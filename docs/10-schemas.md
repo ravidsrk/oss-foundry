@@ -1,0 +1,45 @@
+# Schemas
+
+## Task packet
+
+```
+id                pkt_{owner}_{repo}_{issue}
+repoId            allowlist id
+issueNumber
+issueTitle
+issueUrl
+objective         one sentence
+nonGoals          list
+acceptance        list of checkable claims
+abort             list of stop conditions
+class             buildable | already-has-pr | needs-human | externally-resolved | out-of-scope | policy-denied
+status            scouted → gated → approved → implementing → reviewing → draft-ready → followed-up | parked | rejected | merged
+station           scout | policy | freeze | implement | review | draft | follow-up | terminal
+lighting          lit
+policy            PolicyVerdict
+scout             ScoutScore
+humanAttest       { by, at, note }  required before implement on Wave 1+
+evidence          EvidenceManifest
+prBody
+sandboxSession
+```
+
+## PolicyVerdict.code
+
+`ALLOW | DENY_FORBIDDEN | DENY_UNKNOWN_POLICY | HOLD_CLA | HOLD_HUMAN | HOLD_SCOPE`
+
+## EvidenceManifest
+
+SHA-bound. Copied from orca-fleet `runtime/evidence-manifest.md`:
+
+- `baseSha`, `headSha`, `reviewedSha` (must equal head at draft)
+- `testCommand`, `testExit`
+- `negativeControl`: `red-on-revert` | `pending` | `failed`
+- `filesChanged`, `diffLines` vs repo caps
+- `notes`
+
+A packet without `negativeControl=red-on-revert` cannot enter `draft-ready`.
+
+## Allowlist repo
+
+See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.

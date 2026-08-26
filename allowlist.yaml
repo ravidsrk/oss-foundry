@@ -1,0 +1,126 @@
+# Foundry allowlist — the only repos the factory may see.
+# Schema: docs/10-schemas.md  Policy: docs/03-allowlist.md
+
+version: 2
+
+caps:
+  in_flight: 1
+  first_human_freezes: 20
+  halt_merge_rate: 0.4
+  halt_after_opens: 3
+
+denylist:
+  - id: matplotlib/matplotlib
+    reason: Autonomous-agent PRs banned after 2026 slop incident.
+  - id: curl/curl
+    reason: Maintainer asked agents to stop after HackerOne flood.
+  - id: pydantic/pydantic
+    reason: High slop-PR close rate in 2026.
+  - id: stablyai/orca
+    reason: Contribute via orca-fleet, not drive-by PRs.
+
+repos:
+  - id: ravidsrk/orca-fleet
+    wave: 0
+    language: Python / Markdown
+    aiPolicy: owner
+    testCommand: python3 scripts/validate.py && python3 -m unittest discover -s tests -v
+    maxFiles: 8
+    maxDiffLines: 400
+    sandbox: host
+    preferredLabels: [documentation, p2]
+    firstIssues:
+      - number: 42
+        title: "[P2] CHANGELOG [Unreleased] describes changes already on main; version bump pending"
+        url: https://github.com/ravidsrk/orca-fleet/issues/42
+
+  - id: ravidsrk/frontguard
+    wave: 0
+    language: TypeScript
+    aiPolicy: owner
+    testCommand: npm test
+    maxFiles: 10
+    maxDiffLines: 500
+    sandbox: host
+    preferredLabels: [bug, documentation]
+    firstIssues: []
+
+  - id: ColeMurray/background-agents
+    wave: 1
+    language: TypeScript
+    aiPolicy: welcome
+    testCommand: npm test
+    maxFiles: 6
+    maxDiffLines: 280
+    sandbox: e2b
+    preferredLabels: ["good first issue", "help wanted"]
+    firstIssues:
+      - number: 1476
+        title: Differentiate the right sidebar toggle icon by state
+        url: https://github.com/ColeMurray/background-agents/issues/1476
+
+  - id: github/awesome-copilot
+    wave: 1
+    language: Markdown
+    aiPolicy: welcome
+    testCommand: "true"
+    maxFiles: 3
+    maxDiffLines: 80
+    sandbox: host
+    preferredLabels: [documentation]
+    firstIssues: []
+
+  - id: e2b-dev/E2B
+    wave: 1
+    language: TypeScript / Python
+    aiPolicy: welcome
+    testCommand: npm test
+    maxFiles: 5
+    maxDiffLines: 220
+    sandbox: e2b
+    preferredLabels: [documentation, "good first issue"]
+    firstIssues: []
+
+  - id: mcp-use/mcp-use
+    wave: 1
+    language: TypeScript
+    aiPolicy: unknown
+    testCommand: pnpm test
+    maxFiles: 4
+    maxDiffLines: 200
+    sandbox: e2b
+    preferredLabels: [bug, documentation]
+    firstIssues: []
+
+  - id: kortix-ai/suna
+    wave: 1
+    language: TypeScript
+    aiPolicy: unknown
+    testCommand: npm test
+    maxFiles: 4
+    maxDiffLines: 180
+    sandbox: e2b
+    preferredLabels: [documentation, "good first issue"]
+    firstIssues: []
+
+  - id: mastra-ai/mastra
+    wave: 2
+    language: TypeScript
+    aiPolicy: human-required
+    testCommand: pnpm test
+    maxFiles: 4
+    maxDiffLines: 160
+    sandbox: e2b
+    preferredLabels: ["good first issue", documentation]
+    firstIssues: []
+
+  - id: All-Hands-AI/OpenHands
+    wave: 2
+    language: Python
+    aiPolicy: human-required
+    testCommand: poetry run pytest
+    maxFiles: 3
+    maxDiffLines: 140
+    sandbox: e2b
+    preferredLabels: ["good first issue"]
+    firstIssues: []

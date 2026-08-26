@@ -1,0 +1,162 @@
+export type Wave = 0 | 1 | 2;
+export type AiPolicy =
+  | "owner"
+  | "welcome"
+  | "human-required"
+  | "unknown"
+  | "forbidden";
+
+export type PacketClass =
+  | "buildable"
+  | "already-has-pr"
+  | "needs-human"
+  | "externally-resolved"
+  | "out-of-scope"
+  | "policy-denied";
+
+export type Station =
+  | "scout"
+  | "policy"
+  | "freeze"
+  | "implement"
+  | "review"
+  | "draft"
+  | "follow-up"
+  | "terminal";
+
+export type PacketStatus =
+  | "scouted"
+  | "gated"
+  | "frozen"
+  | "approved"
+  | "implementing"
+  | "reviewing"
+  | "draft-ready"
+  | "submitted"
+  | "followed-up"
+  | "merged"
+  | "parked"
+  | "rejected";
+
+export type Lighting = "lit" | "dark-eligible";
+
+export type SandboxKind = "host" | "e2b" | "daytona";
+
+export interface AllowlistedRepo {
+  id: string;
+  owner: string;
+  name: string;
+  wave: Wave;
+  language: string;
+  aiPolicy: AiPolicy;
+  policyNotes: string;
+  testCommand: string;
+  maxFiles: number;
+  maxDiffLines: number;
+  sandbox: SandboxKind;
+  contributingUrl?: string;
+  agentsMdUrl?: string;
+  preferredLabels: string[];
+  firstIssues: { number: number; title: string; url: string }[];
+}
+
+export interface PolicyVerdict {
+  allow: boolean;
+  code:
+    | "ALLOW"
+    | "DENY_FORBIDDEN"
+    | "DENY_UNKNOWN_POLICY"
+    | "HOLD_CLA"
+    | "HOLD_HUMAN"
+    | "HOLD_SCOPE";
+  reasons: string[];
+  matchedPhrases: string[];
+}
+
+export interface ScoutScore {
+  total: number;
+  parts: {
+    wave: number;
+    labels: number;
+    size: number;
+    freshness: number;
+    grok?: number;
+  };
+  grokRationale?: string;
+}
+
+export interface TaskPacket {
+  id: string;
+  repoId: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueUrl: string;
+  objective: string;
+  nonGoals: string[];
+  acceptance: string[];
+  abort: string[];
+  class: PacketClass;
+  status: PacketStatus;
+  station: Station;
+  lighting: Lighting;
+  policy: PolicyVerdict;
+  scout: ScoutScore;
+  createdAt: string;
+  updatedAt: string;
+  humanAttest?: { by: string; at: string; note: string };
+  evidence?: EvidenceManifest;
+  prBody?: string;
+  parkReason?: string;
+  sandboxSession?: SandboxSession;
+}
+
+export interface EvidenceManifest {
+  baseSha: string;
+  headSha: string;
+  reviewedSha?: string;
+  testCommand: string;
+  testExit: number;
+  negativeControl: "red-on-revert" | "pending" | "failed";
+  filesChanged: number;
+  diffLines: number;
+  notes: string[];
+}
+
+export interface SandboxSession {
+  provider: SandboxKind;
+  id: string;
+  status: "dry-run" | "booting" | "ready" | "executing" | "harvested" | "destroyed";
+  image: string;
+  commands: { cmd: string; exit: number; at: string }[];
+}
+
+export interface ScorecardRow {
+  repoId: string;
+  opened: number;
+  merged: number;
+  closedUnmerged: number;
+  reviewCommentsAvg: number;
+  reverts: number;
+  maintainerTone: "warm" | "neutral" | "cold" | "banned";
+  lastTouch: string;
+}
+
+export interface FactoryEvent {
+  id: string;
+  at: string;
+  kind: "tick" | "gate" | "freeze" | "approve" | "reject" | "review" | "draft" | "sandbox" | "score";
+  packetId?: string;
+  message: string;
+}
+
+export interface FactoryState {
+  version: 2;
+  packets: TaskPacket[];
+  events: FactoryEvent[];
+  scorecard: ScorecardRow[];
+  ticksRun: number;
+  lastTickAt: string | null;
+  mergedTotal: number;
+  bans: number;
+  humanApprovalsRemaining: number;
+}

@@ -1,0 +1,68 @@
+# Foundry clock. Does NOT open pull requests.
+# Default is dry: validates allowlist + denylist disjointness.
+# Set repository variable FOUNDRY_LIVE=true to file a packet issue for humans.
+
+name: oss-tick
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate allowlist
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("allowlist.yaml").read_text()
+          assert "ravidsrk/orca-fleet" in text, "Wave 0 missing"
+          deny = ["matplotlib/matplotlib", "curl/curl", "pydantic/pydantic"]
+          # denylist section must mention them; repos: section must not
+          repos = text.split("repos:")[1]
+          for d in deny:
+              assert d in text, f"{d} missing from file"
+              assert d not in repos, f"{d} leaked into repos"
+          print("allowlist ok")
+          PY
+      - name: Dry notice
+        if: ${{ vars.FOUNDRY_LIVE != 'true' }}
+        run: echo "FOUNDRY_LIVE is not set — clock stays dry. No issues, no PRs."
+      - name: Open packet issue
+        if: ${{ vars.FOUNDRY_LIVE == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "tick: next packet (human freeze required)";
+            const body = [
+              "The 6h clock fired.",
+              "",
+              "This issue is a **packet request**, not a contribution.",
+              "Open Foundry, run a tick, freeze the packet, then hand it to `oss-contribute`.",
+              "",
+              "Do not open a PR from this workflow.",
+            ].join("\n");
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "packet",
+              per_page: 5,
+            });
+            if (open.data.length) {
+              console.log("packet already open", open.data[0].html_url);
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ["packet"],
+            });
