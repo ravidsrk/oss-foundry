@@ -13,11 +13,11 @@ Foundry is the control plane in front of [orca-fleet `oss-contribute`](https://g
 
 ## v1
 
-Allowlist, deterministic policy gate, one-in-flight tick, human freeze, draft PR body. Dogfood `ravidsrk/orca-fleet#42`.
+Allowlist, deterministic policy gate, one-in-flight tick, human freeze, draft PR body. Dogfood `ravidsrk/orca-fleet#42` → [draft PR #70](https://github.com/ravidsrk/orca-fleet/pull/70).
 
 ## v2
 
-Grok scout overlay (user-initiated), E2B sandbox lifecycle (dry-run in the console), scorecard halt rules.
+Grok scout overlay (user-initiated), live GitHub scout (Wave 0–1), E2B sandbox lifecycle (dry-run in the console), follow-up station, scorecard halt rules.
 
 ## Do not
 

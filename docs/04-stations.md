@@ -53,4 +53,16 @@ Opens a **draft** PR from the operator fork to upstream default. Body is generat
 
 ## 7. Follow-up / scorecard
 
-Answer review threads. Reconcile bots. When merged, closed, or quiet, write the scorecard row. Halt rules fire here.
+A draft PR is not done. The packet stays on this station until merged, closed, or quiet.
+
+Does:
+
+- Sync the live PR (draft/open/merged, head SHA, review comment count). User-initiated. Never on load.
+- Record bot-reconcile and review-reply notes against the current head.
+- Mark quiet when threads are answered. **Never merge.**
+- When GitHub reports `merged`, write the scorecard `merged` row. When closed unmerged, write `closedUnmerged`.
+
+Halt rules fire here. See `docs/06-v2.md`.
+
+First live follow-up: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) — Greptile future-dated the 0.5.0 heading; Foundry folded it to `2026-08-26` (`d91fe2f`) and resolved the thread. Still draft.
+

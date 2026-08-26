@@ -85,6 +85,29 @@ export interface ScoutScore {
   grokRationale?: string;
 }
 
+export interface FollowUpEntry {
+  id: string;
+  at: string;
+  kind: "review-reply" | "bot-reconcile" | "quiet" | "ci" | "note";
+  body: string;
+  url?: string;
+}
+
+export interface PrMeta {
+  url: string;
+  title: string;
+  draft: boolean;
+  state: "open" | "closed";
+  merged: boolean;
+  mergeable: string;
+  commits: number;
+  reviewComments: number;
+  issueComments: number;
+  headSha: string;
+  updatedAt: string;
+  syncedAt: string;
+}
+
 export interface TaskPacket {
   id: string;
   repoId: string;
@@ -106,6 +129,9 @@ export interface TaskPacket {
   humanAttest?: { by: string; at: string; note: string };
   evidence?: EvidenceManifest;
   prBody?: string;
+  prUrl?: string;
+  prMeta?: PrMeta;
+  followUps?: FollowUpEntry[];
   parkReason?: string;
   sandboxSession?: SandboxSession;
 }
@@ -144,13 +170,24 @@ export interface ScorecardRow {
 export interface FactoryEvent {
   id: string;
   at: string;
-  kind: "tick" | "gate" | "freeze" | "approve" | "reject" | "review" | "draft" | "sandbox" | "score";
+  kind:
+    | "tick"
+    | "gate"
+    | "freeze"
+    | "approve"
+    | "reject"
+    | "review"
+    | "draft"
+    | "sandbox"
+    | "score"
+    | "scout"
+    | "follow-up";
   packetId?: string;
   message: string;
 }
 
 export interface FactoryState {
-  version: 2;
+  version: 4;
   packets: TaskPacket[];
   events: FactoryEvent[];
   scorecard: ScorecardRow[];

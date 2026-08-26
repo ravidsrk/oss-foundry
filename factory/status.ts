@@ -1,4 +1,5 @@
-import type { PacketStatus, PolicyVerdict } from "./types";
+import { repoById } from "./allowlist";
+import type { PacketStatus, PolicyVerdict, TaskPacket } from "./types";
 
 export function statusTone(
   status: PacketStatus,
@@ -27,4 +28,22 @@ export function formatWhen(iso: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+export function needsFollowUp(packet: TaskPacket): boolean {
+  if (!packet.prUrl) return false;
+  if (["merged", "parked", "rejected"].includes(packet.status)) return false;
+  if (packet.status === "followed-up") return false;
+  return packet.status === "submitted" || packet.station === "follow-up";
+}
+
+export function foundryAttestedWave0Merges(packets: TaskPacket[]): number {
+  return packets.filter((p) => {
+    const repo = repoById(p.repoId);
+    return repo?.wave === 0 && p.status === "merged" && Boolean(p.humanAttest);
+  }).length;
+}
+
+export function waveOf(packet: TaskPacket): number {
+  return repoById(packet.repoId)?.wave ?? 99;
 }

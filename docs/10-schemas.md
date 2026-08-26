@@ -21,6 +21,9 @@ scout             ScoutScore
 humanAttest       { by, at, note }  required before implement on Wave 1+
 evidence          EvidenceManifest
 prBody
+prUrl
+prMeta            { url, title, draft, state, merged, mergeable, commits, reviewComments, issueComments, headSha, updatedAt, syncedAt }
+followUps         [{ id, at, kind: review-reply|bot-reconcile|quiet|ci|note, body, url? }]
 sandboxSession
 ```
 

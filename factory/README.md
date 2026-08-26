@@ -1,12 +1,5 @@
-# Foundry engine
+# factory/
 
-Deterministic control-plane modules used by the operator console.
+TypeScript modules for the Foundry control plane. The operator console (TanStack app) imports the same logic from `src/lib/foundry/`. This copy is the protocol snapshot: no UI, no TanStack server functions.
 
-- `policy.ts` — AGENTS.md / denylist gate
-- `scout.ts` — heuristic rank
-- `packet.ts` — task packet + draft PR body
-- `sandbox.ts` — E2B lifecycle (dry-run)
-- `scorecard.ts` — halt rules
-- `store.ts` — operator ledger (Zustand)
-
-The always-on worker is still [orca-fleet oss-contribute](https://github.com/ravidsrk/orca-fleet).
+Live GitHub scout and PR sync use the public API. On an operator host, set `GITHUB_TOKEN` (or authenticate `gh`) to raise the rate limit. Never put a token in this repo.

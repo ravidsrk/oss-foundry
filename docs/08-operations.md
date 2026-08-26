@@ -14,8 +14,10 @@ Every 6 hours, **or** operator button. Never both overlapping. One packet in fli
 
 1. Freeze `orca-fleet#42`.
 2. Run it through `oss-contribute` / Orca, not through a stranger’s repo.
-3. Merge is yours (you own the repo) but still use a PR. Record evidence.
-4. Only then enable Wave 1 ticks.
+3. Open a **draft** PR. Foundry never clicks merge — even on a repo you own.
+4. Follow up until quiet. First live packet: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70).
+5. Two Foundry-attested Wave 0 *merges* (maintainer merges, not factory merges) before Wave 1 ticks.
+
 
 ## Halt switch
 
