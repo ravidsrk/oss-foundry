@@ -14,12 +14,12 @@ The allowlist is the product. Everything else is a pipeline.
 
 ### Wave 0 — dogfood
 
-- `ravidsrk/orca-fleet` — first packet [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) (CHANGELOG 0.5.0) **merged**. Third: [#71](https://github.com/ravidsrk/orca-fleet/issues/71) → [draft #72](https://github.com/ravidsrk/orca-fleet/pull/72) (unreadable SKILL.md).
+- `ravidsrk/orca-fleet` — [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) and [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) **merged** (Wave 0 2/2).
 - `ravidsrk/frontguard` — second packet: [#195](https://github.com/ravidsrk/frontguard/issues/195) README architecture vs the monorepo → [draft #196](https://github.com/ravidsrk/frontguard/pull/196) (quiet; CI red is pre-existing on main).
 
 ### Wave 1 — low-risk external
 
-- `ColeMurray/background-agents` — OpenInspect. First packet: [#1476](https://github.com/ColeMurray/background-agents/issues/1476) sidebar toggle icon (good-first-issue, help-wanted).
+- `ColeMurray/background-agents` — OpenInspect. [#1476](https://github.com/ColeMurray/background-agents/issues/1476) sidebar toggle icon → fork draft [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1). Upstream compare ready; App 403 on ColeMurray pulls.
 - `github/awesome-copilot` — docs catalog, tiny diffs.
 - `e2b-dev/E2B` — the sandbox we depend on. Docs/examples only.
 - `mcp-use/mcp-use` — policy unknown until CONTRIBUTING is fetched. Gate holds.
