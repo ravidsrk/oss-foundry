@@ -16,7 +16,7 @@ Every 6 hours, **or** operator button. Never both overlapping. One packet in fli
 2. Run it through `oss-contribute` / Orca, not through a stranger’s repo.
 3. Open a **draft** PR. Foundry never clicks merge — even on a repo you own.
 4. Follow up until quiet. Second packet: [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) (quiet; CI red is pre-existing on main).
-5. Third packet: [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) (draft, unreadable SKILL.md). Two Foundry-attested Wave 0 *merges* before Wave 1 ticks. #1476 stays parked until then.
+5. Third packet: [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) **merged** 2026-08-27T11:30:04Z (Foundry 2/2). Wave 1 unparked: [background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) draft on fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) (Greptile 5/5, mergeable=clean). App 403 on upstream `ColeMurray` pulls — operator opens the compare URL. Foundry does not merge.
 
 
 ## Halt switch
