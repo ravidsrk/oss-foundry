@@ -8,7 +8,7 @@ import { applyPacketToScorecard } from "./scorecard";
 import { seedState } from "./seed";
 import type { FactoryEvent, FactoryState, FollowUpEntry, PrMeta, ScoutScore, TaskPacket } from "./types";
 
-const KEY = "foundry-v4";
+const KEY = "foundry-v6";
 
 function ev(
   kind: FactoryEvent["kind"],

@@ -13,7 +13,7 @@ Foundry is the control plane in front of [orca-fleet `oss-contribute`](https://g
 
 ## v1
 
-Allowlist, deterministic policy gate, one-in-flight tick, human freeze, draft PR body. Dogfood `ravidsrk/orca-fleet#42` → [draft PR #70](https://github.com/ravidsrk/orca-fleet/pull/70).
+Allowlist, deterministic policy gate, one-in-flight tick, human freeze, draft PR body. Dogfood `ravidsrk/orca-fleet#42` → [PR #70](https://github.com/ravidsrk/orca-fleet/pull/70) **merged**. Second Wave 0: [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) (quiet). Third: [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) (draft).
 
 ## v2
 

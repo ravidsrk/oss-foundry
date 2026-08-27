@@ -14,8 +14,8 @@ The allowlist is the product. Everything else is a pipeline.
 
 ### Wave 0 — dogfood
 
-- `ravidsrk/orca-fleet` — first packet: [#42](https://github.com/ravidsrk/orca-fleet/issues/42) CHANGELOG/version drift.
-- `ravidsrk/frontguard` — visual regression; use when a UI packet needs an oracle.
+- `ravidsrk/orca-fleet` — first packet [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) (CHANGELOG 0.5.0) **merged**. Third: [#71](https://github.com/ravidsrk/orca-fleet/issues/71) → [draft #72](https://github.com/ravidsrk/orca-fleet/pull/72) (unreadable SKILL.md).
+- `ravidsrk/frontguard` — second packet: [#195](https://github.com/ravidsrk/frontguard/issues/195) README architecture vs the monorepo → [draft #196](https://github.com/ravidsrk/frontguard/pull/196) (quiet; CI red is pre-existing on main).
 
 ### Wave 1 — low-risk external
 

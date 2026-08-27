@@ -40,10 +40,9 @@ export const ALLOWLIST: AllowlistedRepo[] = [
     preferredLabels: ["documentation", "p2"],
     firstIssues: [
       {
-        number: 42,
-        title:
-          "[P2] CHANGELOG [Unreleased] describes changes already on main; version bump pending",
-        url: "https://github.com/ravidsrk/orca-fleet/issues/42",
+        number: 71,
+        title: "[P2] Validator: one unreadable SKILL.md must not abort the catalog",
+        url: "https://github.com/ravidsrk/orca-fleet/issues/71",
       },
     ],
   },
@@ -60,7 +59,13 @@ export const ALLOWLIST: AllowlistedRepo[] = [
     maxDiffLines: 500,
     sandbox: "host",
     preferredLabels: ["bug", "documentation"],
-    firstIssues: [],
+    firstIssues: [
+      {
+        number: 195,
+        title: "[docs] README Architecture still describes a src/ tree; repo is packages/ + apps/",
+        url: "https://github.com/ravidsrk/frontguard/issues/195",
+      },
+    ],
   },
   {
     id: "ColeMurray/background-agents",

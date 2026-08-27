@@ -12,11 +12,11 @@ Every 6 hours, **or** operator button. Never both overlapping. One packet in fli
 
 ## First week (Wave 0 only)
 
-1. Freeze `orca-fleet#42`.
+1. Freeze `orca-fleet#42`. Done — [PR #70](https://github.com/ravidsrk/orca-fleet/pull/70) merged by the maintainer 2026-08-27 (Foundry 1/2).
 2. Run it through `oss-contribute` / Orca, not through a stranger’s repo.
 3. Open a **draft** PR. Foundry never clicks merge — even on a repo you own.
-4. Follow up until quiet. First live packet: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70).
-5. Two Foundry-attested Wave 0 *merges* (maintainer merges, not factory merges) before Wave 1 ticks.
+4. Follow up until quiet. Second packet: [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) (quiet; CI red is pre-existing on main).
+5. Third packet: [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) (draft, unreadable SKILL.md). Two Foundry-attested Wave 0 *merges* before Wave 1 ticks. #1476 stays parked until then.
 
 
 ## Halt switch

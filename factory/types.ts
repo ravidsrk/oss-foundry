@@ -187,7 +187,7 @@ export interface FactoryEvent {
 }
 
 export interface FactoryState {
-  version: 4;
+  version: 6;
   packets: TaskPacket[];
   events: FactoryEvent[];
   scorecard: ScorecardRow[];
