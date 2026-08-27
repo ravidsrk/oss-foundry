@@ -140,7 +140,7 @@ export function seedState(): FactoryState {
     labels: ["documentation", "p2"],
   });
   unreadable = {
-    ...touch(unreadable, "submitted", "follow-up"),
+    ...touch(unreadable, "followed-up", "follow-up"),
     humanAttest: {
       by: "operator",
       at: "2026-08-27T07:18:00.000Z",
@@ -154,14 +154,23 @@ export function seedState(): FactoryState {
       draft: true,
       state: "open",
       merged: false,
-      mergeable: "unstable",
+      mergeable: "clean",
       commits: 1,
       reviewComments: 0,
       issueComments: 0,
       headSha: "8c7068a5467a283de524c88e549dfa66782eeec2",
-      updatedAt: "2026-08-27T07:18:57.000Z",
-      syncedAt: "2026-08-27T07:20:00.000Z",
+      updatedAt: "2026-08-27T07:20:57.000Z",
+      syncedAt: "2026-08-27T10:24:00.000Z",
     },
+    followUps: [
+      {
+        id: "fu_pr72_quiet",
+        at: "2026-08-27T10:24:00.000Z",
+        kind: "quiet",
+        body: "Greptile 5/5. No review threads. mergeable=clean. Foundry does not merge.",
+        url: "https://github.com/ravidsrk/orca-fleet/pull/72",
+      },
+    ],
     evidence: {
       baseSha: "36d0f23708adbdf911e4df050ed516821278a9fc",
       headSha: "8c7068a5467a283de524c88e549dfa66782eeec2",
@@ -172,7 +181,7 @@ export function seedState(): FactoryState {
       filesChanged: 5,
       diffLines: 87,
       notes: [
-        "Draft PR #72. Foundry does not merge.",
+        "Draft PR #72 quiet. Foundry does not merge.",
         "103 tests. Badge JSON regenerated 100 → 103.",
       ],
     },
@@ -188,7 +197,7 @@ export function seedState(): FactoryState {
   sidebar = {
     ...touch(sidebar, "parked", "terminal"),
     parkReason:
-      "Wave 1 waits on two Foundry-attested Wave 0 merges. #70 is 1/2. Frontguard #196 and orca-fleet #72 are still drafts.",
+      "Wave 1 waits on two Foundry-attested Wave 0 merges. #70 is 1/2. Frontguard #196 and orca-fleet #72 are quiet drafts.",
   };
 
   const matplotlib = buildPacket({
@@ -235,6 +244,14 @@ export function seedState(): FactoryState {
     version: 6,
     packets: [unreadable, architecture, changelog, sidebar, matplotlib, openhands],
     events: [
+      {
+        id: "evt_pr72_quiet",
+        at: "2026-08-27T10:24:00.000Z",
+        kind: "follow-up",
+        packetId: unreadable.id,
+        message:
+          "orca-fleet#72 quiet. Greptile 5/5. mergeable=clean. Foundry does not merge.",
+      },
       {
         id: "evt_pr72",
         at: "2026-08-27T07:18:57.000Z",
@@ -306,7 +323,7 @@ export function seedState(): FactoryState {
     ],
     scorecard,
     ticksRun: 4,
-    lastTickAt: "2026-08-27T07:19:00.000Z",
+    lastTickAt: "2026-08-27T10:24:00.000Z",
     mergedTotal: 6,
     bans: 0,
     humanApprovalsRemaining: 16,
