@@ -561,3 +561,15 @@ test("findCompetingPull binds only a closing-keyword PR for this issue", () => {
     undefined,
   );
 });
+
+test("scout score carries no vestigial grok surface", () => {
+  const packet = buildPacket({
+    repoId: "ravidsrk/orca-fleet",
+    issueNumber: 71,
+    issueTitle: "[P2] Validator: one unreadable SKILL.md must not abort the catalog",
+    issueUrl: "https://github.com/ravidsrk/orca-fleet/issues/71",
+    labels: ["documentation"],
+  });
+  assert.equal("grok" in packet.scout.parts, false);
+  assert.equal("grokRationale" in packet.scout, false);
+});

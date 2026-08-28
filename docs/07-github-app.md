@@ -38,6 +38,5 @@ Live in the operator host / GHA environment:
 - `FOUNDRY_APP_PRIVATE_KEY`
 - `FOUNDRY_INSTALLATION_ID`
 - `E2B_API_KEY` (v2)
-- `XAI_API_KEY` (optional; Grok overlay is not shipped)
 
 Never in `allowlist.yaml`, never in the E2B box, never in a packet.

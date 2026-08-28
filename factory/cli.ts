@@ -255,7 +255,7 @@ async function main() {
       process.exit(1);
     }
     const result = applyAttachEvidence(state, id, evidence, {
-      fastForward: true,
+      fastForward: compared.aheadBy >= 1,
       messages: compared.messages,
       filesChanged: compared.filesChanged,
       diffLines: compared.diffLines,

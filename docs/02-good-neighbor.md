@@ -33,4 +33,4 @@ The factory does not merge. Maintainers own the merge.
 
 ## Lighting
 
-Every packet is `lit` by default: a reviewer who did not implement it reads the diff. `dark-eligible` is not used in Foundry v1/v2. Upstream is not our default branch.
+Every packet is `lit`: a reviewer who did not implement it reads the diff. `dark-eligible` is not representable in Foundry — the type and the state loader both refuse it. Upstream is not our default branch.
