@@ -35,6 +35,22 @@ test("incompatible state object is refused", () => {
   assert.match(loaded.error, /not a Foundry v6 state file/);
 });
 
+test("nested malformed packet is refused", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "nested.json");
+  const seed = seedState();
+  writeFileSync(
+    path,
+    JSON.stringify({
+      ...seed,
+      packets: [5, { id: "bad" }],
+    }),
+  );
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, false);
+  if (loaded.ok) return;
+  assert.match(loaded.error, /not a Foundry v6 state file/);
+});
+
 test("valid state round-trips without becoming seed", () => {
   const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "ok.json");
   const seed = seedState();

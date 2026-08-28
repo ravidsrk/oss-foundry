@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { repoById } from "./allowlist.ts";
 import {
   applyAdvance,
   applyApprove,
@@ -64,7 +65,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   approve <packetId> --note <text>
   reject <packetId> --reason <text>
   advance <packetId>
-  evidence <packetId> --base <sha> --head <sha> [--files N] [--diff N] [--test-exit 0] [--negative red-on-revert]
+  evidence <packetId> --base <sha> --head <sha> --test-exit <n> --negative <red-on-revert|pending|failed>
   body <packetId>
   attach-draft <packetId> <prUrl>
 
@@ -157,28 +158,43 @@ async function main() {
       console.error(`unknown packet ${id}`);
       process.exit(1);
     }
-    const evidence: EvidenceManifest = {
-      baseSha: base,
-      headSha: head,
-      testCommand: packet.evidence?.testCommand ?? "true",
-      testExit: Number(flag(rest, "--test-exit") ?? 0),
-      negativeControl: (flag(rest, "--negative") ?? "red-on-revert") as EvidenceManifest["negativeControl"],
-      filesChanged: Number(flag(rest, "--files") ?? 1),
-      diffLines: Number(flag(rest, "--diff") ?? 1),
-      notes: ["attached via CLI"],
-    };
+    const testExitRaw = flag(rest, "--test-exit");
+    const negative = flag(rest, "--negative");
+    if (testExitRaw === undefined || negative === undefined) {
+      console.error(
+        "evidence requires --test-exit <n> and --negative <red-on-revert|pending|failed> (no success defaults)",
+      );
+      process.exit(1);
+    }
+    if (negative !== "red-on-revert" && negative !== "pending" && negative !== "failed") {
+      console.error("invalid --negative");
+      process.exit(1);
+    }
     const compared = await compareCommits(packet.repoId, base, head);
     if (!compared.ok) {
       console.error(compared.error);
       process.exit(1);
     }
-    const result = applyAttachEvidence(
-      state,
-      id,
-      evidence,
-      (repoId, baseSha, headSha) =>
-        repoId === packet.repoId && baseSha === base && headSha === head,
-    );
+    const evidence: EvidenceManifest = {
+      baseSha: base,
+      headSha: head,
+      testCommand: repoById(packet.repoId)?.testCommand ?? packet.evidence?.testCommand ?? "",
+      testExit: Number(testExitRaw),
+      negativeControl: negative,
+      filesChanged: compared.filesChanged,
+      diffLines: compared.diffLines,
+      notes: ["attached via CLI"],
+    };
+    if (!evidence.testCommand) {
+      console.error("no testCommand for this repo");
+      process.exit(1);
+    }
+    const result = applyAttachEvidence(state, id, evidence, {
+      fastForward: true,
+      messages: compared.messages,
+      filesChanged: compared.filesChanged,
+      diffLines: compared.diffLines,
+    });
     if (result.error) {
       console.error(result.error);
       process.exit(1);
@@ -226,6 +242,8 @@ async function main() {
     const result = applyAttachDraft(state, id, url, {
       draft: synced.meta.draft,
       headSha: synced.meta.headSha,
+      title: synced.title,
+      body: synced.body,
     });
     if (result.error) {
       console.error(result.error);

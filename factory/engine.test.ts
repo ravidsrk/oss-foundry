@@ -11,6 +11,7 @@ import {
   hasInflight,
   isBoundSha,
   isPlaceholderSha,
+  type EvidenceBinding,
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
 import { DISCLOSURE } from "./neighbor.ts";
@@ -39,8 +40,17 @@ function blank(): FactoryState {
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
 const OTHER = "36d0f23708adbdf911e4df050ed516821278a9fc";
-function verifyRange(_repo: string, baseSha: string, headSha: string) {
-  return baseSha.toLowerCase() === BASE && headSha.toLowerCase() === HEAD;
+function bindingFor(
+  packet: { issueNumber: number; issueUrl: string },
+  extra: Partial<EvidenceBinding> = {},
+): EvidenceBinding {
+  return {
+    fastForward: true,
+    messages: [`Fixes #${packet.issueNumber}`],
+    filesChanged: 1,
+    diffLines: 1,
+    ...extra,
+  };
 }
 
 function live(
@@ -185,7 +195,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyRange);
+  }, bindingFor(state.packets[0]));
   assert.ok(fake.error);
   assert.equal(isPlaceholderSha("deadbeefab"), true);
   assert.equal(isBoundSha(HEAD), true);
@@ -200,7 +210,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyRange);
+  }, bindingFor(state.packets[0]));
   assert.ok(fabricated.error);
   assert.match(fabricated.error, /placeholder|not found/i);
 
@@ -213,7 +223,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyRange);
+  }, bindingFor(state.packets[0], { fastForward: false }));
   assert.ok(unknownHex.error);
   assert.match(unknownHex.error, /fast-forward/);
 
@@ -226,9 +236,9 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyRange);
+  }, bindingFor(state.packets[0], { messages: ["unrelated refactor"] }));
   assert.ok(unrelatedExisting.error);
-  assert.match(unrelatedExisting.error, /fast-forward/);
+  assert.match(unrelatedExisting.error, /does not reference/);
 
   state = applyAttachEvidence(state, id, {
     baseSha: BASE,
@@ -239,7 +249,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: ["operator-harvested"],
-  }, verifyRange).state;
+  }, bindingFor(state.packets[0])).state;
   assert.equal(evidenceIsReady(state.packets[0].evidence), true);
   state = applyAdvance(state, id).state;
   assert.equal(state.packets[0].status, "draft-ready");
@@ -276,7 +286,7 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyRange).state;
+  }, bindingFor(state.packets[0])).state;
   state = applyAdvance(state, id).state;
   assert.equal(state.packets[0].status, "draft-ready");
   const openedBefore = state.scorecard.find((r) => r.repoId === state.packets[0].repoId)?.opened ?? 0;
@@ -322,11 +332,26 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
     openedBefore,
   );
 
+  const unbound = applyAttachDraft(
+    state,
+    id,
+    `https://github.com/${state.packets[0].repoId}/pull/99`,
+    { draft: true, headSha: HEAD, title: "other work", body: "no issue link" },
+  );
+  assert.ok(unbound.error);
+  assert.match(unbound.error, /does not reference packet issue/);
+  assert.equal(unbound.state.packets[0].status, "draft-ready");
+
   const ok = applyAttachDraft(
     state,
     id,
     `https://github.com/${state.packets[0].repoId}/pull/99`,
-    { draft: true, headSha: HEAD },
+    {
+      draft: true,
+      headSha: HEAD,
+      title: `fix #${state.packets[0].issueNumber}`,
+      body: `Fixes #${state.packets[0].issueNumber}`,
+    },
   );
   assert.equal(ok.error, undefined);
   assert.equal(ok.state.packets[0].status, "submitted");

@@ -267,11 +267,23 @@ export function evidenceIsReady(evidence: EvidenceManifest | undefined): boolean
   return true;
 }
 
+export interface EvidenceBinding {
+  fastForward: boolean;
+  messages: string[];
+  filesChanged: number;
+  diffLines: number;
+}
+
+export function mentionsIssue(text: string, issueNumber: number, issueUrl: string): boolean {
+  if (issueUrl && text.includes(issueUrl)) return true;
+  return new RegExp(`(?:^|[^0-9A-Za-z])#${issueNumber}(?![0-9])`).test(text);
+}
+
 export function applyAttachEvidence(
   state: FactoryState,
   id: string,
   evidence: EvidenceManifest,
-  verifyRange: (repoId: string, baseSha: string, headSha: string) => boolean,
+  binding: EvidenceBinding,
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
@@ -281,11 +293,21 @@ export function applyAttachEvidence(
   if (evidence.baseSha.toLowerCase() === evidence.headSha.toLowerCase()) {
     return { state, error: "evidence baseSha and headSha must differ" };
   }
-  if (!verifyRange(packet.repoId, evidence.baseSha, evidence.headSha)) {
+  if (!binding.fastForward) {
     return {
       state,
       error: `evidence range is not a fast-forward from base to head on ${packet.repoId}`,
     };
+  }
+  if (binding.filesChanged < 1 || binding.diffLines < 1) {
+    return { state, error: "compared range has no file diff" };
+  }
+  if (evidence.filesChanged !== binding.filesChanged || evidence.diffLines !== binding.diffLines) {
+    return { state, error: "evidence scope must match the compared range" };
+  }
+  const blob = binding.messages.join("\n");
+  if (!mentionsIssue(blob, packet.issueNumber, packet.issueUrl)) {
+    return { state, error: `commit range does not reference ${packet.repoId}#${packet.issueNumber}` };
   }
   const bound: EvidenceManifest = { ...evidence, shaVerified: true };
   const packets = state.packets.map((p) => (p.id === id ? bump(p, { evidence: bound }) : p));
@@ -371,7 +393,7 @@ export function applyAttachDraft(
   state: FactoryState,
   id: string,
   url: string,
-  opts: { draft: boolean; headSha?: string },
+  opts: { draft: boolean; headSha?: string; title?: string; body?: string },
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
@@ -392,6 +414,13 @@ export function applyAttachDraft(
   }
   if (opts.headSha && packet.evidence?.headSha && opts.headSha !== packet.evidence.headSha) {
     return { state, error: `PR head ${opts.headSha.slice(0, 7)} does not match evidence head` };
+  }
+  const linked = `${opts.title ?? ""}\n${opts.body ?? ""}`;
+  if (!mentionsIssue(linked, packet.issueNumber, packet.issueUrl)) {
+    return {
+      state,
+      error: `PR does not reference packet issue ${packet.repoId}#${packet.issueNumber}`,
+    };
   }
   const alreadyOpened = packet.status === "submitted" || Boolean(packet.prUrl);
   const packets = state.packets.map((p) =>

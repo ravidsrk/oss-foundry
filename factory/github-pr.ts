@@ -95,7 +95,10 @@ export async function compareCommits(
   baseSha: string,
   headSha: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true; aheadBy: number } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; aheadBy: number; filesChanged: number; diffLines: number; messages: string[] }
+  | { ok: false; error: string }
+> {
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   const headers: Record<string, string> = {
@@ -119,6 +122,8 @@ export async function compareCommits(
       status: string;
       ahead_by: number;
       behind_by: number;
+      files?: { additions?: number; deletions?: number }[];
+      commits?: { commit?: { message?: string } }[];
     };
     if (body.status !== "ahead" || body.behind_by !== 0 || body.ahead_by < 1) {
       return {
@@ -126,7 +131,22 @@ export async function compareCommits(
         error: `base is not an ancestor of head (${body.status}, ahead=${body.ahead_by}, behind=${body.behind_by})`,
       };
     }
-    return { ok: true, aheadBy: body.ahead_by };
+    const files = body.files ?? [];
+    const diffLines = files.reduce(
+      (n, f) => n + (Number(f.additions) || 0) + (Number(f.deletions) || 0),
+      0,
+    );
+    if (files.length < 1 || diffLines < 1) {
+      return { ok: false, error: "compared range has no file diff" };
+    }
+    const messages = (body.commits ?? []).map((c) => c.commit?.message ?? "").filter(Boolean);
+    return {
+      ok: true,
+      aheadBy: body.ahead_by,
+      filesChanged: files.length,
+      diffLines,
+      messages,
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
   }
@@ -152,6 +172,7 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
       const pr = (await res.json()) as {
         html_url: string;
         title: string;
+        body: string | null;
         draft: boolean;
         state: "open" | "closed";
         merged: boolean;
@@ -176,7 +197,7 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
         updatedAt: pr.updated_at,
         syncedAt: new Date().toISOString(),
       };
-      return { ok: true as const, meta };
+      return { ok: true as const, meta, title: pr.title ?? "", body: pr.body ?? "" };
     } catch (err) {
       return {
         ok: false as const,
