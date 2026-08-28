@@ -34,6 +34,8 @@ A GitHub pull request opened with `draft: true`. Ready-for-review is a human bro
 **Attest**:
 The human freeze record `{ by, at, note }` required before implement on Wave 1+, and counted toward the first-20 freeze budget.
 
+**Scorecard** (disambiguation): per-repo standing — merge rate, tone, reverts, halts. Unrelated to OpenSSF Scorecard, the security-health scanner (see ADR 0004).
+
 **Scorecard halt**:
 A per-repo stop when tone is `banned`, any revert of our patch, or opened ≥ 3 with at least one terminal outcome and merge rate < 40% (merge rate = merged / terminal outcomes; silence alone never halts). A halted repo is treated as unselectable until a human edits `allowlist.yaml`.
 
