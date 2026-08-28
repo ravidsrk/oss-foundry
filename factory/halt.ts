@@ -26,25 +26,13 @@ function ev(message: string): FactoryEvent {
 /**
  * The halt on `state`, or `undefined` when the factory is running.
  *
- * `isFactoryState` does not validate this field, so a hand-edited or truncated record could be
- * anything. Read it fail-closed: anything present but unreadable still halts.
+ * This reads the field, it does not re-derive it. `isFactoryState` validates `halt` the same way
+ * it validates every other field, so a hand-edited or truncated record makes `loadFactoryState`
+ * refuse the ledger outright — stricter than reading it defensively here, and the same
+ * validate-at-load / trust-after contract the rest of the record follows.
  */
 export function factoryHalt(state: FactoryState): FactoryHalt | undefined {
-  const raw: unknown = state.halt;
-  if (raw === undefined || raw === null) return undefined;
-  if (typeof raw !== "object") {
-    return { at: "—", reason: "unreadable halt record in the ledger — clear it by hand", source: "secondary-rate-limit" };
-  }
-  const o = raw as Record<string, unknown>;
-  if (typeof o.at !== "string" || typeof o.reason !== "string") {
-    return { at: "—", reason: "unreadable halt record in the ledger — clear it by hand", source: "secondary-rate-limit" };
-  }
-  return {
-    at: o.at,
-    reason: o.reason,
-    source: "secondary-rate-limit",
-    repoId: typeof o.repoId === "string" ? o.repoId : undefined,
-  };
+  return state.halt;
 }
 
 export function applySecondaryLimitHalt(

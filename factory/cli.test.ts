@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { applySecondaryLimitHalt } from "./halt.ts";
@@ -12,11 +12,17 @@ import type { FactoryState } from "./types.ts";
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLI = resolve(REPO_ROOT, "factory/cli.ts");
 
-function runCli(args: string[], cwd: string): { code: number; stdout: string; out: string } {
-  const run = spawnSync(process.execPath, ["--experimental-strip-types", CLI, ...args], {
+function runCli(
+  args: string[],
+  cwd: string,
+  opts: { preload?: string; env?: Record<string, string> } = {},
+): { code: number; stdout: string; out: string } {
+  const nodeArgs = ["--experimental-strip-types"];
+  if (opts.preload) nodeArgs.push("--import", pathToFileURL(opts.preload).href);
+  const run = spawnSync(process.execPath, [...nodeArgs, CLI, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, NODE_NO_WARNINGS: "1" },
+    env: { ...process.env, NODE_NO_WARNINGS: "1", ...opts.env },
   });
   return { code: run.status ?? 1, stdout: run.stdout, out: `${run.stdout}${run.stderr}` };
 }
@@ -26,6 +32,65 @@ function writeState(state: FactoryState): string {
   writeFileSync(path, JSON.stringify(state, null, 2));
   return path;
 }
+
+/**
+ * Replace global `fetch` before the CLI's entry module runs, and log every call.
+ *
+ * The log is the proof: "refused before contacting GitHub" is only demonstrated by showing that no
+ * request was made, not by the absence of an error string that only appears when a request WAS
+ * made. `secondaryLimit` additionally answers the open-draft pre-flight and then returns GitHub's
+ * secondary-rate-limit body for the create, which is the only way to reach the halt-write path.
+ */
+function githubStub(mode: "record" | "secondary-limit"): { preload: string; log: string } {
+  const dir = mkdtempSync(join(tmpdir(), "foundry-stub-"));
+  const log = join(dir, "fetch.log");
+  const preload = join(dir, "preload.mjs");
+  const routes =
+    mode === "secondary-limit"
+      ? `
+  if (method === "POST" && /\\/pulls$/.test(u)) {
+    return json(403, { message: "You have exceeded a secondary rate limit. Please wait a few minutes before you try again." });
+  }
+  if (/\\/pulls\\?state=open/.test(u)) return json(200, []);
+  if (/\\/timeline\\?/.test(u)) return json(200, []);`
+      : "";
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+const json = (status, body) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+globalThis.fetch = async (url, init) => {
+  const u = String(url);
+  const method = (init?.method ?? "GET").toUpperCase();
+  appendFileSync(${JSON.stringify(log)}, method + " " + u + "\\n");${routes}
+  return json(404, { message: "unstubbed " + method + " " + u });
+};
+`,
+  );
+  return { preload, log };
+}
+
+/** The seed with its in-flight packet rewound to draft-ready, so `open-draft` is the next step. */
+function draftReadyState(): FactoryState {
+  const seed = seedState();
+  return {
+    ...seed,
+    packets: seed.packets.map((p) =>
+      p.status === "submitted"
+        ? {
+            ...p,
+            status: "draft-ready" as const,
+            station: "draft" as const,
+            prUrl: undefined,
+            prMeta: undefined,
+          }
+        : p,
+    ),
+  };
+}
+
+const DRAFT_READY_ID = "pkt_ColeMurray_background-agents_1476";
+const DRAFT_READY_REPO = "ColeMurray/background-agents";
 
 test("the state path is anchored to the repo root, not the cwd", () => {
   const fromRoot = runCli(["status"], REPO_ROOT);
@@ -70,31 +135,95 @@ test("status warns when the live state file has drifted from the committed seed"
 });
 
 test("a halt written by an earlier run refuses open-draft before any GitHub call", () => {
-  const seed = seedState();
-  const readyToOpen: FactoryState = {
-    ...seed,
-    packets: seed.packets.map((p) =>
-      p.status === "submitted"
-        ? {
-            ...p,
-            status: "draft-ready" as const,
-            station: "draft" as const,
-            prUrl: undefined,
-            prMeta: undefined,
-          }
-        : p,
-    ),
-  };
-  const halted = applySecondaryLimitHalt(readyToOpen, {
-    repoId: "ColeMurray/background-agents",
+  const halted = applySecondaryLimitHalt(draftReadyState(), {
+    repoId: DRAFT_READY_REPO,
     at: "2026-08-29T09:00:00.000Z",
   });
-  const id = "pkt_ColeMurray_background-agents_1476";
+  const stub = githubStub("record");
   const result = runCli(
-    ["open-draft", id, "--head", "ravidsrk:foundry/issue-1476", "--state", writeState(halted)],
+    [
+      "open-draft",
+      DRAFT_READY_ID,
+      "--head",
+      "ravidsrk:foundry/issue-1476",
+      "--state",
+      writeState(halted),
+    ],
     tmpdir(),
+    { preload: stub.preload, env: { FOUNDRY_PAT: "test-pat" } },
   );
   assert.equal(result.code, 1);
-  assert.match(result.out, /halt/i);
-  assert.equal(/GitHub \d\d\d/.test(result.out), false, "must refuse before contacting GitHub");
+  // The gate's OWN message. `/halt/i` alone matches the informational `FACTORY HALTED` banner that
+  // `mustLoad` prints on every command, so it stays green with the gate deleted.
+  assert.match(result.out, new RegExp(`refusing to open a draft on ${DRAFT_READY_REPO}`));
+  assert.match(result.out, /Factory halted 2026-08-29T09:00:00\.000Z/);
+  // Proof, not a proxy: no request was made at all. The stub logs every call it receives.
+  assert.equal(
+    existsSync(stub.log),
+    false,
+    `must refuse before contacting GitHub; requests made: ${existsSync(stub.log) ? readFileSync(stub.log, "utf8") : ""}`,
+  );
+});
+
+test("a secondary rate limit during open-draft writes a halt that outlives the process", () => {
+  // SPEC.md §6 is "halt the factory, never retry". A printed banner dies with the process and the
+  // next `open-draft` a minute later makes exactly the retry the rule forbids, so what is under
+  // test is the LEDGER WRITE, checked on disk and then in a second process.
+  const path = writeState(draftReadyState());
+  const stub = githubStub("secondary-limit");
+  const hit = runCli(
+    ["open-draft", DRAFT_READY_ID, "--head", "ravidsrk:foundry/issue-1476", "--state", path],
+    tmpdir(),
+    { preload: stub.preload, env: { FOUNDRY_PAT: "test-pat" } },
+  );
+  assert.equal(hit.code, 1);
+  assert.match(hit.out, /FACTORY HALT SIGNAL — secondary rate limit/);
+
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.ok(onDisk.halt, "the halt must be persisted, not just printed");
+  assert.equal(onDisk.halt?.source, "secondary-rate-limit");
+  assert.equal(onDisk.halt?.repoId, DRAFT_READY_REPO);
+
+  // A second process reads it back and refuses — the point of writing it down.
+  const next = runCli(
+    ["open-draft", DRAFT_READY_ID, "--head", "ravidsrk:foundry/issue-1476", "--state", path],
+    tmpdir(),
+    { preload: githubStub("record").preload, env: { FOUNDRY_PAT: "test-pat" } },
+  );
+  assert.equal(next.code, 1);
+  assert.match(next.out, new RegExp(`refusing to open a draft on ${DRAFT_READY_REPO}`));
+});
+
+test("clear-halt lifts the durable halt so the factory can run again", () => {
+  // Neutered, this command can never lift a halt and the factory is bricked permanently.
+  const path = writeState(
+    applySecondaryLimitHalt(seedState(), {
+      repoId: DRAFT_READY_REPO,
+      at: "2026-08-29T09:00:00.000Z",
+    }),
+  );
+  const before = runCli(["status", "--state", path], tmpdir());
+  assert.match(before.out, /FACTORY HALTED 2026-08-29T09:00:00\.000Z/);
+
+  const cleared = runCli(
+    ["clear-halt", "--by", "ravidsrk", "--note", "rate window elapsed", "--state", path],
+    tmpdir(),
+  );
+  assert.equal(cleared.code, 0, cleared.out);
+  assert.match(cleared.out, /halt from 2026-08-29T09:00:00\.000Z cleared by ravidsrk/);
+
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(onDisk.halt, undefined, "the halt must be removed from the ledger, not just logged");
+  assert.equal(
+    onDisk.events.some((e) => /ravidsrk/.test(e.message) && /rate window elapsed/.test(e.message)),
+    true,
+    "the ledger records who lifted the halt and why",
+  );
+
+  const after = runCli(["status", "--state", path], tmpdir());
+  assert.equal(/FACTORY HALTED/.test(after.out), false);
+  // Clearing twice is refused, so a stale `clear-halt` in a script cannot mask a live halt.
+  const again = runCli(["clear-halt", "--by", "ravidsrk", "--state", path], tmpdir());
+  assert.equal(again.code, 1);
+  assert.match(again.out, /not halted/);
 });

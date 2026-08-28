@@ -27,14 +27,25 @@ The guarantee is therefore: *what this repository publishes about its PRs is tru
 `reconcile` is the other half: it absorbs live GitHub into local state and prints `DIVERGENCE …`
 for anything a human must resolve. Neither command rewrites doctrine on its own.
 
-## Factory halt
+## Stopping the factory
 
-A GitHub **secondary rate limit** during `open-draft` writes a halt into the ledger (`halt` on the
-state record) and prints the halt banner. SPEC.md §6 is "halt the factory, never retry", so the
-halt is factory-wide, not per repo, and it persists across runs: `maySelectRepo` refuses every
-repository — tick, approve, and open-draft included — until a human runs
-`clear-halt --by <name> --note <text>`. It is not a scorecard `banned` tone: `bans` counts
-maintainer asks, and a platform throttle is not a maintainer saying stop.
+Three mechanisms, in descending scope. They are not interchangeable — know which one is in force.
+
+**1. Factory halt (durable, automatic, factory-wide).** A GitHub **secondary rate limit** during
+`open-draft` writes a halt into the ledger (`halt` on the state record) and prints the halt banner.
+SPEC.md §6 is "halt the factory, never retry", so the halt is factory-wide, not per repo, and it
+persists across runs: `maySelectRepo` refuses every repository — tick, approve, and open-draft
+included — until a human runs `clear-halt --by <name> --note <text>`. It is not a scorecard
+`banned` tone: `bans` counts maintainer asks, and a platform throttle is not a maintainer saying
+stop. Nothing sets this halt by hand; only the rate-limit path writes it.
+
+**2. Scorecard stop (durable, per repo).** A repo with scorecard health `stop` cannot be queued or
+approved. Every other allowlisted repo keeps running.
+
+**3. Operator stand-down (procedural, factory-wide).** There is no command that writes a halt by
+hand, so a deliberate full stop is still a procedure: reject the in-flight packets and stop
+pressing tick. The GHA default is dry (`FOUNDRY_LIVE` unset), so the 6-hour clock does not open
+PRs on its own.
 
 ## Tick cadence
 
@@ -46,9 +57,6 @@ Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in fli
 2. [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) merged by `ravidsrk`. Do not repeat operator-merge on a Foundry packet.
 3. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652). Follow up. Do not merge. Do not tick.
 
-## Halt switch
-
-A repo with scorecard health `stop` cannot be queued or approved. To halt everything, reject in-flight packets and stop pressing tick. The GHA default is dry (`FOUNDRY_LIVE` unset).
 
 ## Metrics that matter — operational definitions
 

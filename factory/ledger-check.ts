@@ -45,22 +45,29 @@ export function packetDivergences(packet: TaskPacket, live: LivePrLite): string[
       `${packet.id}: recorded draft=${packet.prMeta.draft} but live draft=${live.draft} — doctrine event, resolve by hand`,
     );
   }
-  // Staleness is measured from the WITNESSED commit, not from `prMeta.headSha` — `sync` overwrites
-  // prMeta on every run, so anchoring there erases the warning exactly when new commits arrive.
-  // `evidence.reviewedSha` is immutable, so the flag persists until the packet is re-witnessed.
-  // Only live packets are checked: a terminal packet is at rest, and re-reporting it every tick
-  // would train the operator (and the clock) to ignore real divergence.
+  // Two independent signals, deliberately NOT an if/else chain — they answer different questions
+  // and either can be true on its own.
+  //
+  // (1) Evidence staleness is measured from the WITNESSED commit, not from `prMeta.headSha` —
+  // `sync` overwrites prMeta on every run, so anchoring there erases the warning exactly when new
+  // commits arrive. `evidence.reviewedSha` is immutable, so the flag persists until the packet is
+  // re-witnessed. Only live packets are checked: a terminal packet is at rest, and re-reporting it
+  // every tick would train the operator (and the clock) to ignore real divergence.
+  //
+  // (2) Recorded-ledger-vs-live is SPEC.md §7 — "the committed ledger MUST be reconcilable against
+  // the platform's live state" — the one MUST the 6-hour clock exists to enforce. Chaining it
+  // behind (1) made it reachable only for packets with no evidence at all, so a seed could publish
+  // a PR head that is not the live head and `verify-ledger` would still print `ledger ok`.
   const witnessed = witnessedSha(packet);
-  if (live.headSha && (packet.status === "submitted" || packet.status === "followed-up")) {
-    if (witnessed && witnessed !== live.headSha) {
-      out.push(
-        `${packet.id}: evidence witnessed at ${witnessed.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — commits landed after the review; re-witness before the evidence is read as current`,
-      );
-    } else if (!witnessed && packet.prMeta && packet.prMeta.headSha !== live.headSha) {
-      out.push(
-        `${packet.id}: recorded head ${packet.prMeta.headSha.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — new commits since the last sync`,
-      );
-    }
+  if (witnessed && needsRewitness(packet, live.headSha)) {
+    out.push(
+      `${packet.id}: evidence witnessed at ${witnessed.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — commits landed after the review; re-witness before the evidence is read as current`,
+    );
+  }
+  if (live.headSha && packet.prMeta && packet.prMeta.headSha !== live.headSha) {
+    out.push(
+      `${packet.id}: recorded head ${packet.prMeta.headSha.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — new commits since the last sync`,
+    );
   }
   return out;
 }
@@ -68,6 +75,32 @@ export function packetDivergences(packet: TaskPacket, live: LivePrLite): string[
 /** The commit the evidence actually describes: the reviewed SHA when there is one, else the witnessed head. */
 export function witnessedSha(packet: TaskPacket): string | undefined {
   return packet.evidence?.reviewedSha ?? packet.evidence?.headSha;
+}
+
+/**
+ * The proof does not cover the commit in front of the reader.
+ *
+ * One fact, two consumers: `renderEvidencePage` (what does this proof cover?) and
+ * `packetDivergences` via `needsRewitness` (does anyone still owe work?). It is derived here once
+ * so the audit page and the divergence list can never disagree about whether a packet is stale.
+ */
+export function evidenceIsStale(packet: TaskPacket, headSha: string | undefined): boolean {
+  const witnessed = witnessedSha(packet);
+  return Boolean(witnessed && headSha && witnessed !== headSha);
+}
+
+/**
+ * Stale AND still actionable. A terminal packet is at rest — its evidence is permanently older
+ * than the merged head and nobody can re-witness it, so re-reporting it every tick would train the
+ * operator (and the clock) to ignore real divergence. The evidence page still STATES the fact,
+ * because a maintainer auditing a merged PR needs to know what the proof covered; it just does not
+ * ask anyone to act on it.
+ */
+export function needsRewitness(packet: TaskPacket, headSha: string | undefined): boolean {
+  return (
+    evidenceIsStale(packet, headSha) &&
+    (packet.status === "submitted" || packet.status === "followed-up")
+  );
 }
 
 /**

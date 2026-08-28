@@ -262,11 +262,28 @@ function isScorecardRow(value: unknown): boolean {
   );
 }
 
+/**
+ * A durable factory halt (SPEC.md §6). Validated like every other field: a hand-edited or
+ * truncated halt record makes the whole ledger refuse to load, which is stricter than reading it
+ * defensively — the operator cannot run any command until they fix the file by hand.
+ */
+function isHalt(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.at === "string" &&
+    typeof o.reason === "string" &&
+    o.source === "secondary-rate-limit" &&
+    optional(o.repoId, (v) => typeof v === "string")
+  );
+}
+
 export function isFactoryState(value: unknown): value is FactoryState {
   if (!value || typeof value !== "object") return false;
   const o = value as Record<string, unknown>;
   return (
     o.version === 6 &&
+    optional(o.halt, isHalt) &&
     Array.isArray(o.packets) &&
     o.packets.every(isPacket) &&
     Array.isArray(o.events) &&

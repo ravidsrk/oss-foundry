@@ -44,6 +44,11 @@ const HUMAN_STATEMENTS: RegExp[] = [
  * DCO." is a repo *waiving* the requirement, and reading it as "this is required" parks a
  * legitimate packet. Negation is read inside the matched sentence only — and a sentence that
  * still asserts the requirement ("without a signed CLA will be closed") keeps its hold.
+ *
+ * Only an UNCONDITIONAL waiver is a waiver. A scoped one ("not required for documentation
+ * changes"), a benefit denial ("No DCO, no merge."), and a denied escape hatch ("there is no DCO
+ * bypass") all keep the hold: the gate cannot evaluate a scope, and reading any of them as a
+ * waiver is fail-open on a hard constraint.
  */
 const NEG_DETERMINER =
   /\b(?:no|without)\s+(?:(?:a|an|any|the|signed|separate|explicit|formal)\s+)*$/i;
@@ -54,11 +59,56 @@ const NEG_VERB =
 const NOT_REQUIRED_AFTER =
   /^\W*(?:[\w-]+\s+)?(?:is|are|was|were)?\s*(?:not|isn['’]t|aren['’]t)\s+(?:required|needed|necessary|mandatory)\b/i;
 const REQUIREMENT_WORD = /\b(?:required|needed|necessary|mandatory)\b/i;
-/** Anything in the sentence that still asserts the requirement, so a bare "without" is not a waiver. */
+/**
+ * Anything in the sentence that still asserts the requirement, so a bare "without" is not a
+ * waiver. `merge\w*` is here because "No DCO, no merge." denies the *benefit*, which asserts the
+ * requirement; the escape-hatch nouns (`bypass`, `exception`, `waiver`, …) are here because
+ * "There is no DCO bypass." negates the escape, not the rule.
+ */
 const ASSERTS_REQUIREMENT =
-  /\b(?:require\w*|mandator\w*|must|need\w*|sign\w*|closed|reject\w*|cannot|can['’]t|won['’]t)\b/i;
+  /\b(?:require\w*|mandator\w*|must|need\w*|sign\w*|closed|reject\w*|cannot|can['’]t|won['’]t|merge\w*|bypass\w*|exception\w*|exempt\w*|waiver\w*|workaround\w*|opt[- ]?outs?|skip\w*)\b/i;
+/**
+ * The "no X, no Y" idiom denies a benefit in exchange for the missing X — "No DCO, no merge." is
+ * the requirement stated backwards. Y must be a benefit: "No CLA, no DCO." is two waivers, not
+ * this idiom, so the benefit list never contains a policy artefact.
+ */
+const NO_X_NO_BENEFIT =
+  /\bno\s+[\w.'’-]+\s*,\s*no\s+(?:merg\w*|review\w*|pull[- ]request\w*|prs?\b|ship\w*|releas\w*|land\w*|entry|deal|service|support)/i;
+/**
+ * A waiver that names a scope waives the requirement *for that scope only*. The gate has no notion
+ * of change class, contributor class, or diff size, so it cannot tell whether this packet falls
+ * inside the exemption — the only safe reading is that a qualified waiver is not a waiver.
+ */
+const QUALIFIER_CONNECTIVE =
+  /\b(?:unless|except|other\s+than|besides|save\s+for|provided(?:\s+that)?|as\s+long\s+as|so\s+long\s+as|if|when(?:ever)?|while|only)\b/i;
+/** Every "for …" / "on …" object in the sentence; a narrowing one makes the waiver conditional. */
+const SCOPING_PREPOSITION = /\b(?:for|on)\s+([^.;\n]*)/gi;
+/**
+ * The objects that denote the project as a whole, so "not required for this project" and "we
+ * don't require a DCO on contributions" stay unconditional waivers. The object must END the
+ * clause: "for contributors from partner orgs" is narrowing even though it starts with a
+ * universal noun.
+ */
+const UNIVERSAL_SCOPE =
+  /^(?:(?:this|our|the)\s+(?:project|repo|repository|codebase|org|organi[sz]ation)|contributions?|contributors?|any(?:one|body)|everyone|us|all)\s*(?:[.,;)]|$)/i;
 
-/** The sentence-sized slice holding `index`, and where the match starts inside it. */
+/** True when the sentence waives only inside a named scope, which this gate cannot evaluate. */
+function isQualified(sentence: string): boolean {
+  if (QUALIFIER_CONNECTIVE.test(sentence)) return true;
+  for (const m of sentence.matchAll(SCOPING_PREPOSITION)) {
+    if (!UNIVERSAL_SCOPE.test((m[1] ?? "").trim())) return true;
+  }
+  return false;
+}
+
+/**
+ * The sentence-sized slice holding `index`, and where the match starts inside it.
+ *
+ * `,` is deliberately NOT a delimiter. Narrowing the window is the fail-open direction: it would
+ * cut "no merge" out of "No DCO, no merge." and hand the idiom back its waiver. Comma clauses that
+ * genuinely waive ("you must sign the CLA, but no DCO is needed") are already handled by reading
+ * the negation next to the match rather than anywhere in the window.
+ */
 function sentenceAround(text: string, index: number, length: number) {
   let start = index;
   while (start > 0 && !/[.;\n]/.test(text[start - 1]!)) start--;
@@ -72,6 +122,10 @@ function isWaived(text: string, index: number, length: number): boolean {
   const before = sentence.slice(0, at);
   const fromMatch = sentence.slice(at);
   const after = sentence.slice(at + length);
+  // These two gate EVERY waiver path, including "we don't require …": a false hold costs an
+  // operator one look, a false allow ships a patch into a repo that forbids it.
+  if (isQualified(sentence)) return false;
+  if (NO_X_NO_BENEFIT.test(sentence)) return false;
   // "we don't require a DCO" / "a CLA is not required"
   if (NEG_VERB.test(before) || NOT_REQUIRED_AFTER.test(after)) return true;
   if (!NEG_DETERMINER.test(before)) return false;

@@ -6,6 +6,8 @@ import type { TaskPacket } from "./types.ts";
 
 /** A head the PR moved to after the evidence was witnessed. */
 const LIVE_HEAD = "6b6ff04c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
+/** A head the committed ledger still names after the branch has moved on. */
+const STALE_HEAD = "deadbee1c0ffee2b3a4d5e6f708192a3b4c5d6e7";
 
 function submittedPacket(): TaskPacket {
   return seedState().packets.find((p) => p.status === "submitted")!;
@@ -31,6 +33,60 @@ test("evidence staleness is bound to the witnessed SHA and survives the sync tha
     afterSync.some((d) => d.includes(witnessed.slice(0, 7)) && d.includes(LIVE_HEAD.slice(0, 7))),
     true,
     "the staleness flag must outlive the sync that overwrites prMeta.headSha",
+  );
+});
+
+test("recorded-head-vs-live is reported even when the packet carries evidence", () => {
+  // SPEC.md §7: the committed ledger MUST be reconcilable against the platform's live state — the
+  // one MUST the 6h clock enforces. Chaining this behind the evidence check made it reachable only
+  // for packets with no evidence at all, so a seed could publish a head that is not the live head
+  // and `verify-ledger` would still print `ledger ok`.
+  const packet = submittedPacket();
+  const witnessed = packet.evidence!.reviewedSha!;
+  const behind: TaskPacket = { ...packet, prMeta: { ...packet.prMeta!, headSha: STALE_HEAD } };
+
+  // The evidence is current (witnessed === live head), so ONLY the ledger-behind-live signal fires.
+  const out = packetDivergences(behind, {
+    state: "open",
+    merged: false,
+    draft: behind.prMeta!.draft,
+    headSha: witnessed,
+  });
+  assert.equal(
+    out.some(
+      (d) => d.includes("recorded head") && d.includes(STALE_HEAD.slice(0, 7)) && d.includes(witnessed.slice(0, 7)),
+    ),
+    true,
+    `ledger-behind-live must be reported; got ${JSON.stringify(out)}`,
+  );
+  assert.equal(
+    out.some((d) => d.includes("evidence witnessed at")),
+    false,
+    "evidence witnessed at the live head is not stale",
+  );
+});
+
+test("evidence staleness and ledger-behind-live are independent signals", () => {
+  // Both true at once: the seed names one head, the evidence a second, GitHub a third. Neither
+  // signal may mask the other.
+  const packet = submittedPacket();
+  const witnessed = packet.evidence!.reviewedSha!;
+  const drifted: TaskPacket = { ...packet, prMeta: { ...packet.prMeta!, headSha: STALE_HEAD } };
+  const out = packetDivergences(drifted, {
+    state: "open",
+    merged: false,
+    draft: drifted.prMeta!.draft,
+    headSha: LIVE_HEAD,
+  });
+  assert.equal(
+    out.some((d) => d.includes("evidence witnessed at") && d.includes(witnessed.slice(0, 7))),
+    true,
+    `evidence staleness must be reported; got ${JSON.stringify(out)}`,
+  );
+  assert.equal(
+    out.some((d) => d.includes("recorded head") && d.includes(STALE_HEAD.slice(0, 7))),
+    true,
+    `ledger-behind-live must be reported; got ${JSON.stringify(out)}`,
   );
 });
 

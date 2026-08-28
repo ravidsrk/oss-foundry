@@ -59,8 +59,11 @@ halt?        { at, reason, source: "secondary-rate-limit", repoId? }
 ```
 
 A durable, factory-wide stop (SPEC.md §6). While it is set, `maySelectRepo` refuses every repo, so
-tick, approve, and open-draft all stop; only `clear-halt` removes it. A halt record present but
-unreadable still halts — it fails closed. Distinct from `bans`, which counts maintainer asks.
+tick, approve, and open-draft all stop; only `clear-halt` removes it. `isFactoryState` validates
+`halt` like every other field, so a halt record present but unreadable makes the whole ledger
+refuse to load — no command runs at all until a human fixes the file, which is stricter than
+letting an unreadable record through and re-reading it defensively. Distinct from `bans`, which
+counts maintainer asks.
 
 ## Policy record (`policy-records.json`)
 

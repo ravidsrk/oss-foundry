@@ -204,6 +204,45 @@ const WAIVER_DONT_REQUIRE = `We don't require a DCO sign-off on contributions.`;
 
 const WAIVER_SIGNOFF_NOT_REQUIRED = `DCO sign-off is not required here.`;
 
+// Unconditional waivers whose objects name the project as a whole. These must keep passing: the
+// scoped-waiver guard below must not swallow "for this repository" or "for contributors".
+const WAIVERS_UNCONDITIONAL = [
+  `No CLA, no DCO, no problem.`,
+  `A DCO is not required for this repository.`,
+  `We do not require a DCO for contributors.`,
+  `No DCO is mandatory.`,
+  `We never require a DCO.`,
+  `A DCO is not necessary.`,
+  `No DCO.`,
+];
+
+// A QUALIFIED waiver is not a waiver. The gate has no notion of change class, contributor class,
+// or diff size, so it cannot tell whether this packet falls inside the exemption — reading these
+// as unconditional is fail-open on a hard constraint, which is strictly worse than over-holding.
+const SCOPED_WAIVERS = [
+  `Signing the CLA is not required for documentation changes.`,
+  `A DCO is not required for first-time contributors.`,
+  `DCO is not required for docs-only PRs.`,
+  `We don't require a DCO for docs-only changes.`,
+  `A DCO is not required unless the change touches licensing.`,
+  `DCO is not required if the diff is under ten lines.`,
+  `No DCO required when the contributor is a maintainer.`,
+  `We do not require a DCO for trivial typo fixes.`,
+  `A DCO is only required for external contributors.`,
+];
+
+// A negation aimed at the *benefit* ("no merge") or at the *escape hatch* ("no bypass") states the
+// requirement backwards. Reading the negation word alone inverts the sentence's meaning.
+const REINFORCEMENTS = [
+  `No DCO, no merge.`,
+  `No DCO, no review.`,
+  `No DCO, no PR.`,
+  `There is no DCO bypass.`,
+  `There is no DCO exception.`,
+  `No DCO waiver is available.`,
+  `There is no way to skip the DCO.`,
+];
+
 // The waiver must not reach across a clause that is still asserting the requirement.
 const REQUIRES_CLA_MIXED_CLAUSE = `The CLA is required, though a separate review sign-off is not required.`;
 
@@ -230,6 +269,7 @@ test("waiver phrasings read as waivers, not as requirements", () => {
     WAIVER_NOT_REQUIRED,
     WAIVER_DONT_REQUIRE,
     WAIVER_SIGNOFF_NOT_REQUIRED,
+    ...WAIVERS_UNCONDITIONAL,
   ]) {
     const v = evaluatePolicy({
       repoId: "ColeMurray/background-agents",
@@ -238,6 +278,32 @@ test("waiver phrasings read as waivers, not as requirements", () => {
       issueTitle: "icon tweak",
     });
     assert.equal(v.code, "ALLOW", `expected ALLOW for: ${contributing}`);
+  }
+});
+
+test("a waiver that names a scope is not a waiver", () => {
+  for (const contributing of SCOPED_WAIVERS) {
+    const v = evaluatePolicy({
+      repoId: "ColeMurray/background-agents",
+      agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+      contributing,
+      issueTitle: "icon tweak",
+    });
+    assert.equal(v.allow, false, `a scoped waiver must not allow: ${contributing}`);
+    assert.equal(v.code, "HOLD_CLA", `expected HOLD_CLA for: ${contributing}`);
+  }
+});
+
+test("negating the benefit or the escape hatch asserts the requirement", () => {
+  for (const contributing of REINFORCEMENTS) {
+    const v = evaluatePolicy({
+      repoId: "ColeMurray/background-agents",
+      agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+      contributing,
+      issueTitle: "icon tweak",
+    });
+    assert.equal(v.allow, false, `a reinforcement must not allow: ${contributing}`);
+    assert.equal(v.code, "HOLD_CLA", `expected HOLD_CLA for: ${contributing}`);
   }
 });
 
@@ -258,7 +324,7 @@ test("negation handling does not weaken a real CLA/DCO requirement", () => {
   }
   // A negation word inside a sentence that still asserts the requirement is not a waiver.
   // (This phrasing parks as HOLD_HUMAN rather than HOLD_CLA today — a separate classification
-  // gap tracked in issue #37; what matters here is that the hold survives.)
+  // gap tracked in issue #50; what matters here is that the hold survives.)
   const refusal = evaluatePolicy({
     repoId: "ColeMurray/background-agents",
     agentsMd: "Agent PRs are welcome with tests and a disclosure.",

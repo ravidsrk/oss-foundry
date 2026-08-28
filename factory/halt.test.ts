@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -48,13 +48,39 @@ test("the halt stops the whole factory, not just the repo that hit the limit", (
   }
 });
 
-test("an unreadable halt record fails closed", () => {
-  const state = { ...seedState(), halt: { nonsense: true } } as unknown as ReturnType<
-    typeof seedState
-  >;
-  const record = factoryHalt(state);
-  assert.ok(record, "a halt record that cannot be read must still halt");
-  assert.equal(maySelectRepo(state, "ravidsrk/orca-fleet").ok, false);
+test("a malformed halt record is refused at load, not read defensively", () => {
+  // `halt` is validated like every other field: the ledger refuses to load at all, so no command
+  // runs until a human fixes the file. That is stricter than reading it fail-closed at use.
+  for (const halt of [
+    { nonsense: true },
+    { at: "2026-08-29T09:00:00.000Z" },
+    { at: 1, reason: "truncated", source: "secondary-rate-limit" },
+    { at: "2026-08-29T09:00:00.000Z", reason: "wrong source", source: "maintainer-ask" },
+    { at: "2026-08-29T09:00:00.000Z", reason: "bad repoId", source: "secondary-rate-limit", repoId: 7 },
+    "halted",
+    null,
+  ]) {
+    const path = tmpStatePath();
+    writeFileSync(path, JSON.stringify({ ...seedState(), halt }, null, 2));
+    const loaded = loadFactoryState(path);
+    assert.equal(loaded.ok, false, `a malformed halt must refuse the ledger: ${JSON.stringify(halt)}`);
+    if (!loaded.ok) assert.match(loaded.error, /refusing to load/);
+  }
+
+  // A well-formed halt still loads, and still halts.
+  const good = tmpStatePath();
+  saveFactoryState(
+    good,
+    applySecondaryLimitHalt(seedState(), {
+      repoId: "ColeMurray/background-agents",
+      at: "2026-08-29T09:00:00.000Z",
+    }),
+  );
+  const loaded = loadFactoryState(good);
+  assert.equal(loaded.ok, true);
+  if (!loaded.ok) return;
+  assert.ok(factoryHalt(loaded.state));
+  assert.equal(maySelectRepo(loaded.state, "ravidsrk/orca-fleet").ok, false);
 });
 
 test("only a human clears the halt, and the ledger records who", () => {
