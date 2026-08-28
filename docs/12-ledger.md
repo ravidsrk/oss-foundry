@@ -53,6 +53,8 @@ Live verification found six factual errors in the allowlist; all corrected:
 5. E2B "docs/examples only" surface left that repo (E2B#1769, 2026-08-25); re-scoped via `policyNotes`, retarget tracked in issue #12.
 6. awesome-copilot repo language is JavaScript tooling; content Markdown.
 
+**Roster change — 2026-08-28 (issue #12):** awesome-copilot gains first issue #2684 (docs class; caps raised 80→120 lines for reference work); e2b-dev/E2B → e2b-dev/e2b-cookbook (the docs/examples surface moved); kortix-ai/suna removed (secret-gated dev loop, externally unverifiable). Policy records updated to match (8 records).
+
 ## Next
 
 1. Follow #1652 (now **draft**, disclosure verbatim — healed 2026-08-28) until quiet / merged-by-maintainer / closed.

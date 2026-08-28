@@ -20,10 +20,11 @@ The allowlist is the product. Everything else is a pipeline. Sole source: [`allo
 ### Wave 1 — low-risk external
 
 - `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy anywhere (CONTRIBUTING, AGENTS.md, CLAUDE.md); behaviorally open, 141/272 external PRs merged. [#1476](https://github.com/ColeMurray/background-agents/issues/1476) → [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **draft** since 2026-08-28). Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) closed. **In flight.**
-- `github/awesome-copilot` — docs catalog, tiny diffs. Documented AI-agent fast track in CONTRIBUTING. No named first issue; tick idles rather than inventing one.
-- `e2b-dev/E2B` — the sandbox we depend on. Docs/examples surface moved to `e2b-dev/e2b-cookbook` (E2B#1769 removed in-repo examples, 2026-08-25); retarget tracked in issue 12.
+- `github/awesome-copilot` — docs catalog, tiny diffs. Documented AI-agent fast track in CONTRIBUTING (🤖🤖🤖 title marker). First issue named: [#2684](https://github.com/github/awesome-copilot/issues/2684) (skills/github-issues reference gaps — docs class).
+- `e2b-dev/e2b-cookbook` — replaces `e2b-dev/E2B` (its docs/examples surface left that repo, E2B#1769). Genuinely silent: no CONTRIBUTING anywhere; the gate holds until upstream writes policy or the record turns affirmative. External merges current.
 - `mcp-use/mcp-use` — policy unknown until CONTRIBUTING is fetched. Gate holds.
-- `kortix-ai/suna` — same: unknown until parsed.
+
+Removed 2026-08-28: `kortix-ai/suna` — its documented dev/test loop is gated on encrypted-secret access an outside contributor cannot run; external verification is impractical, so it leaves the roster (issue #12).
 
 ### Wave 2 — adjacent, slower
 

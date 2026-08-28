@@ -69,21 +69,24 @@ repos:
     aiPolicy: welcome
     testCommand: "true"
     maxFiles: 3
-    maxDiffLines: 80
+    maxDiffLines: 120
     sandbox: e2b
     preferredLabels: [documentation]
-    firstIssues: []
+    firstIssues:
+      - number: 2684
+        title: "skills/github-issues: Projects V2 reference gaps - project/field creation, singleSelectOptions overwrite semantics, view-creation limits"
+        url: https://github.com/github/awesome-copilot/issues/2684
 
-  - id: e2b-dev/E2B
+  - id: e2b-dev/e2b-cookbook
     wave: 1
-    language: TypeScript / Python
-    aiPolicy: welcome
-    policyNotes: "Docs and SDK examples moved out of this repo (PR 1769 merged 2026-08-25). Realistic surface is e2b-dev/e2b-cookbook. Retarget tracked in issue 12."
-    testCommand: npm test
-    maxFiles: 5
-    maxDiffLines: 220
+    language: TypeScript / Python examples
+    aiPolicy: unknown
+    policyNotes: "No CONTRIBUTING.md anywhere as of 2026-08-28 - a genuinely silent repo; the gate holds until upstream writes policy or the record turns affirmative. External merges are current (multiple non-owner PRs merged in the last 14 days). Replaces e2b-dev/E2B, whose docs/examples surface was removed upstream (E2B#1769)."
+    testCommand: "true"
+    maxFiles: 4
+    maxDiffLines: 200
     sandbox: e2b
-    preferredLabels: [documentation, "good first issue"]
+    preferredLabels: [documentation]
     firstIssues: []
 
   - id: mcp-use/mcp-use
@@ -95,17 +98,6 @@ repos:
     maxDiffLines: 200
     sandbox: e2b
     preferredLabels: [bug, documentation]
-    firstIssues: []
-
-  - id: kortix-ai/suna
-    wave: 1
-    language: TypeScript
-    aiPolicy: unknown
-    testCommand: npm test
-    maxFiles: 4
-    maxDiffLines: 180
-    sandbox: e2b
-    preferredLabels: [documentation, "good first issue"]
     firstIssues: []
 
   - id: mastra-ai/mastra

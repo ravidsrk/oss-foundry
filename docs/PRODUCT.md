@@ -171,10 +171,11 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 ### Wave 1
 
 - `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (141/272 external PRs merged). First issue **#1476** (in flight as #1652)
-- `github/awesome-copilot` — Markdown content (repo language JavaScript). No named first issue yet; clock idles rather than inventing one
-- `e2b-dev/E2B` — docs/examples surface moved to e2b-dev/e2b-cookbook (retarget: issue 12)
+- `github/awesome-copilot` — Markdown content (repo language JavaScript). First issue **#2684** (skills/github-issues reference gaps, docs class); documented 🤖🤖🤖 fast track
+- `e2b-dev/e2b-cookbook` — replaces e2b-dev/E2B; genuinely silent (no CONTRIBUTING anywhere), gate holds until policy exists
 - `mcp-use/mcp-use` — policy **unknown** until CONTRIBUTING parsed
-- `kortix-ai/suna` — policy **unknown** until parsed
+
+Removed: `kortix-ai/suna` (secret-gated dev loop; externally unverifiable — issue #12)
 
 ### Wave 2
 
