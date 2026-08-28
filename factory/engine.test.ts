@@ -7,6 +7,7 @@ import {
   applyAttachDraft,
   applyAttachEvidence,
   applyHalt,
+  applyPrSync,
   applyQueueLive,
   applyTick,
   bindingFromCompare,
@@ -726,4 +727,149 @@ test("competition precedence and the direct reference helpers", () => {
   );
   assert.equal(keywordBeatsTimeline.kind, "competing");
   if (keywordBeatsTimeline.kind === "competing") assert.equal(keywordBeatsTimeline.why, "closing-keyword");
+});
+
+function prMetaAt(updatedAt: string, over: Record<string, unknown> = {}) {
+  return {
+    url: "https://github.com/ColeMurray/background-agents/pull/1652",
+    title: "Differentiate the right sidebar toggle icon by state",
+    draft: true,
+    state: "open" as const,
+    merged: false,
+    mergeable: "blocked",
+    commits: 1,
+    reviewComments: 0,
+    issueComments: 1,
+    headSha: "48c2242683705b00503d3436575bf3c28b1b0c9b",
+    updatedAt,
+    syncedAt: updatedAt,
+    ...over,
+  };
+}
+
+test("answered threads plus 14 quiet days release the in-flight slot", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  assert.ok(submitted);
+  const at = "2026-09-20T00:00:00.000Z";
+  const result = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at,
+  });
+  assert.equal(result.error, undefined);
+  const after = result.state.packets.find((p) => p.id === submitted!.id);
+  assert.equal(after?.status, "followed-up");
+  assert.equal(hasInflight(result.state.packets), false);
+  assert.equal(after?.followUps?.some((f) => f.kind === "quiet"), true);
+});
+
+test("13 quiet days do not release the slot; unanswered threads never do", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const at = "2026-09-14T00:00:00.000Z";
+  const early = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at,
+  });
+  assert.equal(early.state.packets.find((p) => p.id === submitted!.id)?.status, "submitted");
+  const unanswered = applyPrSync(state, submitted!.id, prMetaAt("2026-08-01T00:00:00.000Z"), {
+    threadsAnswered: false,
+    at: "2026-09-20T00:00:00.000Z",
+  });
+  assert.equal(unanswered.state.packets.find((p) => p.id === submitted!.id)?.status, "submitted");
+});
+
+test("maintainer activity on a followed-up packet re-blocks the factory", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const released = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-20T00:00:00.000Z",
+  });
+  const woken = applyPrSync(released.state, submitted!.id, prMetaAt("2026-09-21T08:00:00.000Z", { issueComments: 2 }), {
+    threadsAnswered: false,
+    at: "2026-09-21T09:00:00.000Z",
+  });
+  const after = woken.state.packets.find((p) => p.id === submitted!.id);
+  assert.equal(after?.status, "submitted");
+  assert.equal(hasInflight(woken.state.packets), true);
+});
+
+test("merged and closed syncs write the scorecard and end follow-up", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const merged = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }), {
+    threadsAnswered: true,
+    at: "2026-09-02T00:00:00.000Z",
+  });
+  const mergedPacket = merged.state.packets.find((p) => p.id === submitted!.id);
+  assert.equal(mergedPacket?.status, "merged");
+  const mergedRow = merged.state.scorecard.find((r) => r.repoId === submitted!.repoId);
+  assert.equal(mergedRow?.merged, 1);
+
+  const closed = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" }), {
+    threadsAnswered: true,
+    at: "2026-09-02T00:00:00.000Z",
+  });
+  const closedPacket = closed.state.packets.find((p) => p.id === submitted!.id);
+  assert.equal(closedPacket?.status, "followed-up");
+  const closedRow = closed.state.scorecard.find((r) => r.repoId === submitted!.repoId);
+  assert.equal(closedRow?.closedUnmerged, 1);
+});
+
+test("45 quiet days record a stale-intent note but never auto-close", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const result = applyPrSync(state, submitted!.id, prMetaAt("2026-08-28T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-10-20T00:00:00.000Z",
+  });
+  const after = result.state.packets.find((p) => p.id === submitted!.id);
+  assert.equal(after?.status, "followed-up");
+  assert.equal(
+    after?.followUps?.some((f) => f.kind === "note" && f.body.includes("stale-intent")),
+    true,
+  );
+  assert.equal(after?.prMeta?.state, "open");
+});
+
+test("re-syncing a closed PR writes closedUnmerged exactly once; merged bumps mergedTotal", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
+  const once = applyPrSync(state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" });
+  const twice = applyPrSync(once.state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-03T00:00:00.000Z" });
+  const thrice = applyPrSync(twice.state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" });
+  const row = thrice.state.scorecard.find((r) => r.repoId === submitted!.repoId);
+  assert.equal(row?.closedUnmerged, 1);
+
+  const merged = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }), {
+    threadsAnswered: true,
+    at: "2026-09-02T00:00:00.000Z",
+  });
+  assert.equal(merged.state.mergedTotal, state.mergedTotal + 1);
+  const again = applyPrSync(merged.state, submitted!.id, prMetaAt("2026-09-05T00:00:00.000Z", { merged: true, state: "closed" }), {
+    threadsAnswered: true,
+    at: "2026-09-06T00:00:00.000Z",
+  });
+  assert.match(again.error ?? "", /cannot sync/);
+});
+
+test("quiet-day thresholds hold at their exact boundaries", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const at14 = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-15T00:00:00.000Z",
+  });
+  assert.equal(at14.state.packets.find((p) => p.id === submitted!.id)?.status, "followed-up");
+
+  const at45 = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-10-16T00:00:00.000Z",
+  });
+  const after45 = at45.state.packets.find((p) => p.id === submitted!.id);
+  assert.equal(after45?.followUps?.some((f) => f.kind === "note" && f.body.startsWith("stale-intent")), true);
+  const scorecardRow = at45.state.scorecard.find((r) => r.repoId === submitted!.repoId);
+  assert.equal(scorecardRow?.closedUnmerged, 0);
 });
