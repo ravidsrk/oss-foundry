@@ -9,6 +9,11 @@ Input: allowlist + open issues + open PRs (both denominators).
 Does:
 
 - Drop denylist, RFC/meta/tracking, issues with an in-flight maintainer PR.
+- Competing-work verdict is two-tier (`classifyCompetition`): **competing** = a closing-keyword PR
+  or an open PR the issue's GitHub timeline cross-references → stand down; **adjacent** = a plain
+  textual mention or an issue-numbered head branch → taste gate, held for human triage, never
+  silently scouted. The same check re-runs at `attach-draft` — a competitor that appeared since
+  gating refuses the attach.
 - Heuristic score: wave, labels, size, freshness.
 - Never invent issue numbers. If every named `firstIssues` row is consumed or blocked, the tick **idles**.
 

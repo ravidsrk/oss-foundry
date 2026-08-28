@@ -10,6 +10,7 @@ import {
   applyQueueLive,
   applyTick,
   bindingFromCompare,
+  classifyCompetition,
   evidenceIsReady,
   findCompetingPull,
   hasInflight,
@@ -607,4 +608,84 @@ test("a non-ahead compare cannot reach evidence attachment as fast-forward via t
     messages: [`Fixes #${packet.issueNumber}`],
   });
   assert.equal(derived.fastForward, true);
+});
+
+test("classifyCompetition: closing keyword is competing, plain mention is adjacent", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const repo = "ravidsrk/orca-fleet";
+  const closing = classifyCompetition(
+    { pulls: [{ title: "fix", body: "Fixes #71", url: "https://github.com/ravidsrk/orca-fleet/pull/2" }] },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(closing.kind, "competing");
+  if (closing.kind === "competing") assert.equal(closing.why, "closing-keyword");
+
+  const plain = classifyCompetition(
+    { pulls: [{ title: "refactor", body: "see also #71 for context", url: "https://github.com/ravidsrk/orca-fleet/pull/3" }] },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(plain.kind, "adjacent");
+  if (plain.kind === "adjacent") assert.equal(plain.why, "plain-mention");
+});
+
+test("classifyCompetition: timeline-linked open PR competes with no textual mention", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const verdict = classifyCompetition(
+    {
+      pulls: [{ title: "unrelated", body: "no mention at all", url: "https://github.com/ravidsrk/orca-fleet/pull/9" }],
+      crossReferencedPullUrls: ["https://github.com/ravidsrk/orca-fleet/pull/9"],
+    },
+    71,
+    url,
+    "ravidsrk/orca-fleet",
+  );
+  assert.equal(verdict.kind, "competing");
+  if (verdict.kind === "competing") assert.equal(verdict.why, "timeline-link");
+});
+
+test("classifyCompetition: branch name naming the issue is adjacent; foreign repo mention is clear", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const branch = classifyCompetition(
+    { pulls: [{ title: "wip", body: "", url: "https://github.com/ravidsrk/orca-fleet/pull/4", headRef: "fix/71-validator" }] },
+    71,
+    url,
+    "ravidsrk/orca-fleet",
+  );
+  assert.equal(branch.kind, "adjacent");
+  if (branch.kind === "adjacent") assert.equal(branch.why, "branch-name");
+
+  const foreign = classifyCompetition(
+    { pulls: [{ title: "x", body: "Fixes other-owner/other-repo#71", url: "https://github.com/ravidsrk/orca-fleet/pull/5" }] },
+    71,
+    url,
+    "ravidsrk/orca-fleet",
+  );
+  assert.equal(foreign.kind, "clear");
+});
+
+test("tick holds an adjacent-flagged issue for human triage instead of scouting it", () => {
+  const state = blank();
+  const issue: ScoutIssue = {
+    repoId: "ravidsrk/orca-fleet",
+    number: 71,
+    title: "[P2] Validator: one unreadable SKILL.md must not abort the catalog",
+    url: "https://github.com/ravidsrk/orca-fleet/issues/71",
+    labels: ["documentation"],
+    daysOld: 1,
+    scout: { total: 0, parts: { wave: 0, labels: 0, size: 0, freshness: 0 } },
+  };
+  const result = applyTick(state, [issue], [], [
+    "ravidsrk/orca-fleet#71",
+    "ravidsrk/frontguard#195",
+  ]);
+  assert.equal(result.packet, null);
+  assert.equal(result.reason, "idle");
+  assert.equal(
+    result.state.events.some((e) => e.message.includes("adjacent")),
+    true,
+  );
 });

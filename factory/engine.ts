@@ -62,28 +62,41 @@ export function applyTick(
   state: FactoryState,
   live: LiveIssue[] = [],
   competingKeys: readonly string[] = [],
+  adjacentKeys: readonly string[] = [],
 ): { state: FactoryState; packet: TaskPacket | null; reason: string } {
   if (hasInflight(state.packets)) {
     const next = appendEvent(state, ev("tick", "Tick aborted — a packet is already in flight. One at a time."));
     return { state: next, packet: null, reason: "in-flight" };
   }
 
-  const used = usedKeys(state.packets);
-  const candidate = pickCandidate(state, live, used, new Set(competingKeys));
+  let held = state;
+  if (adjacentKeys.length > 0) {
+    held = appendEvent(
+      held,
+      ev(
+        "tick",
+        `Tick held ${adjacentKeys.join(", ")} — adjacent PR activity mentions the issue; taste gate, human triage before scouting.`,
+      ),
+    );
+  }
+
+  const used = usedKeys(held.packets);
+  const blocked = new Set([...competingKeys, ...adjacentKeys]);
+  const candidate = pickCandidate(held, live, used, blocked);
   if (!candidate) {
     const next = appendEvent(
-      state,
+      held,
       ev("tick", "Tick idle — no named candidate. Factory will not invent work."),
     );
-    return { state: { ...next, ticksRun: state.ticksRun + 1, lastTickAt: now() }, packet: null, reason: "idle" };
+    return { state: { ...next, ticksRun: held.ticksRun + 1, lastTickAt: now() }, packet: null, reason: "idle" };
   }
 
   const packet = buildPacket(candidate);
   const next: FactoryState = {
-    ...state,
-    packets: [packet, ...state.packets],
-    events: [ev("tick", `Tick scouted ${packet.repoId}#${packet.issueNumber}`, packet.id), ...state.events].slice(0, 80),
-    ticksRun: state.ticksRun + 1,
+    ...held,
+    packets: [packet, ...held.packets],
+    events: [ev("tick", `Tick scouted ${packet.repoId}#${packet.issueNumber}`, packet.id), ...held.events].slice(0, 80),
+    ticksRun: held.ticksRun + 1,
     lastTickAt: now(),
   };
   return { state: next, packet, reason: packet.policy.allow ? "gated" : packet.policy.code };
@@ -352,6 +365,64 @@ export function findCompetingPull(
   repoId: string,
 ): { title: string; body: string; url: string } | undefined {
   return pulls.find((pull) => mentionsIssue(`${pull.title}\n${pull.body}`, issueNumber, issueUrl, repoId));
+}
+
+/** Plain reference without a closing keyword: bare #N (not repo-prefixed), this repo's owner/repo#N, or the issue URL. Foreign owner/repo#N does not count. */
+export function referencesIssue(
+  text: string,
+  issueNumber: number,
+  issueUrl: string,
+  repoId: string,
+): boolean {
+  const n = String(issueNumber);
+  const bare = new RegExp(String.raw`(?<![\w/])#${n}(?!\d)`);
+  const prefixed = new RegExp(`(?<![\\w/])${escapeRe(repoId)}#${n}(?!\\d)`, "i");
+  if (bare.test(text) || prefixed.test(text)) return true;
+  return Boolean(issueUrl) && text.includes(issueUrl);
+}
+
+/** Head branch names that conventionally carry an issue number: fix/71, issue-71, gh_71, bug/71-slug. */
+export function branchMentionsIssue(headRef: string | undefined, issueNumber: number): boolean {
+  if (!headRef) return false;
+  const n = String(issueNumber);
+  const re = new RegExp(String.raw`(?:^|[/_-])(?:fix|issue|bug|gh)[/_-]?0*${n}(?:$|[^0-9])`, "i");
+  return re.test(headRef);
+}
+
+export interface CompetitionPull {
+  title: string;
+  body: string;
+  url: string;
+  headRef?: string;
+}
+
+export type CompetitionVerdict =
+  | { kind: "competing"; url: string; why: "closing-keyword" | "timeline-link" }
+  | { kind: "adjacent"; url: string; why: "plain-mention" | "branch-name" }
+  | { kind: "clear" };
+
+/**
+ * Two-tier competing-work verdict per docs/02-good-neighbor.md rule 8.
+ * competing (stand down): a closing-keyword PR, or an open PR GitHub's issue timeline links.
+ * adjacent (taste gate, hold for a human): a plain textual mention or an issue-numbered branch.
+ */
+export function classifyCompetition(
+  input: { pulls: CompetitionPull[]; crossReferencedPullUrls?: readonly string[] },
+  issueNumber: number,
+  issueUrl: string,
+  repoId: string,
+): CompetitionVerdict {
+  const closing = findCompetingPull(input.pulls, issueNumber, issueUrl, repoId);
+  if (closing) return { kind: "competing", url: closing.url, why: "closing-keyword" };
+  const linked = (input.crossReferencedPullUrls ?? [])[0];
+  if (linked) return { kind: "competing", url: linked, why: "timeline-link" };
+  const mention = input.pulls.find((pull) =>
+    referencesIssue(`${pull.title}\n${pull.body}`, issueNumber, issueUrl, repoId),
+  );
+  if (mention) return { kind: "adjacent", url: mention.url, why: "plain-mention" };
+  const branch = input.pulls.find((pull) => branchMentionsIssue(pull.headRef, issueNumber));
+  if (branch) return { kind: "adjacent", url: branch.url, why: "branch-name" };
+  return { kind: "clear" };
 }
 
 function scopeOverflow(repoId: string, filesChanged: number, diffLines: number): string | undefined {

@@ -47,6 +47,7 @@ export interface OpenPull {
   title: string;
   body: string;
   url: string;
+  headRef: string;
 }
 
 export async function listOpenPulls(
@@ -60,7 +61,13 @@ export async function listOpenPulls(
       headers: githubApiHeaders(),
     });
     if (!res.ok) return { ok: false, error: `GitHub ${res.status} listing pulls on ${repoId}` };
-    const body = (await res.json()) as { number: number; title?: string; body?: string | null; html_url: string }[];
+    const body = (await res.json()) as {
+      number: number;
+      title?: string;
+      body?: string | null;
+      html_url: string;
+      head?: { ref?: string };
+    }[];
     return {
       ok: true,
       pulls: body.map((p) => ({
@@ -68,8 +75,44 @@ export async function listOpenPulls(
         title: p.title ?? "",
         body: p.body ?? "",
         url: p.html_url,
+        headRef: p.head?.ref ?? "",
       })),
     };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
+/** Open pull requests GitHub's issue timeline links to the issue (`cross-referenced` events). Issues and closed PRs are dropped. */
+export async function listCrossReferencingOpenPulls(
+  repoId: string,
+  issueNumber: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; urls: string[] } | { ok: false; error: string }> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
+  try {
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/timeline?per_page=100`,
+      { headers: githubApiHeaders() },
+    );
+    if (!res.ok) {
+      return { ok: false, error: `GitHub ${res.status} reading timeline for ${repoId}#${issueNumber}` };
+    }
+    const body = (await res.json()) as {
+      event?: string;
+      source?: { issue?: { state?: string; html_url?: string; pull_request?: unknown } };
+    }[];
+    const urls = body
+      .filter(
+        (e) =>
+          e.event === "cross-referenced" &&
+          e.source?.issue?.pull_request !== undefined &&
+          e.source.issue.state === "open" &&
+          typeof e.source.issue.html_url === "string",
+      )
+      .map((e) => e.source!.issue!.html_url as string);
+    return { ok: true, urls: [...new Set(urls)] };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
   }

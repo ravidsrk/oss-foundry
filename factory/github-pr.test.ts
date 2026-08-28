@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareCommits, fetchRepoFile, listOpenPulls } from "./github-pr.ts";
+import { compareCommits, fetchRepoFile, listCrossReferencingOpenPulls, listOpenPulls } from "./github-pr.ts";
 
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
@@ -68,4 +68,57 @@ test("fetchRepoFile returns raw text or undefined on 404", async () => {
   assert.equal(ok, "Agents may open draft PRs.");
   const missing = await fetchRepoFile("ravidsrk/orca-fleet", "AGENTS.md", async () => jsonResponse(404, {}));
   assert.equal(missing, undefined);
+});
+
+test("listOpenPulls carries the head branch name", async () => {
+  const listed = await listOpenPulls("ravidsrk/orca-fleet", async () =>
+    jsonResponse(200, [
+      {
+        number: 74,
+        title: "wip",
+        body: "",
+        html_url: "https://github.com/ravidsrk/orca-fleet/pull/74",
+        head: { ref: "fix/71-validator" },
+      },
+    ]),
+  );
+  assert.equal(listed.ok, true);
+  if (listed.ok) assert.equal(listed.pulls[0]?.headRef, "fix/71-validator");
+});
+
+test("listCrossReferencingOpenPulls keeps only open cross-referenced pull requests", async () => {
+  const result = await listCrossReferencingOpenPulls("ravidsrk/orca-fleet", 71, async () =>
+    jsonResponse(200, [
+      {
+        event: "cross-referenced",
+        source: {
+          issue: {
+            state: "open",
+            pull_request: {},
+            html_url: "https://github.com/ravidsrk/orca-fleet/pull/9",
+          },
+        },
+      },
+      {
+        event: "cross-referenced",
+        source: {
+          issue: {
+            state: "closed",
+            pull_request: {},
+            html_url: "https://github.com/ravidsrk/orca-fleet/pull/5",
+          },
+        },
+      },
+      {
+        event: "cross-referenced",
+        source: { issue: { state: "open", html_url: "https://github.com/ravidsrk/orca-fleet/issues/3" } },
+      },
+      { event: "labeled" },
+    ]),
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.urls, ["https://github.com/ravidsrk/orca-fleet/pull/9"]);
+
+  const failed = await listCrossReferencingOpenPulls("ravidsrk/orca-fleet", 71, async () => jsonResponse(500, {}));
+  assert.equal(failed.ok, false);
 });
