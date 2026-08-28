@@ -7,6 +7,7 @@ import {
   applyAttachEvidence,
   applyHalt,
   applyReject,
+  applyPrSync,
   applyTick,
   bindingFromCompare,
   classifyCompetition,
@@ -150,6 +151,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   evidence <packetId> --base <sha> --head <sha> --test-exit <n> --negative <red-on-revert|pending|failed>
   body <packetId>
   attach-draft <packetId> <prUrl>
+  sync <packetId> [--threads-answered]
 
 State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry never merges.
 Disclosure:
@@ -354,6 +356,39 @@ async function main() {
     });
     console.log("---");
     console.log(`create payload draft=${payload.draft} (no merge helper)`);
+    return;
+  }
+
+  if (cmd === "sync") {
+    const id = rest[0];
+    if (!id) {
+      console.error("sync requires a packet id");
+      process.exit(1);
+    }
+    const packet = state.packets.find((p) => p.id === id);
+    if (!packet || !packet.prUrl) {
+      console.error(packet ? `packet ${id} has no PR to sync` : `unknown packet ${id}`);
+      process.exit(1);
+    }
+    const synced = await syncGithubPr({ url: packet.prUrl });
+    if (!synced.ok) {
+      console.error(synced.error);
+      process.exit(1);
+    }
+    // --threads-answered is the operator's attestation that every review thread has a reply.
+    // Without it, quiet days accrue but the slot is never released.
+    const result = applyPrSync(state, id, synced.meta, {
+      threadsAnswered: rest.includes("--threads-answered"),
+    });
+    if (result.error) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    saveFactoryState(STATE_FILE, result.state);
+    const after = result.state.packets.find((p) => p.id === id);
+    console.log(
+      `synced ${id} → ${after?.status}  quiet=${quietDaysOf(synced.meta, new Date().toISOString())}d  draft=${synced.meta.draft} state=${synced.meta.state} merged=${synced.meta.merged}`,
+    );
     return;
   }
 

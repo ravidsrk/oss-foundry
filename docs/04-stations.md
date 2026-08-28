@@ -74,12 +74,16 @@ Does:
 
 Halt rules fire here. See `docs/06-v2.md`. `submitted` remains in-flight so a quiet-but-unmerged draft still blocks a new tick until `followed-up`.
 
-Quiet-day rule (ADR 0002, enforced by `applyPrSync`): once every review thread is answered and the
-PR has been quiet ≥ **14 days**, sync moves the packet to `followed-up` and the slot frees — the
-factory is bounded by discipline, not by maintainer latency. New maintainer activity on a
-`followed-up` packet moves it back to `submitted` (answer before any new tick). At ≥ **45 quiet
-days** sync records a `stale-intent` follow-up note: record `closedUnmerged` and close with a
-polite comment — a human decision; the engine never closes a PR.
+Quiet-day rule (ADR 0002, enforced by `applyPrSync`, driven by the operator CLI:
+`sync <packetId> [--threads-answered]` — the flag is the operator's attestation that every review
+thread has a reply): once threads are answered and the PR has been quiet ≥ **14 days**, sync moves
+the packet to `followed-up` and the slot frees — the factory is bounded by discipline, not by
+maintainer latency. New maintainer activity on a `followed-up` packet moves it back to `submitted`
+(answer before any new tick). At ≥ **45 quiet days** sync records a `stale-intent` follow-up note;
+the close itself is a human act, and the scorecard's `closedUnmerged` row is written once, on the
+actual open→closed transition — never for a still-open draft, which is not a terminal outcome
+(docs/08-operations.md). Quiet days derive from GitHub's `updated_at`, which any activity bumps —
+bot noise can defer a release but can never release early; conservative by design.
 
 Live follow-up: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) — Greptile future-dated the 0.5.0 heading; Foundry folded it to `2026-08-26` (`d91fe2f`) and resolved the thread. **Merged** by the maintainer 2026-08-27.
 

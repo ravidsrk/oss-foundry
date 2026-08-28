@@ -832,3 +832,44 @@ test("45 quiet days record a stale-intent note but never auto-close", () => {
   );
   assert.equal(after?.prMeta?.state, "open");
 });
+
+test("re-syncing a closed PR writes closedUnmerged exactly once; merged bumps mergedTotal", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
+  const once = applyPrSync(state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" });
+  const twice = applyPrSync(once.state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-03T00:00:00.000Z" });
+  const thrice = applyPrSync(twice.state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" });
+  const row = thrice.state.scorecard.find((r) => r.repoId === submitted!.repoId);
+  assert.equal(row?.closedUnmerged, 1);
+
+  const merged = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }), {
+    threadsAnswered: true,
+    at: "2026-09-02T00:00:00.000Z",
+  });
+  assert.equal(merged.state.mergedTotal, state.mergedTotal + 1);
+  const again = applyPrSync(merged.state, submitted!.id, prMetaAt("2026-09-05T00:00:00.000Z", { merged: true, state: "closed" }), {
+    threadsAnswered: true,
+    at: "2026-09-06T00:00:00.000Z",
+  });
+  assert.match(again.error ?? "", /cannot sync/);
+});
+
+test("quiet-day thresholds hold at their exact boundaries", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted");
+  const at14 = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-15T00:00:00.000Z",
+  });
+  assert.equal(at14.state.packets.find((p) => p.id === submitted!.id)?.status, "followed-up");
+
+  const at45 = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-10-16T00:00:00.000Z",
+  });
+  const after45 = at45.state.packets.find((p) => p.id === submitted!.id);
+  assert.equal(after45?.followUps?.some((f) => f.kind === "note" && f.body.startsWith("stale-intent")), true);
+  const scorecardRow = at45.state.scorecard.find((r) => r.repoId === submitted!.repoId);
+  assert.equal(scorecardRow?.closedUnmerged, 0);
+});

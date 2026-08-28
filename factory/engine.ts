@@ -730,14 +730,22 @@ export function applyPrSync(
   let next: TaskPacket = bump(packet, { prMeta: meta });
   let scorecard = state.scorecard;
 
+  let mergedNow = false;
   if (meta.merged) {
+    // Reachable only from submitted/followed-up; the merged status blocks re-entry, so this fires once.
     next = bump(next, { status: "merged", station: "terminal" });
     scorecard = applyPacketToScorecard(scorecard, packet, "merged");
+    mergedNow = true;
     events.push(ev("follow-up", `Merged by maintainers — ${meta.url}`, id));
   } else if (meta.state === "closed") {
     next = bump(next, { status: "followed-up" });
-    scorecard = applyPacketToScorecard(scorecard, packet, "closed");
-    events.push(ev("follow-up", `Closed unmerged — scorecard closedUnmerged written for ${packet.repoId}`, id));
+    // Edge-triggered: write closedUnmerged only on the open→closed transition. Re-syncing an
+    // already-closed PR must not inflate the terminal count (it feeds mergeRate and the halt).
+    const firstClose = packet.prMeta?.state !== "closed";
+    if (firstClose) {
+      scorecard = applyPacketToScorecard(scorecard, packet, "closed");
+      events.push(ev("follow-up", `Closed unmerged — scorecard closedUnmerged written for ${packet.repoId}`, id));
+    }
   } else {
     const quiet = quietDaysOf(meta, at);
     const woke =
@@ -757,6 +765,9 @@ export function applyPrSync(
       });
       events.push(ev("follow-up", `Quiet ${quiet}d ≥ ${QUIET_RELEASE_DAYS} — packet followed-up, slot released`, id));
     }
+    // Deliberately no scorecard write here: a still-open draft is not a terminal outcome, and
+    // closedUnmerged feeds mergeRate/halt (docs/08-operations.md). The row is written once, on the
+    // actual open→closed transition above. The note records the intent; a human performs the close.
     if (quiet >= STALE_INTENT_DAYS) {
       const already = (next.followUps ?? []).some((f) => f.kind === "note" && f.body.startsWith("stale-intent"));
       if (!already) {
@@ -781,6 +792,7 @@ export function applyPrSync(
       ...state,
       packets: state.packets.map((p) => (p.id === id ? next : p)),
       scorecard,
+      mergedTotal: mergedNow ? state.mergedTotal + 1 : state.mergedTotal,
       events: [...events.reverse(), ...state.events].slice(0, 80),
     },
   };
