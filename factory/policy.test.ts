@@ -23,7 +23,7 @@ test("forbidden phrase beats a welcome repo", () => {
 
 test("CLA parks needs-human", () => {
   const v = evaluatePolicy({
-    repoId: "All-Hands-AI/OpenHands",
+    repoId: "OpenHands/OpenHands",
     agentsMd: "Please sign the CLA. HUMAN: required.",
     issueTitle: "docs FAQ",
   });

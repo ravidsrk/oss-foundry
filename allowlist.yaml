@@ -15,9 +15,9 @@ denylist:
   - id: curl/curl
     reason: Maintainer asked agents to stop after HackerOne flood.
   - id: pydantic/pydantic
-    reason: High slop-PR close rate in 2026.
+    reason: "Welcomes AI-assisted PRs, but auto-closes unassigned PRs and reserves closing mass-submitted PRs across repos - the factory pattern. Denied as a poor factory fit, not as anti-AI."
   - id: stablyai/orca
-    reason: Contribute via orca-fleet, not drive-by PRs.
+    reason: "No upstream AI restriction (PRs must include an AI review summary). Denied for conflict of interest: it is the runtime Foundry rides. Contribute via orca-fleet."
 
 repos:
   - id: ravidsrk/orca-fleet
@@ -51,7 +51,8 @@ repos:
   - id: ColeMurray/background-agents
     wave: 1
     language: TypeScript
-    aiPolicy: welcome
+    aiPolicy: unknown
+    policyNotes: "No written AI-contribution policy in CONTRIBUTING, AGENTS.md, or CLAUDE.md as of 2026-08-28. Behaviorally open (141 of 272 external PRs merged). Unknown until policy text exists - see issue 3."
     testCommand: npm test
     maxFiles: 6
     maxDiffLines: 280
@@ -64,7 +65,7 @@ repos:
 
   - id: github/awesome-copilot
     wave: 1
-    language: Markdown
+    language: Markdown content (repo language JavaScript)
     aiPolicy: welcome
     testCommand: "true"
     maxFiles: 3
@@ -77,6 +78,7 @@ repos:
     wave: 1
     language: TypeScript / Python
     aiPolicy: welcome
+    policyNotes: "Docs and SDK examples moved out of this repo (PR 1769 merged 2026-08-25). Realistic surface is e2b-dev/e2b-cookbook. Retarget tracked in issue 12."
     testCommand: npm test
     maxFiles: 5
     maxDiffLines: 220
@@ -117,7 +119,7 @@ repos:
     preferredLabels: ["good first issue", documentation]
     firstIssues: []
 
-  - id: All-Hands-AI/OpenHands
+  - id: OpenHands/OpenHands
     wave: 2
     language: Python
     aiPolicy: human-required

@@ -45,4 +45,4 @@ A packet without `negativeControl=red-on-revert` and real (non-placeholder) `bas
 
 ## Allowlist repo
 
-See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.
+See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Optional: `policyNotes` — a free-text provenance note (why a policy value was chosen, dated). It is appended to the policy-scan blob, so keep it free of gate phrases. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.

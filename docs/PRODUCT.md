@@ -26,7 +26,7 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 - matplotlib banned autonomous-agent PRs after a slop incident
 - curl maintainers asked agents to stop after a HackerOne flood
-- pydantic closed slop PRs at a high rate
+- pydantic welcomes AI-assisted PRs but bans mass submission across repos — the very pattern a contribution factory is
 - drive-by volume without governance is vandalism
 
 Foundry’s posture is the inverse: **contribute less, merge more, never surprise a maintainer.**
@@ -166,23 +166,23 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ### Wave 1
 
-- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: welcome`. First issue **#1476** (in flight as #1652)
-- `github/awesome-copilot` — Markdown docs. No named first issue yet; clock idles rather than inventing one
-- `e2b-dev/E2B` — docs/examples only
+- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (141/272 external PRs merged). First issue **#1476** (in flight as #1652)
+- `github/awesome-copilot` — Markdown content (repo language JavaScript). No named first issue yet; clock idles rather than inventing one
+- `e2b-dev/E2B` — docs/examples surface moved to e2b-dev/e2b-cookbook (retarget: issue 12)
 - `mcp-use/mcp-use` — policy **unknown** until CONTRIBUTING parsed
 - `kortix-ai/suna` — policy **unknown** until parsed
 
 ### Wave 2
 
 - `mastra-ai/mastra` — human-required
-- `All-Hands-AI/OpenHands` — HUMAN: markers, docs only
+- `OpenHands/OpenHands` (org renamed from All-Hands-AI) — HUMAN: markers, docs only
 
 ### Denylist (hard)
 
 - `matplotlib/matplotlib` — autonomous-agent ban
 - `curl/curl` — maintainer asked agents to stop
-- `pydantic/pydantic` — high slop-PR close rate
-- `stablyai/orca` — contribute via orca-fleet, not drive-by
+- `pydantic/pydantic` — welcomes AI-assisted PRs; bans mass submission across repos + unassigned PRs. Denied as poor factory fit, not anti-AI
+- `stablyai/orca` — no AI restriction; denied for conflict of interest (the runtime Foundry rides). Contribute via orca-fleet
 
 ---
 
@@ -248,6 +248,8 @@ Policy parsed for #1476 (operator, before open):
 | reverts | 0 | | | |
 
 Merge-rate halt is **not** tripped (`opened ≥ 3` required).
+
+**Corrections 2026-08-28 (issue #3):** six allowlist facts fixed after live verification — pydantic and stablyai/orca deny reasons rewritten (both were mischaracterized as AI-restrictions), OpenHands org rename, background-agents `welcome` → `unknown` (no written policy), E2B surface re-scoped toward e2b-cookbook, awesome-copilot language. Details in [12-ledger.md](12-ledger.md).
 
 ---
 

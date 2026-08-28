@@ -31,6 +31,17 @@ Do **not** open the compare URL again. The upstream PR exists. Follow up. Do not
 - background-agents: 1 opened, 0 merged, neutral
 - halt: none
 
+## Corrections — 2026-08-28 (issue #3)
+
+Live verification found six factual errors in the allowlist; all corrected:
+
+1. pydantic deny reason was "high slop-PR close rate" (unsubstantiated). Pydantic's CONTRIBUTING **welcomes** AI-assisted PRs; the real gates are anti-mass-submission and assignment-first. Deny kept, reason rewritten.
+2. stablyai/orca deny reason implied an AI restriction; upstream has none (PRs must *include* an AI review summary). Deny kept as conflict-of-interest.
+3. `All-Hands-AI/OpenHands` → `OpenHands/OpenHands` (org renamed; old id redirects).
+4. background-agents `aiPolicy: welcome` was an inference — no written AI policy exists. Now `unknown` with a `policyNotes` provenance record.
+5. E2B "docs/examples only" surface left that repo (E2B#1769, 2026-08-25); re-scoped via `policyNotes`, retarget tracked in issue #12.
+6. awesome-copilot repo language is JavaScript tooling; content Markdown.
+
 ## Next
 
 1. Follow #1652 until quiet / merged-by-maintainer / closed.
