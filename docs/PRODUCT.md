@@ -316,10 +316,12 @@ Never:
 
 ## 11. 90-day success
 
+Terms are defined operationally in [08-operations.md](08-operations.md) — denominators matter.
+
 - ≥ 1 merged PR on a Wave 1 repo that is not ours
-- Merge rate ≥ 60% on opened drafts
-- Review-comment average ≤ 4
-- **Bans = 0. Reverts = 0**
+- Merge rate ≥ 60% on opened drafts that reached a terminal state (stale-closed counts against)
+- Review-comment average ≤ 4 over human-reviewed PRs (`noReview` reported alongside)
+- **Bans = 0. Reverts = 0** (revert = explicit revert of our merge commit within 30 days; rework is not a revert)
 - First 20 packets each have a human attest
 
 ---

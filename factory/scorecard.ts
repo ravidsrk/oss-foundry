@@ -8,6 +8,7 @@ export function emptyScorecard(): ScorecardRow[] {
     merged: 0,
     closedUnmerged: 0,
     reviewCommentsAvg: 0,
+    noReview: 0,
     reverts: 0,
     maintainerTone: "neutral" as const,
     lastTouch: "—",
@@ -47,12 +48,14 @@ export function factoryKpis(rows: ScorecardRow[]) {
   const opened = rows.reduce((a, r) => a + r.opened, 0);
   const merged = rows.reduce((a, r) => a + r.merged, 0);
   const reverts = rows.reduce((a, r) => a + r.reverts, 0);
+  const noReview = rows.reduce((a, r) => a + r.noReview, 0);
   const banned = rows.filter((r) => r.maintainerTone === "banned").length;
   return {
     opened,
     merged,
     mergeRate: opened === 0 ? 0 : merged / opened,
     reverts,
+    noReview,
     banned,
   };
 }

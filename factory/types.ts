@@ -163,7 +163,11 @@ export interface ScorecardRow {
   opened: number;
   merged: number;
   closedUnmerged: number;
+  /** Mean human (non-bot) review comments over PRs that received ≥1 human review comment. */
   reviewCommentsAvg: number;
+  /** Opened drafts that reached a terminal state with zero human review activity. */
+  noReview: number;
+  /** Explicit `git revert` of our merge commit (or maintainer-stated rollback naming the PR) within 30 days. Post-merge rework is not a revert. */
   reverts: number;
   maintainerTone: "warm" | "neutral" | "cold" | "banned";
   lastTouch: string;

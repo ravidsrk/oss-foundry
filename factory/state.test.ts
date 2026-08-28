@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { emptyScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 
@@ -107,6 +108,29 @@ test("v6 ledger missing later-required fields is migrated, not stranded", () => 
   assert.equal(loaded.state.packets[0].scout.parts.wave, 0);
   assert.equal(loaded.state.scorecard[0].closedUnmerged, 0);
   assert.equal(loaded.state.scorecard[0].lastTouch, "—");
+});
+
+test("scorecard rows carry a noReview counter from birth", () => {
+  for (const row of emptyScorecard()) {
+    assert.equal(row.noReview, 0);
+  }
+});
+
+test("stored scorecard without noReview is migrated to 0, not stranded", () => {
+  const seed = seedState();
+  const scorecard = seed.scorecard.map((r) => {
+    const row = { ...r } as Record<string, unknown>;
+    delete row.noReview;
+    return row;
+  });
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "no-noreview.json");
+  writeFileSync(path, JSON.stringify({ ...seed, scorecard }));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true);
+  if (!loaded.ok) return;
+  for (const row of loaded.state.scorecard) {
+    assert.equal(row.noReview, 0);
+  }
 });
 
 test("valid state round-trips without becoming seed", () => {
