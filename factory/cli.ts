@@ -27,6 +27,7 @@ import {
   syncGithubPr,
 } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
+import { packetDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
@@ -152,6 +153,8 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   body <packetId>
   attach-draft <packetId> <prUrl>
   sync <packetId> [--threads-answered]
+  reconcile
+  ledger
 
 State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry never merges.
 Disclosure:
@@ -223,7 +226,12 @@ async function main() {
         );
       }
     }
-    const result = applyApprove(state, id, flag(rest, "--note") ?? "");
+    const result = applyApprove(
+      state,
+      id,
+      flag(rest, "--note") ?? "",
+      flag(rest, "--by") ?? process.env.FOUNDRY_OPERATOR ?? "operator",
+    );
     if (result.error) {
       console.error(result.error);
       process.exit(1);
@@ -356,6 +364,52 @@ async function main() {
     });
     console.log("---");
     console.log(`create payload draft=${payload.draft} (no merge helper)`);
+    return;
+  }
+
+  if (cmd === "reconcile") {
+    let next = state;
+    const doctrine: string[] = [];
+    for (const packet of state.packets) {
+      if (!packet.prUrl) continue;
+      const synced = await syncGithubPr({ url: packet.prUrl });
+      if (!synced.ok) {
+        console.error(`${packet.id}: ${synced.error}`);
+        process.exit(1);
+      }
+      const live = {
+        state: synced.meta.state,
+        merged: synced.meta.merged,
+        draft: synced.meta.draft,
+        headSha: synced.meta.headSha,
+      };
+      if (packet.status === "submitted" || packet.status === "followed-up") {
+        // Mechanical absorption only: reconcile never attests threads answered, so it can
+        // record merges/closes but never release the in-flight slot.
+        const applied = applyPrSync(next, packet.id, synced.meta, { threadsAnswered: false });
+        if (!applied.error) next = applied.state;
+      }
+      doctrine.push(...packetDivergences(next.packets.find((p) => p.id === packet.id)!, live));
+    }
+    saveFactoryState(STATE_FILE, next);
+    for (const d of doctrine) console.error(`DIVERGENCE ${d}`);
+    console.log(`reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length}`);
+    return;
+  }
+
+  if (cmd === "ledger") {
+    console.log("| packet | issue | PR | status |");
+    console.log("|---|---|---|---|");
+    for (const p of state.packets) {
+      console.log(
+        `| ${p.id} | [${p.repoId}#${p.issueNumber}](${p.issueUrl}) | ${p.prUrl ?? "—"} | ${p.status} |`,
+      );
+    }
+    console.log("");
+    for (const row of state.scorecard) {
+      if (row.opened === 0) continue;
+      console.log(`- ${row.repoId}: opened=${row.opened} merged=${row.merged} closedUnmerged=${row.closedUnmerged} noReview=${row.noReview} tone=${row.maintainerTone}`);
+    }
     return;
   }
 

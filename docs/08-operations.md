@@ -3,6 +3,7 @@
 ## Daily
 
 - `node --experimental-strip-types factory/cli.ts status`
+- `node --experimental-strip-types factory/cli.ts reconcile` — absorb merges/closes; read any `DIVERGENCE` lines (doctrine events, resolved by hand, never auto-rewritten)
 - Answer any review thread before running another tick.
 - If a maintainer replies “please stop,” remove the repo the same hour.
 

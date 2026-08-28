@@ -1,6 +1,6 @@
 # Live ledger — 2026-08-28
 
-Operator snapshot. Foundry does not merge. Seed: `factory/seed.ts`. Refresh this file when GitHub changes.
+Operator snapshot. Foundry does not merge. Seed: `factory/seed.ts`. The packet table is regenerable (`factory/cli.ts ledger`), the clock cross-checks the committed seed against GitHub every tick (`factory/verify-ledger.ts` — divergence fails the run), and `reconcile` absorbs merges/closes into local state without ever releasing the in-flight slot.
 
 ## Wave 0
 

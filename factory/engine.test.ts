@@ -24,6 +24,7 @@ import {
   type EvidenceBinding,
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
+import { packetDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -938,4 +939,50 @@ test("commitTrailerViolation inspects every co-author line and the configured co
   assert.match(commitTrailerViolation(["fix: y\n\nAssisted-by: SomeOtherTool"], "assisted-by") ?? "", /missing/i);
   assert.equal(commitTrailerViolation(["docs: z\n\nGenerated-by: Foundry"], "generated-by"), undefined);
   assert.match(commitTrailerViolation(["docs: z\n\nAssisted-by: Foundry"], "generated-by") ?? "", /missing/i);
+});
+
+test("approve records the attesting identity, defaulting to operator", () => {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  const named = applyApprove(state, id, "checked the packet", "ravidsrk");
+  assert.equal(named.state.packets[0].humanAttest?.by, "ravidsrk");
+  const anon = applyApprove(state, id, "checked the packet");
+  assert.equal(anon.state.packets[0].humanAttest?.by, "operator");
+});
+
+test("ledger divergences: mechanical drift names the sync command, doctrine drift stands alone", () => {
+  const seed = seedState();
+  const submitted = seed.packets.find((p) => p.status === "submitted")!;
+  const mergedUpstream = packetDivergences(submitted, {
+    state: "closed",
+    merged: true,
+    draft: false,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.equal(mergedUpstream.some((d) => d.includes(`sync ${submitted.id}`)), true);
+
+  const draftFlip = packetDivergences(submitted, {
+    state: "open",
+    merged: false,
+    draft: !(submitted.prMeta?.draft ?? false),
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.equal(draftFlip.some((d) => /draft=/.test(d) && /by hand|doctrine/.test(d)), true);
+
+  const mergedPacket = seed.packets.find((p) => p.status === "merged" && p.prUrl)!;
+  const ghost = packetDivergences(mergedPacket, {
+    state: "open",
+    merged: false,
+    draft: true,
+    headSha: "0000000000000000000000000000000000000000",
+  });
+  assert.equal(ghost.some((d) => /ledger says merged/.test(d)), true);
+
+  const clean = packetDivergences(submitted, {
+    state: "open",
+    merged: false,
+    draft: submitted.prMeta?.draft ?? false,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.deepEqual(clean, []);
 });

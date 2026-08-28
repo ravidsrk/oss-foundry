@@ -152,6 +152,7 @@ export function applyApprove(
   state: FactoryState,
   id: string,
   note: string,
+  by = "operator",
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
@@ -170,7 +171,7 @@ export function applyApprove(
           status: "approved",
           station: "implement",
           humanAttest: {
-            by: "operator",
+            by,
             at: now(),
             note: note || "Human freeze passed.",
           },

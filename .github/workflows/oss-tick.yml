@@ -22,6 +22,10 @@ jobs:
           node-version: "22"
       - name: Validate allowlist
         run: node --experimental-strip-types factory/validate-allowlist.ts
+      - name: Verify committed ledger against GitHub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node --experimental-strip-types factory/verify-ledger.ts
       - name: Dry notice
         if: ${{ vars.FOUNDRY_LIVE != 'true' }}
         run: echo "FOUNDRY_LIVE is not set — clock stays dry. No issues, no PRs."
