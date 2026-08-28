@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { CAPS } from "./allowlist.ts";
 import {
@@ -1166,4 +1167,15 @@ test("the evidence page binds every claim to a checkable source", () => {
   assert.match(page, /attested, not witnessed/);
   assert.equal(page.includes(DISCLOSURE), true);
   assert.match(page, /you own the merge/);
+});
+
+test("the committed evidence page regenerates byte-identical from this tree", () => {
+  const seed = seedState();
+  const merged = seed.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_71")!;
+  const committed = readFileSync(
+    new URL("../docs/evidence/pkt_ravidsrk_orca-fleet_71.md", import.meta.url),
+    "utf8",
+  );
+  assert.equal(committed.trimEnd(), renderEvidencePage(merged).trimEnd());
+  assert.equal(committed.includes(DISCLOSURE), true);
 });

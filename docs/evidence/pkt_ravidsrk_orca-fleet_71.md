@@ -22,7 +22,7 @@ From `AGENTS.md` (fetched 2026-08-28, stance: welcome):
 - Say stop and the repository is halted the same hour.
 
 ---
-This patch was prepared by Foundry, an operator-gated contribution factory.
+This patch was prepared by Foundry (ravidsrk/oss-foundry), an operator-gated contribution factory.
 A human reviewed the packet, the diff, and the tests before this draft was opened.
 The factory does not merge. Maintainers own the merge.
 
