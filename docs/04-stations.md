@@ -22,7 +22,16 @@ Output: at most one candidate. Clock / CLI skip if anything is in flight (`gated
 
 ## 2. Policy gate
 
-Input: candidate + `AGENTS.md` / `CONTRIBUTING` blob.
+Input: candidate + `AGENTS.md` / `CONTRIBUTING` blob + the repo's committed policy record
+([`policy-records.json`](../policy-records.json) — quoted verbatim, dated, with source path).
+
+The scanner matches policy **statements**, not topic words: a ban pairs an AI subject with a
+contribution object and a refusal verdict inside one sentence-sized window. A repo whose docs
+merely *discuss* autonomous agents is not banning them. Precedence: record `forbidden` → scanned
+ban statement → CLA/DCO (from scan or record conditions) → record conditions → unknown-without-
+evidence. A `silent` record ("parsed, found nothing") does **not** satisfy parse-policy-first for
+an `unknown` repo — absence is re-verified by a live fetch; affirmative records (welcome /
+conditional / forbidden) carry a quote and do.
 
 Codes:
 

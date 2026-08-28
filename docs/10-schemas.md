@@ -46,3 +46,21 @@ A packet without `negativeControl=red-on-revert` and real (non-placeholder) `bas
 ## Allowlist repo
 
 See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Optional: `policyNotes` — a free-text provenance note (why a policy value was chosen, dated). It is appended to the policy-scan blob, so keep it free of gate phrases. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.
+
+## Policy record (`policy-records.json`)
+
+One record per allowlisted repo; the validator refuses records for unlisted repos.
+
+```
+repoId       allowlist id
+source       file the quote came from (e.g. CONTRIBUTING.md, .github/pull_request_template.md)
+url          canonical link to the source
+fetchedAt    date the source was read (staleness is visible, not hidden)
+stance       forbidden | conditional | welcome | silent
+conditions   e.g. assignment-first, human-template, labeled-issue, cla, dco
+quote        the verbatim policy statement (or an explicit absence note for silent)
+```
+
+A record is evidence, not an override: `aiPolicy` in the YAML remains the operator's call, and the
+verdict carries the record (`PolicyVerdict.record`) so every gate decision is auditable back to a
+quoted, dated source.
