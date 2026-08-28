@@ -9,7 +9,7 @@ TypeScript modules for the Foundry control plane. No operator web UI lives in th
 | `engine.ts` | Tick / queue / approve / advance. Enforces hard rules |
 | `packet.ts` | `buildPacket` / `renderPrBody` |
 | `cli.ts` | Operator freeze / tick / draft-body loop |
-| `github-pr.ts` | Draft-only create payload + PR sync. No merge helper |
+| `github-pr.ts` | Draft-only create payload + PR sync. No POST-pulls helper. No merge helper |
 | `github-scout.ts` | User-initiated live issue fetch. Public API; `GITHUB_TOKEN` raises the rate limit |
 | `sandbox.ts` | Dry-run plan. Does not stamp harvested/exit 0 |
 | `scorecard.ts` | Halt rules; engine consults `health()` |

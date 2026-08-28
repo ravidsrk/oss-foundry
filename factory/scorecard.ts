@@ -1,4 +1,4 @@
-import { ALLOWLIST } from "./allowlist.ts";
+import { ALLOWLIST, CAPS } from "./allowlist.ts";
 import type { ScorecardRow, TaskPacket } from "./types.ts";
 
 export function emptyScorecard(): ScorecardRow[] {
@@ -21,7 +21,7 @@ export function mergeRate(row: ScorecardRow): number {
 
 export function health(row: ScorecardRow): "good" | "watch" | "stop" {
   if (row.maintainerTone === "banned" || row.reverts > 0) return "stop";
-  if (row.opened >= 3 && mergeRate(row) < 0.4) return "stop";
+  if (row.opened >= CAPS.halt_after_opens && mergeRate(row) < CAPS.halt_merge_rate) return "stop";
   if (row.maintainerTone === "cold") return "watch";
   if (row.opened >= 2 && mergeRate(row) < 0.6) return "watch";
   return "good";

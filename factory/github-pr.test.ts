@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareCommits } from "./github-pr.ts";
+import { compareCommits, fetchRepoFile, listOpenPulls } from "./github-pr.ts";
 
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
@@ -45,4 +45,27 @@ test("compareCommits accepts only a fast-forward ahead range with a diff", async
     jsonResponse(200, { status: "ahead", ahead_by: 1, behind_by: 0, files: [], commits: [] }),
   );
   assert.equal(emptyDiff.ok, false);
+});
+
+test("listOpenPulls returns open PR title and body", async () => {
+  const listed = await listOpenPulls("ravidsrk/orca-fleet", async () =>
+    jsonResponse(200, [
+      { number: 72, title: "fix validator", body: "Fixes #71", html_url: "https://github.com/ravidsrk/orca-fleet/pull/72" },
+    ]),
+  );
+  assert.equal(listed.ok, true);
+  if (listed.ok) {
+    assert.equal(listed.pulls[0]?.number, 72);
+    assert.equal(listed.pulls[0]?.body, "Fixes #71");
+  }
+
+  const failed = await listOpenPulls("ravidsrk/orca-fleet", async () => jsonResponse(403, { message: "nope" }));
+  assert.equal(failed.ok, false);
+});
+
+test("fetchRepoFile returns raw text or undefined on 404", async () => {
+  const ok = await fetchRepoFile("ravidsrk/orca-fleet", "AGENTS.md", async () => new Response("Agents may open draft PRs.", { status: 200 }));
+  assert.equal(ok, "Agents may open draft PRs.");
+  const missing = await fetchRepoFile("ravidsrk/orca-fleet", "AGENTS.md", async () => jsonResponse(404, {}));
+  assert.equal(missing, undefined);
 });

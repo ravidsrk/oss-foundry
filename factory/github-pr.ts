@@ -31,61 +31,65 @@ export function draftPullPayload(input: {
   };
 }
 
-export async function createGithubDraftPr(
-  input: {
-    owner: string;
-    repo: string;
-    title: string;
-    head: string;
-    base?: string;
-    body: string;
-  },
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
-  const payload = draftPullPayload(input);
-  if (payload.draft !== true) return { ok: false, error: "create helper refused a non-draft PR." };
+export function githubApiHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "oss-foundry",
-    "Content-Type": "application/json",
+    ...extra,
   };
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+export interface OpenPull {
+  number: number;
+  title: string;
+  body: string;
+  url: string;
+}
+
+export async function listOpenPulls(
+  repoId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; pulls: OpenPull[] } | { ok: false; error: string }> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
-    const res = await fetchImpl(
-      `https://api.github.com/repos/${input.owner}/${input.repo}/pulls`,
-      { method: "POST", headers, body: JSON.stringify(payload) },
-    );
-    if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
-    const pr = (await res.json()) as { html_url: string; draft: boolean };
-    if (!pr.draft) return { ok: false, error: "GitHub returned a non-draft PR; abort." };
-    return { ok: true, url: pr.html_url };
+    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`, {
+      headers: githubApiHeaders(),
+    });
+    if (!res.ok) return { ok: false, error: `GitHub ${res.status} listing pulls on ${repoId}` };
+    const body = (await res.json()) as { number: number; title?: string; body?: string | null; html_url: string }[];
+    return {
+      ok: true,
+      pulls: body.map((p) => ({
+        number: p.number,
+        title: p.title ?? "",
+        body: p.body ?? "",
+        url: p.html_url,
+      })),
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
   }
 }
 
-export async function commitExists(
+export async function fetchRepoFile(
   repoId: string,
-  sha: string,
+  path: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<string | undefined> {
   const [owner, repo] = repoId.split("/");
-  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "oss-foundry",
-  };
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (!owner || !repo) return undefined;
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/commits/${sha}`, {
-      headers,
+    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
+      headers: githubApiHeaders({ Accept: "application/vnd.github.raw" }),
     });
-    if (!res.ok) return { ok: false, error: `GitHub ${res.status} for ${repoId}@${sha.slice(0, 7)}` };
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    if (!res.ok) return undefined;
+    return await res.text();
+  } catch {
+    return undefined;
   }
 }
 
@@ -101,16 +105,10 @@ export async function compareCommits(
 > {
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "oss-foundry",
-  };
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (token) headers.Authorization = `Bearer ${token}`;
   try {
     const res = await fetchImpl(
       `https://api.github.com/repos/${owner}/${repo}/compare/${baseSha}...${headSha}`,
-      { headers },
+      { headers: githubApiHeaders() },
     );
     if (!res.ok) {
       return {
@@ -153,55 +151,48 @@ export async function compareCommits(
 }
 
 export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetch = fetch) {
-    const parsed = parsePrUrl(data.url);
-    if (!parsed) return { ok: false as const, error: "Not a GitHub pull request URL." };
+  const parsed = parsePrUrl(data.url);
+  if (!parsed) return { ok: false as const, error: "Not a GitHub pull request URL." };
 
-    const headers: Record<string, string> = {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "oss-foundry",
+  try {
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
+      { headers: githubApiHeaders() },
+    );
+    if (!res.ok) return { ok: false as const, error: `GitHub ${res.status}` };
+    const pr = (await res.json()) as {
+      html_url: string;
+      title: string;
+      body: string | null;
+      draft: boolean;
+      state: "open" | "closed";
+      merged: boolean;
+      mergeable_state: string;
+      commits: number;
+      review_comments: number;
+      comments: number;
+      head: { sha: string };
+      updated_at: string;
     };
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-    if (token) headers.Authorization = `Bearer ${token}`;
-
-    try {
-      const res = await fetchImpl(
-        `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
-        { headers },
-      );
-      if (!res.ok) return { ok: false as const, error: `GitHub ${res.status}` };
-      const pr = (await res.json()) as {
-        html_url: string;
-        title: string;
-        body: string | null;
-        draft: boolean;
-        state: "open" | "closed";
-        merged: boolean;
-        mergeable_state: string;
-        commits: number;
-        review_comments: number;
-        comments: number;
-        head: { sha: string };
-        updated_at: string;
-      };
-      const meta: PrMeta = {
-        url: pr.html_url,
-        title: pr.title,
-        draft: pr.draft,
-        state: pr.state,
-        merged: pr.merged,
-        mergeable: pr.mergeable_state,
-        commits: pr.commits,
-        reviewComments: pr.review_comments,
-        issueComments: pr.comments,
-        headSha: pr.head.sha,
-        updatedAt: pr.updated_at,
-        syncedAt: new Date().toISOString(),
-      };
-      return { ok: true as const, meta, title: pr.title ?? "", body: pr.body ?? "" };
-    } catch (err) {
-      return {
-        ok: false as const,
-        error: err instanceof Error ? err.message : "fetch failed",
-      };
-    }
+    const meta: PrMeta = {
+      url: pr.html_url,
+      title: pr.title,
+      draft: pr.draft,
+      state: pr.state,
+      merged: pr.merged,
+      mergeable: pr.mergeable_state,
+      commits: pr.commits,
+      reviewComments: pr.review_comments,
+      issueComments: pr.comments,
+      headSha: pr.head.sha,
+      updatedAt: pr.updated_at,
+      syncedAt: new Date().toISOString(),
+    };
+    return { ok: true as const, meta, title: pr.title ?? "", body: pr.body ?? "" };
+  } catch (err) {
+    return {
+      ok: false as const,
+      error: err instanceof Error ? err.message : "fetch failed",
+    };
+  }
 }

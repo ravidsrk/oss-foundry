@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { CAPS } from "./allowlist.ts";
 import {
   applyAdvance,
   applyApprove,
   applyAttachDraft,
   applyAttachEvidence,
+  applyHalt,
   applyQueueLive,
   applyTick,
   evidenceIsReady,
+  findCompetingPull,
   hasInflight,
   isBoundSha,
   isPlaceholderSha,
@@ -121,7 +124,7 @@ test("scorecard halt stop blocks queue and approve", () => {
   const state = blank();
   state.scorecard = state.scorecard.map((row) =>
     row.repoId === "ravidsrk/orca-fleet"
-      ? { ...row, opened: 3, merged: 0, maintainerTone: "neutral" as const }
+      ? { ...row, opened: CAPS.halt_after_opens, merged: 0, maintainerTone: "neutral" as const }
       : row,
   );
   assert.equal(health(state.scorecard.find((r) => r.repoId === "ravidsrk/orca-fleet")!), "stop");
@@ -408,4 +411,153 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
   );
   assert.equal(ok.error, undefined);
   assert.equal(ok.state.packets[0].status, "submitted");
+});
+
+function reviewing(): { state: FactoryState; id: string } {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  state = applyApprove(state, id, "attest").state;
+  state = applyAdvance(state, id).state;
+  state = applyAdvance(state, id).state;
+  return { state, id };
+}
+
+function readyEvidence(
+  packet: { issueNumber: number; issueUrl: string },
+  extra: { filesChanged?: number; diffLines?: number } = {},
+) {
+  const filesChanged = extra.filesChanged ?? 1;
+  const diffLines = extra.diffLines ?? 1;
+  return {
+    evidence: {
+      baseSha: BASE,
+      headSha: HEAD,
+      testCommand: "true",
+      testExit: 0,
+      negativeControl: "red-on-revert" as const,
+      filesChanged,
+      diffLines,
+      notes: [],
+    },
+    binding: bindingFor(packet, { filesChanged, diffLines }),
+  };
+}
+
+test("evidence attach is refused outside review and over-cap ranges are parked", () => {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  const gated = applyAttachEvidence(state, id, readyEvidence(state.packets[0]).evidence, readyEvidence(state.packets[0]).binding);
+  assert.ok(gated.error);
+  assert.match(gated.error!, /reviewing/);
+  assert.equal(gated.state.packets[0].status, "gated");
+
+  const reviewingState = reviewing();
+  const packet = reviewingState.state.packets[0];
+  const over = applyAttachEvidence(
+    reviewingState.state,
+    reviewingState.id,
+    readyEvidence(packet, { filesChanged: 9, diffLines: 1 }).evidence,
+    readyEvidence(packet, { filesChanged: 9, diffLines: 1 }).binding,
+  );
+  assert.ok(over.error);
+  assert.match(over.error!, /park|cap|scope/i);
+  assert.equal(over.state.packets[0].status, "parked");
+  assert.equal(over.state.packets[0].class, "out-of-scope");
+  assert.equal(over.state.packets[0].evidence, undefined);
+});
+
+test("attach-draft requires the PR head to match reviewed evidence", () => {
+  const started = reviewing();
+  const packet = started.state.packets[0];
+  const ready = readyEvidence(packet);
+  let state = applyAttachEvidence(started.state, started.id, ready.evidence, ready.binding).state;
+  state = applyAdvance(state, started.id).state;
+  const url = `https://github.com/${state.packets[0].repoId}/pull/99`;
+  const n = state.packets[0].issueNumber;
+
+  const missing = applyAttachDraft(state, started.id, url, {
+    draft: true,
+    title: `Fixes #${n}`,
+    body: `Fixes #${n}`,
+  });
+  assert.ok(missing.error);
+  assert.match(missing.error!, /head SHA is required/);
+  assert.equal(missing.state.packets[0].status, "draft-ready");
+
+  const mismatch = applyAttachDraft(state, started.id, url, {
+    draft: true,
+    headSha: OTHER,
+    title: `Fixes #${n}`,
+    body: `Fixes #${n}`,
+  });
+  assert.ok(mismatch.error);
+  assert.match(mismatch.error!, /does not match evidence head/);
+  assert.equal(mismatch.state.packets[0].status, "draft-ready");
+});
+
+test("tick skips issues that already have a competing PR", () => {
+  const ticked = applyTick(blank(), [], ["ravidsrk/orca-fleet#71"]);
+  assert.ok(ticked.packet);
+  assert.notEqual(`${ticked.packet.repoId}#${ticked.packet.issueNumber}`, "ravidsrk/orca-fleet#71");
+
+  const queued = applyQueueLive(blank(), live("ravidsrk/orca-fleet", 80), undefined, true);
+  assert.equal(queued.packet, null);
+  assert.equal(queued.reason, "already-has-pr");
+});
+
+test("tick uses fetched AGENTS.md instead of YAML notes alone", () => {
+  const forbidden = applyTick(blank(), [
+    {
+      ...live("ravidsrk/orca-fleet", 80, "docs tweak"),
+      agentsMd: "Autonomous agents not allowed on this tracker.",
+    },
+  ]);
+  assert.notEqual(forbidden.packet?.issueNumber, 80);
+
+  const allowed = applyTick(blank(), [
+    {
+      ...live("ravidsrk/orca-fleet", 80, "docs tweak"),
+      agentsMd: "Agents may open draft PRs.",
+    },
+  ]);
+  assert.equal(allowed.packet?.issueNumber, 80);
+  assert.equal(allowed.packet?.policy.code, "ALLOW");
+});
+
+test("halt sets scorecard banned, parks inflight, and blocks a new queue", () => {
+  let state = applyTick(blank()).state;
+  const repoId = state.packets[0].repoId;
+  const halted = applyHalt(state, repoId, "maintainer asked the factory to stop");
+  assert.equal(halted.error, undefined);
+  assert.equal(halted.state.packets[0].status, "parked");
+  assert.equal(halted.state.bans, 1);
+  const row = halted.state.scorecard.find((r) => r.repoId === repoId);
+  assert.equal(row?.maintainerTone, "banned");
+  assert.equal(health(row!), "stop");
+  const queued = applyQueueLive(halted.state, live(repoId, 99));
+  assert.equal(queued.packet, null);
+  assert.match(queued.reason, /halted/);
+});
+
+test("findCompetingPull binds only a closing-keyword PR for this issue", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const hit = findCompetingPull(
+    [
+      { title: "other", body: "see also #71", url: "https://github.com/ravidsrk/orca-fleet/pull/1" },
+      { title: "fix validator", body: "Fixes #71", url: "https://github.com/ravidsrk/orca-fleet/pull/2" },
+    ],
+    71,
+    url,
+    "ravidsrk/orca-fleet",
+  );
+  assert.equal(hit?.url, "https://github.com/ravidsrk/orca-fleet/pull/2");
+  assert.equal(
+    findCompetingPull(
+      [{ title: "other", body: "see also #71", url: "https://github.com/ravidsrk/orca-fleet/pull/1" }],
+      71,
+      url,
+      "ravidsrk/orca-fleet",
+    ),
+    undefined,
+  );
 });

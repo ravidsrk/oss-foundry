@@ -1,15 +1,26 @@
 import { resolve } from "node:path";
-import { repoById } from "./allowlist.ts";
+import { ALLOWLIST, repoById } from "./allowlist.ts";
 import {
   applyAdvance,
   applyApprove,
   applyAttachDraft,
   applyAttachEvidence,
+  applyHalt,
   applyReject,
   applyTick,
+  findCompetingPull,
   hasInflight,
+  INFLIGHT_STATUSES,
 } from "./engine.ts";
-import { compareCommits, draftPullPayload, parsePrUrl, syncGithubPr } from "./github-pr.ts";
+import {
+  compareCommits,
+  draftPullPayload,
+  fetchRepoFile,
+  listOpenPulls,
+  parsePrUrl,
+  syncGithubPr,
+} from "./github-pr.ts";
+import type { LiveIssue } from "./github-scout.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
@@ -35,9 +46,7 @@ function mustLoad() {
 }
 
 function printStatus(state: ReturnType<typeof mustLoad>) {
-  const inflight = state.packets.filter((p) =>
-    ["gated", "frozen", "approved", "implementing", "reviewing", "draft-ready", "submitted"].includes(p.status),
-  );
+  const inflight = state.packets.filter((p) => INFLIGHT_STATUSES.includes(p.status));
   console.log(`Foundry  packets=${state.packets.length} ticks=${state.ticksRun} attestedWave0=${foundryAttestedWave0Merges(state.packets)} inflight=${hasInflight(state.packets)}`);
   console.log(`humanApprovalsRemaining=${state.humanApprovalsRemaining} mergedTotal=${state.mergedTotal} bans=${state.bans}`);
   if (inflight.length) {
@@ -55,6 +64,43 @@ function printStatus(state: ReturnType<typeof mustLoad>) {
   }
 }
 
+async function tickWithGithub(state: ReturnType<typeof mustLoad>) {
+  if (hasInflight(state.packets)) return applyTick(state);
+  const competingKeys: string[] = [];
+  const live: LiveIssue[] = [];
+  for (const repo of ALLOWLIST) {
+    if (repo.firstIssues.length === 0) continue;
+    const pulls = await listOpenPulls(repo.id);
+    if (!pulls.ok) {
+      console.error(pulls.error);
+      process.exit(1);
+    }
+    const agentsMd = await fetchRepoFile(repo.id, "AGENTS.md");
+    const contributing =
+      (await fetchRepoFile(repo.id, "CONTRIBUTING.md")) ??
+      (await fetchRepoFile(repo.id, ".github/CONTRIBUTING.md"));
+    for (const issue of repo.firstIssues) {
+      const key = `${repo.id}#${issue.number}`;
+      if (findCompetingPull(pulls.pulls, issue.number, issue.url, repo.id)) {
+        competingKeys.push(key);
+        continue;
+      }
+      live.push({
+        repoId: repo.id,
+        number: issue.number,
+        title: issue.title,
+        url: issue.url,
+        labels: repo.preferredLabels,
+        daysOld: 0,
+        scout: { total: 0, parts: { wave: 0, labels: 0, size: 0, freshness: 0 } },
+        agentsMd,
+        contributing,
+      });
+    }
+  }
+  return applyTick(state, live, competingKeys);
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
 
 if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
@@ -64,6 +110,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   tick
   approve <packetId> --note <text>
   reject <packetId> --reason <text>
+  halt <repoId> --reason <text>
   advance <packetId>
   evidence <packetId> --base <sha> --head <sha> --test-exit <n> --negative <red-on-revert|pending|failed>
   body <packetId>
@@ -85,7 +132,7 @@ async function main() {
   }
 
   if (cmd === "tick") {
-    const result = applyTick(state);
+    const result = await tickWithGithub(state);
     saveFactoryState(STATE_FILE, result.state);
     if (!result.packet) {
       console.log(result.reason);
@@ -128,6 +175,22 @@ async function main() {
     return;
   }
 
+  if (cmd === "halt") {
+    const repoId = rest[0];
+    if (!repoId) {
+      console.error("halt requires a repo id (owner/name)");
+      process.exit(1);
+    }
+    const result = applyHalt(state, repoId, flag(rest, "--reason") ?? "maintainer asked the factory to stop.");
+    if (result.error) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    saveFactoryState(STATE_FILE, result.state);
+    console.log(`halted ${repoId} (scorecard banned). Edit allowlist.yaml denylist the same hour.`);
+    return;
+  }
+
   if (cmd === "advance") {
     const id = rest[0];
     if (!id) {
@@ -136,6 +199,8 @@ async function main() {
     }
     const result = applyAdvance(state, id);
     if (result.error) {
+      const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
+      if (parked) saveFactoryState(STATE_FILE, result.state);
       console.error(result.error);
       process.exit(1);
     }
@@ -196,6 +261,8 @@ async function main() {
       diffLines: compared.diffLines,
     });
     if (result.error) {
+      const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
+      if (parked) saveFactoryState(STATE_FILE, result.state);
       console.error(result.error);
       process.exit(1);
     }

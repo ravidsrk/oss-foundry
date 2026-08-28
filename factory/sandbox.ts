@@ -12,7 +12,7 @@ export function planSandbox(packet: TaskPacket): SandboxSession {
   return {
     provider: hostOk ? "host" : provider === "daytona" ? "daytona" : "e2b",
     id: `sbx_${packet.id}`,
-    status: hostOk ? "dry-run" : "dry-run",
+    status: "dry-run",
     image: hostOk
       ? "host-worktree (Wave 0 only)"
       : "e2b/code-interpreter · fresh · no secrets",

@@ -1,4 +1,4 @@
-import { ALLOWLIST, isDenied, repoById } from "./allowlist.ts";
+import { ALLOWLIST, CAPS, isDenied, repoById } from "./allowlist.ts";
 import { parsePrUrl } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
@@ -24,8 +24,12 @@ export const INFLIGHT_STATUSES: PacketStatus[] = [
   "submitted",
 ];
 
+export function inflightCount(packets: TaskPacket[]): number {
+  return packets.filter((p) => INFLIGHT_STATUSES.includes(p.status)).length;
+}
+
 export function hasInflight(packets: TaskPacket[]): boolean {
-  return packets.some((p) => INFLIGHT_STATUSES.includes(p.status));
+  return inflightCount(packets) >= CAPS.in_flight;
 }
 
 export function repoHealth(scorecard: ScorecardRow[], repoId: string) {
@@ -57,6 +61,7 @@ export function maySelectRepo(
 export function applyTick(
   state: FactoryState,
   live: LiveIssue[] = [],
+  competingKeys: readonly string[] = [],
 ): { state: FactoryState; packet: TaskPacket | null; reason: string } {
   if (hasInflight(state.packets)) {
     const next = appendEvent(state, ev("tick", "Tick aborted — a packet is already in flight. One at a time."));
@@ -64,7 +69,7 @@ export function applyTick(
   }
 
   const used = usedKeys(state.packets);
-  const candidate = pickCandidate(state, live, used);
+  const candidate = pickCandidate(state, live, used, new Set(competingKeys));
   if (!candidate) {
     const next = appendEvent(
       state,
@@ -88,10 +93,18 @@ export function applyQueueLive(
   state: FactoryState,
   issue: LiveIssue,
   docs?: { agentsMd?: string; contributing?: string },
+  competingPr = false,
 ): { state: FactoryState; packet: TaskPacket | null; reason: string } {
   if (hasInflight(state.packets)) {
     const next = appendEvent(state, ev("tick", "Queue blocked — a packet is already in flight."));
     return { state: next, packet: null, reason: "in-flight" };
+  }
+  if (competingPr) {
+    const next = appendEvent(
+      state,
+      ev("tick", `Queue refused ${issue.repoId}#${issue.number}: an open PR already covers the issue.`),
+    );
+    return { state: next, packet: null, reason: "already-has-pr" };
   }
   const existing = state.packets.find((p) => p.repoId === issue.repoId && p.issueNumber === issue.number);
   if (existing) return { state, packet: existing, reason: "duplicate" };
@@ -108,8 +121,8 @@ export function applyQueueLive(
     issueTitle: issue.title,
     issueUrl: issue.url,
     labels: issue.labels,
-    agentsMd: docs?.agentsMd,
-    contributing: docs?.contributing,
+    agentsMd: docs?.agentsMd ?? issue.agentsMd,
+    contributing: docs?.contributing ?? issue.contributing,
   });
   const next: FactoryState = {
     ...state,
@@ -184,10 +197,41 @@ export function applyReject(
   };
 }
 
+export function applyHalt(
+  state: FactoryState,
+  repoId: string,
+  reason: string,
+): { state: FactoryState; error?: string } {
+  const repo = repoById(repoId);
+  if (!repo) return { state, error: `${repoId} is not on the allowlist.` };
+  const note = reason || "maintainer asked the factory to stop.";
+  const row = state.scorecard.find((r) => r.repoId === repoId);
+  const alreadyBanned = row?.maintainerTone === "banned";
+  const scorecard = state.scorecard.map((r) =>
+    r.repoId === repoId
+      ? { ...r, maintainerTone: "banned" as const, lastTouch: now().slice(0, 10) }
+      : r,
+  );
+  let next: FactoryState = {
+    ...state,
+    scorecard,
+    bans: alreadyBanned ? state.bans : state.bans + 1,
+  };
+  for (const packet of state.packets) {
+    if (packet.repoId !== repoId) continue;
+    if (!INFLIGHT_STATUSES.includes(packet.status) && packet.status !== "followed-up") continue;
+    next = park(next, packet.id, note, "score");
+  }
+  return {
+    state: appendEvent(next, ev("score", `Halted ${repoId}: ${note}`)),
+  };
+}
+
 function pickCandidate(
   state: FactoryState,
   live: LiveIssue[],
   used: Set<string>,
+  competing: Set<string>,
 ): {
   repoId: string;
   issueNumber: number;
@@ -199,7 +243,7 @@ function pickCandidate(
 } | null {
   for (const issue of live) {
     const key = `${issue.repoId}#${issue.number}`;
-    if (used.has(key)) continue;
+    if (used.has(key) || competing.has(key)) continue;
     if (!maySelectRepo(state, issue.repoId).ok) continue;
     const packet = buildPacket({
       repoId: issue.repoId,
@@ -207,6 +251,8 @@ function pickCandidate(
       issueTitle: issue.title,
       issueUrl: issue.url,
       labels: issue.labels,
+      agentsMd: issue.agentsMd,
+      contributing: issue.contributing,
     });
     if (!packet.policy.allow) continue;
     return {
@@ -215,6 +261,8 @@ function pickCandidate(
       issueTitle: issue.title,
       issueUrl: issue.url,
       labels: issue.labels,
+      agentsMd: issue.agentsMd,
+      contributing: issue.contributing,
     };
   }
 
@@ -222,7 +270,7 @@ function pickCandidate(
     if (!maySelectRepo(state, repo.id).ok) continue;
     for (const issue of repo.firstIssues) {
       const key = `${repo.id}#${issue.number}`;
-      if (used.has(key)) continue;
+      if (used.has(key) || competing.has(key)) continue;
       const packet = buildPacket({
         repoId: repo.id,
         issueNumber: issue.number,
@@ -297,6 +345,27 @@ export function mentionsIssue(
   return false;
 }
 
+export function findCompetingPull(
+  pulls: { title: string; body: string; url: string }[],
+  issueNumber: number,
+  issueUrl: string,
+  repoId: string,
+): { title: string; body: string; url: string } | undefined {
+  return pulls.find((pull) => mentionsIssue(`${pull.title}\n${pull.body}`, issueNumber, issueUrl, repoId));
+}
+
+function scopeOverflow(repoId: string, filesChanged: number, diffLines: number): string | undefined {
+  const repo = repoById(repoId);
+  if (!repo) return undefined;
+  if (filesChanged > repo.maxFiles) {
+    return `Packet would touch ${filesChanged} files; cap is ${repo.maxFiles}.`;
+  }
+  if (diffLines > repo.maxDiffLines) {
+    return `Diff ${diffLines} lines exceeds cap ${repo.maxDiffLines}.`;
+  }
+  return undefined;
+}
+
 export function applyAttachEvidence(
   state: FactoryState,
   id: string,
@@ -305,6 +374,9 @@ export function applyAttachEvidence(
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
+  if (packet.status !== "reviewing") {
+    return { state, error: `cannot attach evidence from status ${packet.status}; packet must be reviewing` };
+  }
   if (!isBoundSha(evidence.baseSha) || !isBoundSha(evidence.headSha)) {
     return { state, error: "evidence SHAs must be full 40-char git objects, not placeholders" };
   }
@@ -322,6 +394,11 @@ export function applyAttachEvidence(
   }
   if (evidence.filesChanged !== binding.filesChanged || evidence.diffLines !== binding.diffLines) {
     return { state, error: "evidence scope must match the compared range" };
+  }
+  const overflow = scopeOverflow(packet.repoId, binding.filesChanged, binding.diffLines);
+  if (overflow) {
+    const parked = park(state, id, overflow);
+    return { state: parked, error: `${overflow} Packet parked.` };
   }
   const blob = binding.messages.join("\n");
   if (!mentionsIssue(blob, packet.issueNumber, packet.issueUrl, packet.repoId)) {
@@ -344,9 +421,6 @@ export function applyAdvance(
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
-  if (!packet.humanAttest && packet.status === "approved") {
-    /* attest is written by approve; keep the belt */
-  }
   if (packet.status === "approved") {
     if (!packet.humanAttest) return { state, error: `cannot advance ${id}: un-attested` };
     const sandbox = runSandboxDry(packet);
@@ -383,6 +457,15 @@ export function applyAdvance(
         state,
         error: `cannot enter draft-ready: attach SHA-bound evidence with red-on-revert first`,
       };
+    }
+    const overflow = scopeOverflow(
+      packet.repoId,
+      packet.evidence!.filesChanged,
+      packet.evidence!.diffLines,
+    );
+    if (overflow) {
+      const parked = park(state, id, overflow);
+      return { state: parked, error: `${overflow} Packet parked.` };
     }
     const body = renderPrBody(packet);
     const packets = state.packets.map((p) =>
@@ -430,8 +513,12 @@ export function applyAttachDraft(
   if (opts.draft !== true) {
     return { state, error: "PR must be a draft. Foundry will not attach a ready-for-review pull request." };
   }
-  if (opts.headSha && packet.evidence?.headSha && opts.headSha !== packet.evidence.headSha) {
-    return { state, error: `PR head ${opts.headSha.slice(0, 7)} does not match evidence head` };
+  const expected = packet.evidence?.reviewedSha ?? packet.evidence?.headSha;
+  if (!isBoundSha(opts.headSha)) {
+    return { state, error: "PR head SHA is required and must match reviewed evidence" };
+  }
+  if (!isBoundSha(expected) || opts.headSha!.toLowerCase() !== expected.toLowerCase()) {
+    return { state, error: `PR head ${opts.headSha!.slice(0, 7)} does not match evidence head` };
   }
   const linked = `${opts.title ?? ""}\n${opts.body ?? ""}`;
   if (!mentionsIssue(linked, packet.issueNumber, packet.issueUrl, packet.repoId)) {
@@ -478,4 +565,27 @@ function ev(kind: FactoryEvent["kind"], message: string, packetId?: string): Fac
 
 function appendEvent(state: FactoryState, event: FactoryEvent): FactoryState {
   return { ...state, events: [event, ...state.events].slice(0, 80) };
+}
+
+function park(
+  state: FactoryState,
+  id: string,
+  reason: string,
+  kind: FactoryEvent["kind"] = "reject",
+): FactoryState {
+  const packets = state.packets.map((p) =>
+    p.id === id
+      ? bump(p, {
+          status: "parked",
+          station: "terminal",
+          class: "out-of-scope",
+          parkReason: reason,
+        })
+      : p,
+  );
+  return {
+    ...state,
+    packets,
+    events: [ev(kind, reason, id), ...state.events].slice(0, 80),
+  };
 }

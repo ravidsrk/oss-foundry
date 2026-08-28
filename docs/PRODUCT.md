@@ -267,7 +267,7 @@ It **cannot**:
 
 A human browser session opened #1652. Future Wave 1 drafts on stranger repos need the same: operator browser, **as draft**, body from `renderPrBody`.
 
-The in-repo create helper still hard-codes `draft: true` for when the App *can* post (owned forks). It exposes no merge path.
+The in-repo create payload hard-codes `draft: true`. There is no `POST /pulls` helper and no merge path. Operator opens the draft in the browser (`cli.ts body`).
 
 ---
 
@@ -277,6 +277,7 @@ The in-repo create helper still hard-codes `draft: true` for when the App *can* 
 node --experimental-strip-types factory/cli.ts status
 node --experimental-strip-types factory/cli.ts tick
 node --experimental-strip-types factory/cli.ts approve <packetId> --note "…"
+node --experimental-strip-types factory/cli.ts halt <owner/name> --reason "…"
 node --experimental-strip-types factory/cli.ts body <packetId>
 ```
 
@@ -284,7 +285,7 @@ Daily:
 
 - Read `status` / this ledger
 - Answer any review thread before starting a new packet
-- If a maintainer says stop → denylist same hour
+- If a maintainer says stop → `halt <repoId>` (scorecard `banned`) and denylist in `allowlist.yaml` the same hour. `tick` fetches AGENTS.md / CONTRIBUTING and refuses issues that already have an open closing-keyword PR.
 
 Now:
 
