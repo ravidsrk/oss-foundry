@@ -27,7 +27,7 @@ This is not a new agent framework. It is a **control plane** that sits in front 
 | frontguard | Visual regression when a UI patch needs an oracle. |
 | HeyCMO / Mastra | Not the factory. Different product. Do not reimplement Foundry in Mastra. |
 
-Foundry adds what `oss-contribute` does not have: an **always-on clock**, a **hard allowlist**, a **policy compiler**, a **human freeze UI**, **E2B isolation for untrusted upstream**, **Grok scout scoring**, and a **scorecard that can halt the factory**.
+Foundry adds what `oss-contribute` does not have: an **always-on clock**, a **hard allowlist**, a **policy compiler**, a **human freeze CLI**, **E2B isolation for untrusted upstream**, and a **scorecard that can halt the factory**.
 
 ## Non-goals
 

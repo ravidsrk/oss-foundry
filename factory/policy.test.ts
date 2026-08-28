@@ -44,3 +44,22 @@ test("unknown repo is denied", () => {
   const v = evaluatePolicy({ repoId: "random/slop-magnet", issueTitle: "typo" });
   assert.equal(v.code, "DENY_UNKNOWN_POLICY");
 });
+
+test("files or diff over the repo cap is HOLD_SCOPE", () => {
+  const files = evaluatePolicy({
+    repoId: "ravidsrk/orca-fleet",
+    agentsMd: "Agents may open draft PRs.",
+    issueTitle: "docs tweak",
+    filesHint: 99,
+  });
+  assert.equal(files.code, "HOLD_SCOPE");
+  assert.equal(files.allow, false);
+
+  const diff = evaluatePolicy({
+    repoId: "ravidsrk/orca-fleet",
+    agentsMd: "Agents may open draft PRs.",
+    issueTitle: "docs tweak",
+    diffHint: 401,
+  });
+  assert.equal(diff.code, "HOLD_SCOPE");
+});

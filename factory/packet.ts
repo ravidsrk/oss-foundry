@@ -1,8 +1,8 @@
-import { repoById } from "./allowlist";
-import { ABORT_DEFAULT, NON_GOALS_DEFAULT } from "./neighbor";
-import { evaluatePolicy, demoPolicyCorpus } from "./policy";
-import { scoreIssue } from "./scout";
-import type { PacketClass, TaskPacket } from "./types";
+import { repoById } from "./allowlist.ts";
+import { ABORT_DEFAULT, DISCLOSURE, NON_GOALS_DEFAULT } from "./neighbor.ts";
+import { evaluatePolicy } from "./policy.ts";
+import { scoreIssue } from "./scout.ts";
+import type { PacketClass, TaskPacket } from "./types.ts";
 
 function idFor(repoId: string, issue: number) {
   return `pkt_${repoId.replace("/", "_")}_${issue}`;
@@ -18,10 +18,9 @@ export function buildPacket(input: {
   contributing?: string;
 }): TaskPacket {
   const repo = repoById(input.repoId);
-  const policyText = input.agentsMd ?? (repo ? demoPolicyCorpus(repo) : "");
   const policy = evaluatePolicy({
     repoId: input.repoId,
-    agentsMd: policyText,
+    agentsMd: input.agentsMd,
     contributing: input.contributing,
     issueTitle: input.issueTitle,
   });
@@ -98,9 +97,7 @@ ${packet.nonGoals.map((a) => `- ${a}`).join("\n")}
 
 ## Disclosure
 
-This patch was prepared by Foundry, an operator-gated contribution factory.
-A human reviewed the packet, the diff, and the tests before this draft was opened.
-The factory does not merge. Maintainers own the merge.
+${DISCLOSURE}
 
 Closes #${packet.issueNumber}
 `;

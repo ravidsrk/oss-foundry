@@ -1,39 +1,39 @@
-# Live ledger — 2026-08-27
+# Live ledger — 2026-08-28
 
-Operator snapshot. Foundry does not merge.
+Operator snapshot. Foundry does not merge. Seed: `factory/seed.ts`. Refresh this file when GitHub changes.
 
-## Wave 0 — complete (2/2 attested merges)
-
-| Packet | Issue | PR | Status |
-|---|---|---|---|
-| CHANGELOG 0.5.0 | orca-fleet#42 | [#70](https://github.com/ravidsrk/orca-fleet/pull/70) | **merged** 2026-08-27T07:04:52Z |
-| README architecture | frontguard#195 | [#196](https://github.com/ravidsrk/frontguard/pull/196) | quiet draft (Greptile 5/5; CI red pre-existing on main) |
-| Validator unreadable SKILL.md | orca-fleet#71 | [#72](https://github.com/ravidsrk/orca-fleet/pull/72) | **merged** 2026-08-27T11:30:04Z |
-
-## Wave 1 — first packet in flight (follow-up / quiet)
+## Wave 0
 
 | Packet | Issue | PR | Status |
 |---|---|---|---|
-| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) | draft, Greptile 5/5, mergeable=clean |
+| CHANGELOG 0.5.0 | orca-fleet#42 | [#70](https://github.com/ravidsrk/orca-fleet/pull/70) | **merged** 2026-08-27T07:04:52Z. Attested **1/2** |
+| README architecture | frontguard#195 | [#196](https://github.com/ravidsrk/frontguard/pull/196) | **merged** 2026-08-28T06:40:44Z by `ravidsrk`. Not a promotion-gate merge |
+| Validator unreadable SKILL.md | orca-fleet#71 | [#72](https://github.com/ravidsrk/orca-fleet/pull/72) | **merged** 2026-08-27T11:30:04Z. Attested **2/2** |
 
-Upstream compare (App 403 on `ColeMurray` pulls):
+Wave 1 promotion gate (two attested Wave 0 merges on orca-fleet): **passed**.
 
-https://github.com/ColeMurray/background-agents/compare/main...ravidsrk:foundry/issue-1476-sidebar-toggle-icon?quick_pull=1
+## Wave 1 — in flight (`submitted`)
 
-Policy parsed: `AGENTS.md` welcome, `CONTRIBUTING` has no CLA/DCO. Human freeze attested. Files: 3. Diff ~+88/−1.
+| Packet | Issue | PR | Status |
+|---|---|---|---|
+| Right sidebar toggle icon | [background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) | **open, ready-for-review** (not draft), blocked mergeability, +88/−1, 3 files. Head `48c2242683705b00503d3436575bf3c28b1b0c9b` |
 
-## Scorecard
+Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) is **closed** (still draft, not merged) as of 2026-08-28T10:14:36Z.
+
+Do **not** open the compare URL again. The upstream PR exists. Follow up. Do not merge. Do not tick.
+
+## Scorecard (this control plane)
 
 - bans: 0
 - reverts: 0
-- orca-fleet: warm
-- frontguard: warm (draft still open)
-- background-agents: neutral (first open, not yet merged by upstream)
-- halt: none (opened≥3 + merge rate<40% not tripped)
+- orca-fleet: 2 opened, 2 merged, warm
+- frontguard: 1 opened, 1 merged, warm
+- background-agents: 1 opened, 0 merged, neutral
+- halt: none
 
-## Next tick
+## Next
 
-1. Operator clicks the compare URL and opens a **draft** on `ColeMurray/background-agents`.
-2. Follow-up until quiet / merged / closed. Do not merge.
-3. Keep `frontguard#196` quiet. Do not open another Wave 0 draft for merge-rate vanity.
-4. Stop immediately if a maintainer asks.
+1. Follow #1652 until quiet / merged-by-maintainer / closed.
+2. Prefer converting #1652 to **draft** until tests on that head are green.
+3. Paste verbatim disclosure if the body is edited (`factory/neighbor.ts`).
+4. Idle. One packet in flight.

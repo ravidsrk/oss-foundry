@@ -22,4 +22,4 @@ Foundry will be judged by the worst PR it opens, not the best.
 
 ## Proof over doctrine
 
-orca-fleet’s predecessor died of missions that were not run. Foundry inherits the same rule: a station that has not produced a SHA-bound evidence manifest is `doctrine-only`. The operator console labels v2 sandbox sessions `dry-run` until an E2B key harvests a real patch.
+orca-fleet’s predecessor died of missions that were not run. Foundry inherits the same rule: a station that has not produced a SHA-bound evidence manifest is `doctrine-only`. Sandbox sessions in this repo are labeled `dry-run` until an E2B key on the worker host harvests a real patch. Dry-run does not stamp harvested/exit 0.

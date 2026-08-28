@@ -13,7 +13,7 @@ nonGoals          list
 acceptance        list of checkable claims
 abort             list of stop conditions
 class             buildable | already-has-pr | needs-human | externally-resolved | out-of-scope | policy-denied
-status            scouted → gated → approved → implementing → reviewing → draft-ready → followed-up | parked | rejected | merged
+status            scouted → gated → frozen → approved → implementing → reviewing → draft-ready → submitted → followed-up | parked | rejected | merged
 station           scout | policy | freeze | implement | review | draft | follow-up | terminal
 lighting          lit
 policy            PolicyVerdict
@@ -41,7 +41,7 @@ SHA-bound. Copied from orca-fleet `runtime/evidence-manifest.md`:
 - `filesChanged`, `diffLines` vs repo caps
 - `notes`
 
-A packet without `negativeControl=red-on-revert` cannot enter `draft-ready`.
+A packet without `negativeControl=red-on-revert` and real (non-placeholder) `baseSha` / `headSha` cannot enter `draft-ready`. The engine does not invent SHAs.
 
 ## Allowlist repo
 

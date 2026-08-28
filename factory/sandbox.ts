@@ -1,5 +1,5 @@
-import { repoById } from "./allowlist";
-import type { SandboxSession, TaskPacket } from "./types";
+import { repoById } from "./allowlist.ts";
+import type { SandboxSession, TaskPacket } from "./types.ts";
 
 function now() {
   return new Date().toISOString();
@@ -12,7 +12,7 @@ export function planSandbox(packet: TaskPacket): SandboxSession {
   return {
     provider: hostOk ? "host" : provider === "daytona" ? "daytona" : "e2b",
     id: `sbx_${packet.id}`,
-    status: hostOk ? "dry-run" : "dry-run",
+    status: "dry-run",
     image: hostOk
       ? "host-worktree (Wave 0 only)"
       : "e2b/code-interpreter · fresh · no secrets",
@@ -32,11 +32,11 @@ export function runSandboxDry(packet: TaskPacket): SandboxSession {
   ];
   return {
     ...base,
-    status: "harvested",
-    commands: cmds.map((cmd, i) => ({
-      cmd,
-      exit: 0,
-      at: new Date(Date.now() + i * 400).toISOString(),
+    status: "dry-run",
+    commands: cmds.map((cmd) => ({
+      cmd: `# planned · not executed · ${cmd}`,
+      exit: -1,
+      at: now(),
     })),
   };
 }
