@@ -263,6 +263,61 @@ export function isFactoryState(value: unknown): value is FactoryState {
   );
 }
 
+function migratePacket(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const o = { ...(value as Record<string, unknown>) };
+  if (o.objective === undefined) o.objective = "";
+  if (o.nonGoals === undefined) o.nonGoals = [];
+  if (o.acceptance === undefined) o.acceptance = [];
+  if (o.abort === undefined) o.abort = [];
+  if (o.lighting === undefined) o.lighting = "lit";
+  if (o.createdAt === undefined) o.createdAt = typeof o.updatedAt === "string" ? o.updatedAt : "—";
+  if (o.updatedAt === undefined) o.updatedAt = typeof o.createdAt === "string" ? o.createdAt : "—";
+  if (o.policy && typeof o.policy === "object") {
+    const policy = { ...(o.policy as Record<string, unknown>) };
+    if (policy.reasons === undefined) policy.reasons = [];
+    if (policy.matchedPhrases === undefined) policy.matchedPhrases = [];
+    o.policy = policy;
+  }
+  if (o.scout && typeof o.scout === "object") {
+    const scout = { ...(o.scout as Record<string, unknown>) };
+    if (scout.parts === undefined) {
+      scout.parts = { wave: 0, labels: 0, size: 0, freshness: 0 };
+    }
+    o.scout = scout;
+  }
+  if (o.evidence && typeof o.evidence === "object") {
+    const evidence = { ...(o.evidence as Record<string, unknown>) };
+    if (evidence.notes === undefined) evidence.notes = [];
+    if (evidence.negativeControl === undefined) evidence.negativeControl = "pending";
+    if (evidence.filesChanged === undefined) evidence.filesChanged = 0;
+    if (evidence.diffLines === undefined) evidence.diffLines = 0;
+    if (evidence.testCommand === undefined) evidence.testCommand = "";
+    if (evidence.testExit === undefined) evidence.testExit = 1;
+    o.evidence = evidence;
+  }
+  return o;
+}
+
+function migrateScorecard(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const o = { ...(value as Record<string, unknown>) };
+  if (o.closedUnmerged === undefined) o.closedUnmerged = 0;
+  if (o.reviewCommentsAvg === undefined) o.reviewCommentsAvg = 0;
+  if (o.reverts === undefined) o.reverts = 0;
+  if (o.lastTouch === undefined) o.lastTouch = "—";
+  return o;
+}
+
+/** Fill fields added after v6 shipped. Wrong types are left in place so validation still refuses them. */
+export function migrateV6(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const o = { ...(value as Record<string, unknown>) };
+  if (Array.isArray(o.packets)) o.packets = o.packets.map(migratePacket);
+  if (Array.isArray(o.scorecard)) o.scorecard = o.scorecard.map(migrateScorecard);
+  return o;
+}
+
 export function loadFactoryState(
   path: string,
   seed: () => FactoryState = seedState,
@@ -277,13 +332,20 @@ export function loadFactoryState(
   }
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!isFactoryState(parsed)) {
+    if (!parsed || typeof parsed !== "object" || (parsed as { version?: unknown }).version !== 6) {
       return {
         ok: false,
         error: `refusing to load ${path}: not a Foundry v6 state file. Fix or remove it; will not overwrite with seed.`,
       };
     }
-    return { ok: true, state: parsed, source: "file" };
+    const migrated = migrateV6(parsed);
+    if (!isFactoryState(migrated)) {
+      return {
+        ok: false,
+        error: `refusing to load ${path}: not a Foundry v6 state file. Fix or remove it; will not overwrite with seed.`,
+      };
+    }
+    return { ok: true, state: migrated, source: "file" };
   } catch (err) {
     return {
       ok: false,

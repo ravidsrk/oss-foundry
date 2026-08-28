@@ -71,6 +71,44 @@ test("malformed nested packet fields are refused", () => {
   }
 });
 
+test("v6 ledger missing later-required fields is migrated, not stranded", () => {
+  const seed = seedState();
+  const packet = { ...seed.packets[0] } as Record<string, unknown>;
+  delete packet.lighting;
+  delete packet.acceptance;
+  delete packet.nonGoals;
+  delete packet.abort;
+  delete packet.createdAt;
+  const policy = { ...(packet.policy as Record<string, unknown>) };
+  delete policy.reasons;
+  delete policy.matchedPhrases;
+  packet.policy = policy;
+  const scout = { ...(packet.scout as Record<string, unknown>) };
+  delete scout.parts;
+  packet.scout = scout;
+  const row = { ...(seed.scorecard[0] as Record<string, unknown>) };
+  delete row.closedUnmerged;
+  delete row.lastTouch;
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "old-v6.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      ...seed,
+      packets: [packet, ...seed.packets.slice(1)],
+      scorecard: [row, ...seed.scorecard.slice(1)],
+    }),
+  );
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true);
+  if (!loaded.ok) return;
+  assert.equal(loaded.state.packets[0].lighting, "lit");
+  assert.deepEqual(loaded.state.packets[0].acceptance, []);
+  assert.equal(loaded.state.packets[0].policy.reasons.length, 0);
+  assert.equal(loaded.state.packets[0].scout.parts.wave, 0);
+  assert.equal(loaded.state.scorecard[0].closedUnmerged, 0);
+  assert.equal(loaded.state.scorecard[0].lastTouch, "—");
+});
+
 test("valid state round-trips without becoming seed", () => {
   const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "ok.json");
   const seed = seedState();

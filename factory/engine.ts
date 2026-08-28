@@ -274,9 +274,21 @@ export interface EvidenceBinding {
   diffLines: number;
 }
 
+function escapeRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** GitHub closing keywords only — a casual mention of #N or the issue URL is not a binding. */
 export function mentionsIssue(text: string, issueNumber: number, issueUrl: string): boolean {
-  if (issueUrl && text.includes(issueUrl)) return true;
-  return new RegExp(`(?:^|[^0-9A-Za-z])#${issueNumber}(?![0-9])`).test(text);
+  const kw = String.raw`(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
+  const n = String(issueNumber);
+  const closeHash = new RegExp(`${kw}\\s*:?\\s*(?:[\\w.-]+\\/[\\w.-]+)?#${n}(?!\\d)`, "i");
+  if (closeHash.test(text)) return true;
+  if (issueUrl) {
+    const closeUrl = new RegExp(`${kw}\\s*:?\\s*${escapeRe(issueUrl)}`, "i");
+    if (closeUrl.test(text)) return true;
+  }
+  return false;
 }
 
 export function applyAttachEvidence(
@@ -307,7 +319,7 @@ export function applyAttachEvidence(
   }
   const blob = binding.messages.join("\n");
   if (!mentionsIssue(blob, packet.issueNumber, packet.issueUrl)) {
-    return { state, error: `commit range does not reference ${packet.repoId}#${packet.issueNumber}` };
+    return { state, error: `commit range does not close ${packet.repoId}#${packet.issueNumber}` };
   }
   const bound: EvidenceManifest = { ...evidence, shaVerified: true };
   const packets = state.packets.map((p) => (p.id === id ? bump(p, { evidence: bound }) : p));
@@ -419,7 +431,7 @@ export function applyAttachDraft(
   if (!mentionsIssue(linked, packet.issueNumber, packet.issueUrl)) {
     return {
       state,
-      error: `PR does not reference packet issue ${packet.repoId}#${packet.issueNumber}`,
+      error: `PR does not close packet issue ${packet.repoId}#${packet.issueNumber}`,
     };
   }
   const alreadyOpened = packet.status === "submitted" || Boolean(packet.prUrl);

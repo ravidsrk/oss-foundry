@@ -238,7 +238,20 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     notes: [],
   }, bindingFor(state.packets[0], { messages: ["unrelated refactor"] }));
   assert.ok(unrelatedExisting.error);
-  assert.match(unrelatedExisting.error, /does not reference/);
+  assert.match(unrelatedExisting.error, /does not close/);
+
+  const casualMention = applyAttachEvidence(state, id, {
+    baseSha: BASE,
+    headSha: OTHER,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  }, bindingFor(state.packets[0], { messages: [`see also #${state.packets[0].issueNumber}`] }));
+  assert.ok(casualMention.error);
+  assert.match(casualMention.error, /does not close/);
 
   state = applyAttachEvidence(state, id, {
     baseSha: BASE,
@@ -339,8 +352,22 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
     { draft: true, headSha: HEAD, title: "other work", body: "no issue link" },
   );
   assert.ok(unbound.error);
-  assert.match(unbound.error, /does not reference packet issue/);
+  assert.match(unbound.error, /does not close packet issue/);
   assert.equal(unbound.state.packets[0].status, "draft-ready");
+
+  const casualPr = applyAttachDraft(
+    state,
+    id,
+    `https://github.com/${state.packets[0].repoId}/pull/99`,
+    {
+      draft: true,
+      headSha: HEAD,
+      title: "unrelated",
+      body: `see also #${state.packets[0].issueNumber} ${state.packets[0].issueUrl}`,
+    },
+  );
+  assert.ok(casualPr.error);
+  assert.match(casualPr.error, /does not close packet issue/);
 
   const ok = applyAttachDraft(
     state,
