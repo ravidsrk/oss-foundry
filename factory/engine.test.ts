@@ -898,9 +898,16 @@ test("wake does not reclaim submitted when another packet already holds the in-f
     true,
   );
   assert.equal(afterA.followUps?.some((f) => f.kind === "review-reply"), false);
-  assert.ok(
-    woken.state.events.some((e) => e.packetId === a.id && /reply|maintainer activity/i.test(e.message)),
-  );
+  // The event must distinguish the held-slot wake from the ordinary one. A loose /reply|maintainer
+  // activity/ matched the pre-fix text too, so it proved nothing: both messages open with
+  // "Maintainer activity on <url>". Pin what changed — the reply is owed, the packet did NOT
+  // reclaim the slot — and forbid the pre-fix claim, which would be false here: no tick was blocked.
+  const wake = woken.state.events.find((e) => e.packetId === a.id && e.kind === "follow-up");
+  assert.ok(wake, "no follow-up event was recorded for the woken packet");
+  assert.match(wake.message, /reply owed/i);
+  assert.match(wake.message, /in-flight slot is held by another packet/i);
+  assert.match(wake.message, new RegExp(`${a.id} stays followed-up`));
+  assert.doesNotMatch(wake.message, /before any new tick/i);
 });
 
 test("merged and closed syncs write the scorecard and end follow-up", () => {
@@ -1202,6 +1209,86 @@ test("the reject warning reaches the operator's terminal, not only the ledger", 
   const quiet = reject(state.packets.find((p) => !p.prUrl)!.id);
   assert.equal(quiet.status, 0, `${quiet.stdout}${quiet.stderr}`);
   assert.doesNotMatch(`${quiet.stdout}${quiet.stderr}`, /still open on GitHub/);
+});
+
+test("the reject warning is scoped to submitted, not to every packet that names a PR", () => {
+  // The `prUrl` half of the condition is pinned both ways by the test above; this pins the `status`
+  // half, which was one-directional — widening `status === "submitted" && prUrl` to `prUrl` alone
+  // left the suite green. A `followed-up` packet still names a live PR, but it has already released
+  // the slot, so rejecting it is not the halt-everything path abandoning an in-flight draft.
+  // (`reconcile` still flags the open PR afterward via `packetDivergences` — that is unchanged.)
+  const seed = seedState();
+  const submitted = seed.packets.find((p) => p.status === "submitted")!;
+  const released = applyPrSync(seed, submitted.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-20T00:00:00.000Z",
+  });
+  const followedUp = released.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(followedUp.status, "followed-up");
+  assert.ok(followedUp.prUrl, "the followed-up packet must still name a PR or this binds nothing");
+
+  const result = applyReject(released.state, submitted.id, "superseded upstream");
+  assert.equal(result.error, undefined);
+  assert.equal(result.warning, undefined);
+  const after = result.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(after.status, "rejected");
+  // Nothing leaked into the stored record either: the park reason is the operator's reason, verbatim.
+  assert.equal(after.parkReason, "superseded upstream");
+  assert.equal(result.state.events[0].message, "superseded upstream");
+});
+
+test("status does not claim a re-block that the held slot already prevented", () => {
+  // Driven at the reducer level, the reply-owed note was recorded and nothing surfaced it: `status`
+  // printed "(maintainer activity re-blocks the tick)" for a packet whose maintainer activity had
+  // just re-blocked nothing, and `reconcile` reported divergences=0. Drive the real binary.
+  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-status-"));
+  const cli = join(import.meta.dirname, "cli.ts");
+  const statusIn = (state: FactoryState) => {
+    writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+    const run = spawnSync(process.execPath, ["--experimental-strip-types", cli, "status"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
+    return `${run.stdout}${run.stderr}`;
+  };
+
+  const seed = seedState();
+  const a = seed.packets.find((p) => p.status === "submitted")!;
+  const released = applyPrSync(seed, a.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-20T00:00:00.000Z",
+  });
+
+  // Control: slot free, nothing owed — the original claim is true, and still printed.
+  const free = statusIn(released.state);
+  assert.match(free, /\(maintainer activity re-blocks the tick\)/);
+  assert.doesNotMatch(free, /reply owed:/);
+
+  // Now B takes the freed slot and maintainer activity lands on A.
+  const b = buildPacket({
+    repoId: "github/awesome-copilot",
+    issueNumber: 2684,
+    issueTitle: "operator ticked this while A was quiet",
+    issueUrl: "https://github.com/github/awesome-copilot/issues/2684",
+  });
+  const withB: FactoryState = {
+    ...released.state,
+    packets: [{ ...b, status: "gated", station: "freeze" }, ...released.state.packets],
+  };
+  const woken = applyPrSync(withB, a.id, prMetaAt("2026-09-21T08:00:00.000Z", { issueComments: 2 }), {
+    threadsAnswered: false,
+    at: "2026-09-21T09:00:00.000Z",
+  });
+  assert.equal(woken.state.packets.find((p) => p.id === a.id)?.status, "followed-up");
+
+  const held = statusIn(woken.state);
+  // The false claim is gone...
+  assert.doesNotMatch(held, /\(maintainer activity re-blocks the tick\)/);
+  assert.match(held, /does not re-block the tick/);
+  // ...and the reply the operator now owes is named, with the PR to answer.
+  assert.match(held, /reply owed:/);
+  assert.ok(held.includes(a.prUrl!), held);
 });
 
 function fakeRunner(script: Record<string, { exit: number; output: string }>) {

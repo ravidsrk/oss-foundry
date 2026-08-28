@@ -110,7 +110,7 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 |---|---|---|
 | 1 | Scout | Allowlist issues only. Drop denylist, RFC/meta, issues with an in-flight maintainer PR. Heuristic rank. Clock / CLI never invent issue numbers |
 | 2 | Policy | Deterministic. Grok has no vote |
-| 3 | Freeze | Operator `approve` (attest) or `reject` (park). Denied / halted packets cannot be approved |
+| 3 | Freeze | Operator `approve` (attest) or `reject` (park). Denied / halted packets cannot be approved. `merged` packets cannot be rejected — terminal, and a late reject desyncs the promotion-gate counters. Rejecting a `submitted` packet is the halt-everything path, but it never closes the PR: the CLI names the one left open |
 | 4 | Implement | One playbook pack. Failing-first. Wave 0 host / Wave 1+ E2B. Console/CLI dry-run does not fake a green harvest |
 | 5 | Review | Independent, lit. Negative control: revert goes red. Evidence attached by the operator, not invented |
 | 6 | Draft | Fork → upstream draft. Body from `renderPrBody`. Create helper sets `draft: true` |

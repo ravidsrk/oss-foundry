@@ -190,17 +190,22 @@ export function applyReject(
       error: `cannot reject ${id} from status ${packet.status} — rejecting a merged packet would desync the promotion-gate counters (mergedTotal vs. attested Wave 0 merges)`,
     };
   }
-  // docs/08-operations.md: "to halt everything, reject in-flight packets" — submitted (with a live,
-  // still-open PR) must stay rejectable as the halt path. It must not be silent about it: an
-  // operator who mistypes `reject` on the one in-flight packet is about to abandon a real draft.
-  // `warning` is separate from `error` on purpose: `error` is the refusal path the CLI exits 1 on,
-  // while this one proceeds and prints — the same "proceed but say so out loud" shape the freeze
-  // taste gate uses for an adjacent PR. A warning that only reaches parkReason is not loud.
+  // docs/08-operations.md:23: "To halt everything, reject in-flight packets and stop pressing tick."
+  // So submitted (with a live, still-open PR) must stay rejectable as the halt path. It must not be
+  // silent about it: an operator who mistypes `reject` on the one in-flight packet is about to
+  // abandon a real draft. `warning` is separate from `error` on purpose: `error` is the refusal path
+  // the CLI exits 1 on, while this one proceeds and prints — the same "proceed but say so out loud"
+  // shape the freeze taste gate uses for an adjacent PR. A warning that only reaches parkReason is
+  // not loud. Lowercase `open pr:` matches the CLI's advisory prefixes (`stand down:`, `taste gate:`,
+  // `hold <key>:`); all-caps is reserved for the halt signal.
   const abandonsOpenPr = packet.status === "submitted" && Boolean(packet.prUrl);
   const warning = abandonsOpenPr
-    ? `WARNING: ${packet.prUrl} is still open on GitHub. Rejecting this packet does not close the PR; close it by hand or it stays live and unattended.`
+    ? `open pr: ${packet.prUrl} is still open on GitHub. Rejecting this packet does not close the PR; close it by hand or it stays live and unattended.`
     : undefined;
-  const message = warning ? `${reason} — ${warning}` : reason;
+  // Two shapes, not one string stored twice: the ledger records the fact (which PR was left open),
+  // the terminal gets the instruction. A stored field read back months later does not need "close it
+  // by hand" — `reconcile` re-derives that from the live PR every run (ledger-check.ts).
+  const message = abandonsOpenPr ? `${reason} — left ${packet.prUrl} open on GitHub` : reason;
   const packets = state.packets.map((p) =>
     p.id === id
       ? bump(p, {
@@ -716,6 +721,22 @@ export function quietDaysOf(meta: PrMeta, at: string): number {
   return Math.max(0, Math.floor((nowMs - updated) / 86_400_000));
 }
 
+/**
+ * Prefix on the follow-up note `applyPrSync` writes when maintainer activity lands on a
+ * `followed-up` packet while another packet holds the in-flight slot. Written here, read back by
+ * `repliesOwed` so the operator surface and the writer cannot drift apart on the literal.
+ */
+const REPLY_OWED_PREFIX = "reply-owed:";
+
+/**
+ * Replies the operator still owes a maintainer: activity arrived, the slot was held by a newer
+ * packet, so the tick was never re-blocked and nothing else will nag about it. One entry per
+ * arrival. `status` prints these — a note nobody reads is the same as no note (issue #34).
+ */
+export function repliesOwed(packet: TaskPacket): FollowUpEntry[] {
+  return (packet.followUps ?? []).filter((f) => f.kind === "note" && f.body.startsWith(REPLY_OWED_PREFIX));
+}
+
 function followUpEntry(at: string, kind: FollowUpEntry["kind"], body: string, url?: string): FollowUpEntry {
   return {
     id: `fu_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -780,13 +801,18 @@ export function applyPrSync(
         next = bump(next, {
           followUps: [
             ...(next.followUps ?? []),
-            // `kind: "note"` with a `reply-owed:` prefix, following `stale-intent` below.
-            // `review-reply` is reserved for a reply that was MADE (docs/04-stations.md,
-            // docs/10-schemas.md); this entry records one that is still owed.
+            // `kind: "note"` with a prefix — the same entry shape as `stale-intent` below, but
+            // deliberately NOT its dedupe: `stale-intent` is one standing fact about the PR (it has
+            // been quiet ≥ 45 days), while each arrival here is a distinct maintainer comment that
+            // genuinely owes its own reply. The branch is gated on `updatedAt` changing, so a
+            // re-sync of the same activity cannot duplicate a note.
+            // `review-reply` is reserved for a reply that was MADE — docs/04-stations.md, "Follow-up
+            // / scorecard": "`review-reply` is a reply that was **made**; a reply still **owed** ...
+            // is a `note` prefixed `reply-owed:`". This entry records one that is still owed.
             followUpEntry(
               at,
               "note",
-              `reply-owed: Maintainer activity on ${meta.url} while another packet holds the in-flight slot — reply owed; not reclaiming submitted.`,
+              `${REPLY_OWED_PREFIX} Maintainer activity on ${meta.url} while another packet holds the in-flight slot — reply owed; not reclaiming submitted.`,
               meta.url,
             ),
           ],
