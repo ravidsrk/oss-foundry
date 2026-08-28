@@ -1,13 +1,26 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { repoById } from "./allowlist.ts";
-import { applyApprove, applyQueueLive, applyReject, applyTick } from "./engine.ts";
+import {
+  applyAdvance,
+  applyApprove,
+  applyAttachDraft,
+  applyAttachEvidence,
+  applyQueueLive,
+  applyReject,
+  applyTick,
+} from "./engine.ts";
 import type { LiveIssue } from "./github-scout.ts";
-import { renderPrBody } from "./packet.ts";
-import { runSandboxDry } from "./sandbox.ts";
 import { applyPacketToScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
-import type { FactoryEvent, FactoryState, FollowUpEntry, PrMeta, ScoutScore, TaskPacket } from "./types.ts";
+import type {
+  EvidenceManifest,
+  FactoryEvent,
+  FactoryState,
+  FollowUpEntry,
+  PrMeta,
+  ScoutScore,
+  TaskPacket,
+} from "./types.ts";
 
 const KEY = "foundry-v6";
 
@@ -53,6 +66,7 @@ interface FoundryStore extends FactoryState {
   approve: (id: string, note: string) => void;
   reject: (id: string, reason: string) => void;
   advance: (id: string) => void;
+  attachEvidence: (id: string, evidence: EvidenceManifest) => void;
   attachDraft: (id: string, url: string) => void;
   recordFollowUp: (id: string, kind: FollowUpEntry["kind"], body: string, url?: string) => void;
   markQuiet: (id: string) => void;
@@ -98,92 +112,16 @@ export const useFoundry = create<FoundryStore>()(
         set(result.state);
       },
       advance: (id) => {
-        const { packets, events, scorecard } = get();
-        const packet = packets.find((p) => p.id === id);
-        if (!packet) return;
-
-        if (packet.status === "approved") {
-          const sandbox = runSandboxDry(packet);
-          set({
-            packets: packets.map((p) =>
-              p.id === id
-                ? bump(p, {
-                    status: "implementing",
-                    station: "implement",
-                    sandboxSession: sandbox,
-                  })
-                : p,
-            ),
-            events: [
-              ev("sandbox", `Sandbox ${sandbox.provider} harvested for ${id}`, id),
-              ...events,
-            ].slice(0, 80),
-          });
-          return;
-        }
-
-        if (packet.status === "implementing") {
-          set({
-            packets: packets.map((p) =>
-              p.id === id
-                ? bump(p, {
-                    status: "reviewing",
-                    station: "review",
-                    evidence: {
-                      baseSha: "origin/HEAD",
-                      headSha: `deadbeef${id.slice(-4)}`,
-                      testCommand: repoById(p.repoId)?.testCommand ?? "true",
-                      testExit: 0,
-                      negativeControl: "red-on-revert",
-                      filesChanged: 2,
-                      diffLines: 48,
-                      notes: ["Independent reviewer did not see implementer traces."],
-                    },
-                  })
-                : p,
-            ),
-            events: [ev("review", `Build-blind review started for ${id}`, id), ...events].slice(0, 80),
-          });
-          return;
-        }
-
-        if (packet.status === "reviewing") {
-          const body = renderPrBody(packet);
-          set({
-            packets: packets.map((p) =>
-              p.id === id
-                ? bump(p, {
-                    status: "draft-ready",
-                    station: "draft",
-                    prBody: body,
-                    evidence: p.evidence
-                      ? { ...p.evidence, reviewedSha: p.evidence.headSha }
-                      : p.evidence,
-                  })
-                : p,
-            ),
-            scorecard: applyPacketToScorecard(scorecard, packet, "opened"),
-            events: [
-              ev("draft", `Draft PR body ready for ${packet.repoId}#${packet.issueNumber}`, id),
-              ...events,
-            ].slice(0, 80),
-          });
-        }
+        const result = applyAdvance(core(get()), id);
+        set(result.state);
+      },
+      attachEvidence: (id, evidence) => {
+        const result = applyAttachEvidence(core(get()), id, evidence);
+        set(result.state);
       },
       attachDraft: (id, url) => {
-        const { packets, events, scorecard } = get();
-        const packet = packets.find((p) => p.id === id);
-        if (!packet) return;
-        const alreadyOpened = packet.status === "submitted" || packet.status === "followed-up";
-        set({
-          packets: packets.map((p) =>
-            p.id === id
-              ? bump(p, { status: "submitted", station: "follow-up", prUrl: url })
-              : p,
-          ),
-          scorecard: alreadyOpened ? scorecard : applyPacketToScorecard(scorecard, packet, "opened"),
-          events: [ev("draft", `Attached draft ${url}`, id), ...events].slice(0, 80),
-        });
+        const result = applyAttachDraft(core(get()), id, url);
+        set(result.state);
       },
       recordFollowUp: (id, kind, body, url) => {
         const { packets, events } = get();

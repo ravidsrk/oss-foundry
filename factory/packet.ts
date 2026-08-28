@@ -1,5 +1,5 @@
 import { repoById } from "./allowlist.ts";
-import { ABORT_DEFAULT, NON_GOALS_DEFAULT } from "./neighbor.ts";
+import { ABORT_DEFAULT, DISCLOSURE, NON_GOALS_DEFAULT } from "./neighbor.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { scoreIssue } from "./scout.ts";
 import type { PacketClass, TaskPacket } from "./types.ts";
@@ -97,9 +97,7 @@ ${packet.nonGoals.map((a) => `- ${a}`).join("\n")}
 
 ## Disclosure
 
-This patch was prepared by Foundry, an operator-gated contribution factory.
-A human reviewed the packet, the diff, and the tests before this draft was opened.
-The factory does not merge. Maintainers own the merge.
+${DISCLOSURE}
 
 Closes #${packet.issueNumber}
 `;

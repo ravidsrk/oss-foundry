@@ -1,9 +1,11 @@
 import { ALLOWLIST, isDenied, repoById } from "./allowlist.ts";
 import type { LiveIssue } from "./github-scout.ts";
-import { buildPacket } from "./packet.ts";
-import { health } from "./scorecard.ts";
+import { buildPacket, renderPrBody } from "./packet.ts";
+import { planSandbox, runSandboxDry } from "./sandbox.ts";
+import { applyPacketToScorecard, health } from "./scorecard.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
 import type {
+  EvidenceManifest,
   FactoryEvent,
   FactoryState,
   PacketStatus,
@@ -238,6 +240,134 @@ function pickCandidate(
     }
   }
   return null;
+}
+
+export function isPlaceholderSha(sha: string | undefined): boolean {
+  if (!sha) return true;
+  const s = sha.trim().toLowerCase();
+  if (s === "origin/head" || s.startsWith("deadbeef")) return true;
+  return !/^[0-9a-f]{7,40}$/.test(s);
+}
+
+export function evidenceIsReady(evidence: EvidenceManifest | undefined): boolean {
+  if (!evidence) return false;
+  if (evidence.negativeControl !== "red-on-revert") return false;
+  if (evidence.testExit !== 0) return false;
+  if (isPlaceholderSha(evidence.baseSha) || isPlaceholderSha(evidence.headSha)) return false;
+  return true;
+}
+
+export function applyAttachEvidence(
+  state: FactoryState,
+  id: string,
+  evidence: EvidenceManifest,
+): { state: FactoryState; error?: string } {
+  const packet = state.packets.find((p) => p.id === id);
+  if (!packet) return { state, error: `unknown packet ${id}` };
+  if (isPlaceholderSha(evidence.baseSha) || isPlaceholderSha(evidence.headSha)) {
+    return { state, error: "evidence SHAs must be real git objects, not placeholders" };
+  }
+  const packets = state.packets.map((p) => (p.id === id ? bump(p, { evidence }) : p));
+  return {
+    state: {
+      ...state,
+      packets,
+      events: [ev("review", `Evidence attached for ${id}`, id), ...state.events].slice(0, 80),
+    },
+  };
+}
+
+export function applyAdvance(
+  state: FactoryState,
+  id: string,
+): { state: FactoryState; error?: string } {
+  const packet = state.packets.find((p) => p.id === id);
+  if (!packet) return { state, error: `unknown packet ${id}` };
+  if (!packet.humanAttest && packet.status === "approved") {
+    /* attest is written by approve; keep the belt */
+  }
+  if (packet.status === "approved") {
+    if (!packet.humanAttest) return { state, error: `cannot advance ${id}: un-attested` };
+    const sandbox = runSandboxDry(packet);
+    const planned = planSandbox(packet);
+    const session = { ...sandbox, status: "dry-run" as const, id: planned.id };
+    const packets = state.packets.map((p) =>
+      p.id === id ? bump(p, { status: "implementing", station: "implement", sandboxSession: session }) : p,
+    );
+    return {
+      state: {
+        ...state,
+        packets,
+        events: [ev("sandbox", `Sandbox ${session.provider} dry-run planned for ${id}`, id), ...state.events].slice(0, 80),
+      },
+    };
+  }
+
+  if (packet.status === "implementing") {
+    const packets = state.packets.map((p) =>
+      p.id === id ? bump(p, { status: "reviewing", station: "review" }) : p,
+    );
+    return {
+      state: {
+        ...state,
+        packets,
+        events: [ev("review", `Build-blind review started for ${id}`, id), ...state.events].slice(0, 80),
+      },
+    };
+  }
+
+  if (packet.status === "reviewing") {
+    if (!evidenceIsReady(packet.evidence)) {
+      return {
+        state,
+        error: `cannot enter draft-ready: attach SHA-bound evidence with red-on-revert first`,
+      };
+    }
+    const body = renderPrBody(packet);
+    const packets = state.packets.map((p) =>
+      p.id === id
+        ? bump(p, {
+            status: "draft-ready",
+            station: "draft",
+            prBody: body,
+            evidence: p.evidence ? { ...p.evidence, reviewedSha: p.evidence.headSha } : p.evidence,
+          })
+        : p,
+    );
+    return {
+      state: {
+        ...state,
+        packets,
+        events: [ev("draft", `Draft PR body ready for ${packet.repoId}#${packet.issueNumber}`, id), ...state.events].slice(0, 80),
+      },
+    };
+  }
+
+  return { state, error: `cannot advance ${id} from status ${packet.status}` };
+}
+
+export function applyAttachDraft(
+  state: FactoryState,
+  id: string,
+  url: string,
+): { state: FactoryState; error?: string } {
+  const packet = state.packets.find((p) => p.id === id);
+  if (!packet) return { state, error: `unknown packet ${id}` };
+  if (packet.status !== "draft-ready" && packet.status !== "submitted") {
+    return { state, error: `cannot attach draft from status ${packet.status}` };
+  }
+  const alreadyOpened = packet.status === "submitted" || Boolean(packet.prUrl);
+  const packets = state.packets.map((p) =>
+    p.id === id ? bump(p, { status: "submitted", station: "follow-up", prUrl: url }) : p,
+  );
+  return {
+    state: {
+      ...state,
+      packets,
+      scorecard: alreadyOpened ? state.scorecard : applyPacketToScorecard(state.scorecard, packet, "opened"),
+      events: [ev("draft", `Attached draft ${url}`, id), ...state.events].slice(0, 80),
+    },
+  };
 }
 
 function usedKeys(packets: TaskPacket[]): Set<string> {

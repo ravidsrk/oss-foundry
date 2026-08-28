@@ -32,11 +32,11 @@ export function runSandboxDry(packet: TaskPacket): SandboxSession {
   ];
   return {
     ...base,
-    status: "harvested",
-    commands: cmds.map((cmd, i) => ({
-      cmd,
-      exit: 0,
-      at: new Date(Date.now() + i * 400).toISOString(),
+    status: "dry-run",
+    commands: cmds.map((cmd) => ({
+      cmd: `# planned · not executed · ${cmd}`,
+      exit: -1,
+      at: now(),
     })),
   };
 }

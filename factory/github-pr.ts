@@ -16,6 +16,55 @@ export function parsePrUrl(url: string): { owner: string; repo: string; number: 
   }
 }
 
+export function draftPullPayload(input: {
+  title: string;
+  head: string;
+  base?: string;
+  body: string;
+}): { title: string; head: string; base: string; body: string; draft: true } {
+  return {
+    title: input.title,
+    head: input.head,
+    base: input.base ?? "main",
+    body: input.body,
+    draft: true,
+  };
+}
+
+export async function createGithubDraftPr(
+  input: {
+    owner: string;
+    repo: string;
+    title: string;
+    head: string;
+    base?: string;
+    body: string;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const payload = draftPullPayload(input);
+  if (payload.draft !== true) return { ok: false, error: "create helper refused a non-draft PR." };
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "oss-foundry",
+    "Content-Type": "application/json",
+  };
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${input.owner}/${input.repo}/pulls`,
+      { method: "POST", headers, body: JSON.stringify(payload) },
+    );
+    if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
+    const pr = (await res.json()) as { html_url: string; draft: boolean };
+    if (!pr.draft) return { ok: false, error: "GitHub returned a non-draft PR; abort." };
+    return { ok: true, url: pr.html_url };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
 export async function syncGithubPr(data: { url: string }) {
     const parsed = parsePrUrl(data.url);
     if (!parsed) return { ok: false as const, error: "Not a GitHub pull request URL." };
