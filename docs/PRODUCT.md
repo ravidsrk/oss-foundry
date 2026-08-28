@@ -139,9 +139,11 @@ Stop a repo when:
 
 - maintainer tone is `banned`, or
 - any revert of our patch, or
-- opened ≥ 3 **and** merge rate < 40%
+- opened ≥ 3, **at least one terminal outcome**, and merge rate < 40% (merge rate = merged / terminal outcomes)
 
-Watch when tone is `cold`, or opened ≥ 2 and merge rate < 60%.
+Silence alone never halts — three still-open unreviewed drafts are `watch`, not `stop`.
+
+Watch when tone is `cold`, or opened ≥ 2 and merge rate < 60% (watch carries no silence guard by design — it is soft caution).
 
 A `stop` repo is unselectable until a human edits `allowlist.yaml`.
 
@@ -320,8 +322,8 @@ Terms are defined operationally in [08-operations.md](08-operations.md) — deno
 
 - ≥ 1 merged PR on a Wave 1 repo that is not ours
 - Merge rate ≥ 60% on opened drafts that reached a terminal state (stale-closed counts against)
-- Review-comment average ≤ 4 over human-reviewed PRs (`noReview` reported alongside)
-- **Bans = 0. Reverts = 0** (revert = explicit revert of our merge commit within 30 days; rework is not a revert)
+- Review-comment average ≤ 4 over human-reviewed PRs (`noReview` — terminal-state drafts never human-reviewed — reported alongside)
+- **Bans = 0. Reverts = 0** (revert = explicit revert of our merge commit, or a maintainer-stated rollback naming the PR, within 30 days; rework is not a revert)
 - First 20 packets each have a human attest
 
 ---

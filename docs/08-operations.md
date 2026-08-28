@@ -28,8 +28,10 @@ Silence is the modal outcome for external agent PRs, so every KPI names its deno
   or stale-closed under the quiet-day rule). Stale-closed counts **against** the rate. A draft still
   open and in follow-up is not yet in the denominator.
 - **Review-comment average** = mean **human, non-bot** review comments, computed **only over PRs
-  with ≥ 1 human review comment**. The `noReview` counter is reported beside it — a low average from
-  silence is not a low average from clean work.
+  with ≥ 1 human review comment**. The `noReview` counter is reported beside it — opened drafts that
+  reached a terminal state with **zero** human review activity (a still-open silent draft is not yet
+  counted; the silent share is `noReview / terminal outcomes`, the same denominator as merge rate).
+  A low average from silence is not a low average from clean work.
 - **Time-to-quiet** = open → last human activity (comment, review, or push).
 - **Revert** = an explicit `git revert` of our merge commit, or a maintainer-stated rollback naming
   the PR, within 30 days of merge. Post-merge edits/refactors of our code are **rework**, tracked as

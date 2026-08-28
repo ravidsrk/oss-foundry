@@ -43,6 +43,6 @@ After 90 days (operational definitions in [08-operations.md](08-operations.md)):
 
 - ≥ 1 merged PR on a Wave 1 repo that is not ours.
 - Merge rate ≥ 60% on opened drafts that reached a terminal state; stale-closed counts against.
-- Review-comment average ≤ 4 over human-reviewed PRs, with the no-review count reported alongside.
-- **Bans = 0. Reverts = 0.** A revert is an explicit revert of our merge commit within 30 days; post-merge rework is not a revert.
+- Review-comment average ≤ 4 over human-reviewed PRs, with the no-review count (terminal-state drafts that never got a human review) reported alongside.
+- **Bans = 0. Reverts = 0.** A revert is an explicit revert of our merge commit — or a maintainer-stated rollback naming the PR — within 30 days; post-merge rework is not a revert.
 - The first 20 packets each have a human attest in the ledger.

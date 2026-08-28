@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { emptyScorecard } from "./scorecard.ts";
+import { emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 
@@ -143,4 +143,15 @@ test("valid state round-trips without becoming seed", () => {
   if (!loaded.ok) return;
   assert.equal(loaded.source, "file");
   assert.equal(loaded.state.ticksRun, 99);
+});
+
+test("merge rate counts terminal outcomes; silence alone cannot trip the halt", () => {
+  const silent = { ...emptyScorecard()[0], opened: 3 };
+  assert.equal(mergeRate(silent), 0);
+  assert.notEqual(health(silent), "stop");
+  const allClosed = { ...silent, closedUnmerged: 3 };
+  assert.equal(health(allClosed), "stop");
+  const mixed = { ...silent, merged: 2, closedUnmerged: 1 };
+  assert.ok(mergeRate(mixed) > 0.6);
+  assert.equal(health(mixed), "good");
 });

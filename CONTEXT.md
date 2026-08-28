@@ -35,7 +35,7 @@ A GitHub pull request opened with `draft: true`. Ready-for-review is a human bro
 The human freeze record `{ by, at, note }` required before implement on Wave 1+, and counted toward the first-20 freeze budget.
 
 **Scorecard halt**:
-A per-repo stop when tone is `banned`, any revert of our patch, or opened ≥ 3 and merge rate < 40%. A halted repo is treated as unselectable until a human edits `allowlist.yaml`.
+A per-repo stop when tone is `banned`, any revert of our patch, or opened ≥ 3 with at least one terminal outcome and merge rate < 40% (merge rate = merged / terminal outcomes; silence alone never halts). A halted repo is treated as unselectable until a human edits `allowlist.yaml`.
 
 **Evidence**:
 SHA-bound proof that tests ran and a revert goes red. A packet without `negativeControl=red-on-revert` and real SHAs cannot become `draft-ready`.
