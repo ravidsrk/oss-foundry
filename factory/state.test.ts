@@ -51,6 +51,26 @@ test("nested malformed packet is refused", () => {
   assert.match(loaded.error, /not a Foundry v6 state file/);
 });
 
+test("malformed nested packet fields are refused", () => {
+  const seed = seedState();
+  const base = seed.packets[0];
+  const cases: unknown[] = [
+    { ...base, acceptance: "not an array" },
+    { ...base, nonGoals: [1, 2] },
+    { ...base, evidence: { baseSha: 1 } },
+    { ...base, humanAttest: {} },
+    { ...base, prMeta: { url: "https://example" } },
+    { ...base, followUps: [{ id: "x" }] },
+    { ...base, sandboxSession: { status: "dry-run" } },
+  ];
+  for (const packet of cases) {
+    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "fields.json");
+    writeFileSync(path, JSON.stringify({ ...seed, packets: [packet] }));
+    const loaded = loadFactoryState(path);
+    assert.equal(loaded.ok, false, JSON.stringify(packet).slice(0, 80));
+  }
+});
+
 test("valid state round-trips without becoming seed", () => {
   const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "ok.json");
   const seed = seedState();

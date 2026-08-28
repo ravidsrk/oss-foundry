@@ -48,29 +48,171 @@ const EVENT_KINDS = new Set([
   "scout",
   "follow-up",
 ]);
+const POLICY_CODES = new Set([
+  "ALLOW",
+  "DENY_FORBIDDEN",
+  "DENY_UNKNOWN_POLICY",
+  "HOLD_CLA",
+  "HOLD_HUMAN",
+  "HOLD_SCOPE",
+]);
+const LIGHTING = new Set(["lit", "dark-eligible"]);
+const NEGATIVE = new Set(["red-on-revert", "pending", "failed"]);
+const SANDBOX_KINDS = new Set(["host", "e2b", "daytona"]);
+const SANDBOX_STATUSES = new Set([
+  "dry-run",
+  "booting",
+  "ready",
+  "executing",
+  "harvested",
+  "destroyed",
+]);
+const FOLLOWUP_KINDS = new Set(["review-reply", "bot-reconcile", "quiet", "ci", "note"]);
+const PR_STATES = new Set(["open", "closed"]);
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function optional(value: unknown, check: (v: unknown) => boolean): boolean {
+  return value === undefined || check(value);
+}
+
+function isPolicy(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.allow === "boolean" &&
+    typeof o.code === "string" &&
+    POLICY_CODES.has(o.code) &&
+    isStringArray(o.reasons) &&
+    isStringArray(o.matchedPhrases)
+  );
+}
+
+function isScout(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  const parts = o.parts as Record<string, unknown> | undefined;
+  return (
+    typeof o.total === "number" &&
+    !!parts &&
+    typeof parts.wave === "number" &&
+    typeof parts.labels === "number" &&
+    typeof parts.size === "number" &&
+    typeof parts.freshness === "number"
+  );
+}
+
+function isEvidence(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.baseSha === "string" &&
+    typeof o.headSha === "string" &&
+    typeof o.testCommand === "string" &&
+    typeof o.testExit === "number" &&
+    typeof o.negativeControl === "string" &&
+    NEGATIVE.has(o.negativeControl) &&
+    typeof o.filesChanged === "number" &&
+    typeof o.diffLines === "number" &&
+    isStringArray(o.notes) &&
+    optional(o.reviewedSha, (v) => typeof v === "string") &&
+    optional(o.shaVerified, (v) => typeof v === "boolean")
+  );
+}
+
+function isAttest(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return typeof o.by === "string" && typeof o.at === "string" && typeof o.note === "string";
+}
+
+function isPrMeta(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.url === "string" &&
+    typeof o.title === "string" &&
+    typeof o.draft === "boolean" &&
+    typeof o.state === "string" &&
+    PR_STATES.has(o.state) &&
+    typeof o.merged === "boolean" &&
+    typeof o.mergeable === "string" &&
+    typeof o.commits === "number" &&
+    typeof o.reviewComments === "number" &&
+    typeof o.issueComments === "number" &&
+    typeof o.headSha === "string" &&
+    typeof o.updatedAt === "string" &&
+    typeof o.syncedAt === "string"
+  );
+}
+
+function isFollowUp(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.id === "string" &&
+    typeof o.at === "string" &&
+    typeof o.kind === "string" &&
+    FOLLOWUP_KINDS.has(o.kind) &&
+    typeof o.body === "string" &&
+    optional(o.url, (v) => typeof v === "string")
+  );
+}
+
+function isSandbox(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.provider === "string" &&
+    SANDBOX_KINDS.has(o.provider) &&
+    typeof o.id === "string" &&
+    typeof o.status === "string" &&
+    SANDBOX_STATUSES.has(o.status) &&
+    typeof o.image === "string" &&
+    Array.isArray(o.commands) &&
+    o.commands.every((cmd) => {
+      if (!cmd || typeof cmd !== "object") return false;
+      const c = cmd as Record<string, unknown>;
+      return typeof c.cmd === "string" && typeof c.exit === "number" && typeof c.at === "string";
+    })
+  );
+}
 
 function isPacket(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const o = value as Record<string, unknown>;
-  const policy = o.policy as Record<string, unknown> | undefined;
-  const scout = o.scout as Record<string, unknown> | undefined;
   return (
     typeof o.id === "string" &&
     typeof o.repoId === "string" &&
     Number.isInteger(o.issueNumber) &&
     typeof o.issueTitle === "string" &&
     typeof o.issueUrl === "string" &&
+    typeof o.objective === "string" &&
+    isStringArray(o.nonGoals) &&
+    isStringArray(o.acceptance) &&
+    isStringArray(o.abort) &&
     typeof o.status === "string" &&
     PACKET_STATUSES.has(o.status) &&
     typeof o.station === "string" &&
     STATIONS.has(o.station) &&
     typeof o.class === "string" &&
     CLASSES.has(o.class) &&
-    !!policy &&
-    typeof policy.allow === "boolean" &&
-    typeof policy.code === "string" &&
-    !!scout &&
-    typeof scout.total === "number"
+    typeof o.lighting === "string" &&
+    LIGHTING.has(o.lighting) &&
+    typeof o.createdAt === "string" &&
+    typeof o.updatedAt === "string" &&
+    isPolicy(o.policy) &&
+    isScout(o.scout) &&
+    optional(o.humanAttest, isAttest) &&
+    optional(o.evidence, isEvidence) &&
+    optional(o.prBody, (v) => typeof v === "string") &&
+    optional(o.prUrl, (v) => typeof v === "string") &&
+    optional(o.prMeta, isPrMeta) &&
+    optional(o.followUps, (v) => Array.isArray(v) && v.every(isFollowUp)) &&
+    optional(o.parkReason, (v) => typeof v === "string") &&
+    optional(o.sandboxSession, isSandbox)
   );
 }
 
@@ -93,9 +235,12 @@ function isScorecardRow(value: unknown): boolean {
     typeof o.repoId === "string" &&
     typeof o.opened === "number" &&
     typeof o.merged === "number" &&
+    typeof o.closedUnmerged === "number" &&
+    typeof o.reviewCommentsAvg === "number" &&
     typeof o.reverts === "number" &&
     typeof o.maintainerTone === "string" &&
-    TONES.has(o.maintainerTone)
+    TONES.has(o.maintainerTone) &&
+    typeof o.lastTouch === "string"
   );
 }
 
