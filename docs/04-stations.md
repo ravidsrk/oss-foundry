@@ -74,6 +74,13 @@ Does:
 
 Halt rules fire here. See `docs/06-v2.md`. `submitted` remains in-flight so a quiet-but-unmerged draft still blocks a new tick until `followed-up`.
 
+Quiet-day rule (ADR 0002, enforced by `applyPrSync`): once every review thread is answered and the
+PR has been quiet ≥ **14 days**, sync moves the packet to `followed-up` and the slot frees — the
+factory is bounded by discipline, not by maintainer latency. New maintainer activity on a
+`followed-up` packet moves it back to `submitted` (answer before any new tick). At ≥ **45 quiet
+days** sync records a `stale-intent` follow-up note: record `closedUnmerged` and close with a
+polite comment — a human decision; the engine never closes a PR.
+
 Live follow-up: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) — Greptile future-dated the 0.5.0 heading; Foundry folded it to `2026-08-26` (`d91fe2f`) and resolved the thread. **Merged** by the maintainer 2026-08-27.
 
 In-flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652).

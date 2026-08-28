@@ -133,6 +133,8 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 
 `hasInflight` gates: `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`, **`submitted`**. `followed-up` is **not** in-flight.
 
+`submitted` → `followed-up` is bounded (ADR 0002, `applyPrSync`): threads answered + PR quiet ≥ 14 days releases the slot; maintainer activity on a `followed-up` packet re-blocks the tick until answered; ≥ 45 quiet days records a `stale-intent` note (`closedUnmerged` + polite close is a human act). Maintainer silence cannot idle the factory indefinitely.
+
 ### Scorecard halt
 
 Stop a repo when:

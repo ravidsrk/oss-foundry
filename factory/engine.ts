@@ -9,7 +9,9 @@ import type {
   EvidenceManifest,
   FactoryEvent,
   FactoryState,
+  FollowUpEntry,
   PacketStatus,
+  PrMeta,
   ScorecardRow,
   TaskPacket,
 } from "./types.ts";
@@ -679,5 +681,107 @@ export function bindingFromCompare(compared: {
     messages: compared.messages,
     filesChanged: compared.filesChanged,
     diffLines: compared.diffLines,
+  };
+}
+
+/** ADR 0002: answered threads + this many quiet days move `submitted` → `followed-up`, releasing the slot. */
+export const QUIET_RELEASE_DAYS = 14;
+/** ADR 0002: after this many quiet days an abandoned draft gets a closedUnmerged-intent note. A human closes; the engine never does. */
+export const STALE_INTENT_DAYS = 45;
+
+/** Whole days since the PR's last recorded activity. GitHub bumps updated_at on any activity, bots included — conservative: noise resets the clock, it never releases early. */
+export function quietDaysOf(meta: PrMeta, at: string): number {
+  const updated = Date.parse(meta.updatedAt);
+  const nowMs = Date.parse(at);
+  if (!Number.isFinite(updated) || !Number.isFinite(nowMs)) return 0;
+  return Math.max(0, Math.floor((nowMs - updated) / 86_400_000));
+}
+
+function followUpEntry(at: string, kind: FollowUpEntry["kind"], body: string, url?: string): FollowUpEntry {
+  return {
+    id: `fu_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    at,
+    kind,
+    body,
+    url,
+  };
+}
+
+/**
+ * Apply a live PR sync to a submitted/followed-up packet.
+ * merged → terminal + scorecard `merged`. closed unmerged → followed-up + scorecard `closedUnmerged`.
+ * open: answered threads + ≥QUIET_RELEASE_DAYS quiet releases the in-flight slot; new maintainer
+ * activity on a followed-up packet re-blocks the factory until answered; ≥STALE_INTENT_DAYS quiet
+ * records a stale-intent note — closing stays a human act.
+ */
+export function applyPrSync(
+  state: FactoryState,
+  id: string,
+  meta: PrMeta,
+  opts: { threadsAnswered: boolean; at?: string },
+): { state: FactoryState; error?: string } {
+  const packet = state.packets.find((p) => p.id === id);
+  if (!packet) return { state, error: `unknown packet ${id}` };
+  if (packet.status !== "submitted" && packet.status !== "followed-up") {
+    return { state, error: `cannot sync PR from status ${packet.status}` };
+  }
+  const at = opts.at ?? now();
+  const events: FactoryEvent[] = [];
+  let next: TaskPacket = bump(packet, { prMeta: meta });
+  let scorecard = state.scorecard;
+
+  if (meta.merged) {
+    next = bump(next, { status: "merged", station: "terminal" });
+    scorecard = applyPacketToScorecard(scorecard, packet, "merged");
+    events.push(ev("follow-up", `Merged by maintainers — ${meta.url}`, id));
+  } else if (meta.state === "closed") {
+    next = bump(next, { status: "followed-up" });
+    scorecard = applyPacketToScorecard(scorecard, packet, "closed");
+    events.push(ev("follow-up", `Closed unmerged — scorecard closedUnmerged written for ${packet.repoId}`, id));
+  } else {
+    const quiet = quietDaysOf(meta, at);
+    const woke =
+      packet.status === "followed-up" &&
+      packet.prMeta !== undefined &&
+      packet.prMeta.updatedAt !== meta.updatedAt;
+    if (woke) {
+      next = bump(next, { status: "submitted" });
+      events.push(ev("follow-up", `Maintainer activity on ${meta.url} — answer threads before any new tick`, id));
+    } else if (packet.status === "submitted" && opts.threadsAnswered && quiet >= QUIET_RELEASE_DAYS) {
+      next = bump(next, {
+        status: "followed-up",
+        followUps: [
+          ...(next.followUps ?? []),
+          followUpEntry(at, "quiet", `Threads answered; PR quiet ${quiet} days — slot released, follow-up continues.`, meta.url),
+        ],
+      });
+      events.push(ev("follow-up", `Quiet ${quiet}d ≥ ${QUIET_RELEASE_DAYS} — packet followed-up, slot released`, id));
+    }
+    if (quiet >= STALE_INTENT_DAYS) {
+      const already = (next.followUps ?? []).some((f) => f.kind === "note" && f.body.startsWith("stale-intent"));
+      if (!already) {
+        next = bump(next, {
+          followUps: [
+            ...(next.followUps ?? []),
+            followUpEntry(
+              at,
+              "note",
+              `stale-intent: quiet ${quiet} days ≥ ${STALE_INTENT_DAYS}. Record closedUnmerged and close with a polite note — a human decides; the engine does not close PRs.`,
+              meta.url,
+            ),
+          ],
+        });
+        events.push(ev("follow-up", `Stale ${quiet}d — closedUnmerged intent recorded; a human closes`, id));
+      }
+    }
+  }
+
+  return {
+    state: {
+      ...state,
+      packets: state.packets.map((p) => (p.id === id ? next : p)),
+      scorecard,
+      events: [...events.reverse(), ...state.events].slice(0, 80),
+    },
   };
 }

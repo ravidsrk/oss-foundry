@@ -13,6 +13,8 @@ import {
   findCompetingPull,
   hasInflight,
   INFLIGHT_STATUSES,
+  QUIET_RELEASE_DAYS,
+  quietDaysOf,
 } from "./engine.ts";
 import {
   compareCommits,
@@ -55,10 +57,17 @@ function printStatus(state: ReturnType<typeof mustLoad>) {
   if (inflight.length) {
     console.log("in flight:");
     for (const p of inflight) {
-      console.log(`  ${p.id}  ${p.status}  ${p.repoId}#${p.issueNumber}  ${p.prUrl ?? ""}`);
+      const quiet = p.prMeta ? `  quiet=${quietDaysOf(p.prMeta, new Date().toISOString())}d/${QUIET_RELEASE_DAYS}` : "";
+      console.log(`  ${p.id}  ${p.status}  ${p.repoId}#${p.issueNumber}  ${p.prUrl ?? ""}${quiet}`);
     }
   } else {
     console.log("in flight: none — tick is allowed");
+  }
+  const following = state.packets.filter((p) => p.status === "followed-up" && p.prMeta?.state === "open");
+  for (const p of following) {
+    console.log(
+      `  following ${p.repoId}#${p.issueNumber}  quiet=${quietDaysOf(p.prMeta!, new Date().toISOString())}d  (maintainer activity re-blocks the tick)`,
+    );
   }
   console.log("scorecard:");
   for (const row of state.scorecard) {
