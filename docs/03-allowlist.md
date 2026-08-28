@@ -28,12 +28,12 @@ The allowlist is the product. Everything else is a pipeline. Sole source: [`allo
 ### Wave 2 — adjacent, slower
 
 - `mastra-ai/mastra` — HeyCMO’s runtime. Human-required (assignment-first auto-close).
-- `OpenHands/OpenHands` — org renamed from `All-Hands-AI`. HUMAN: markers in the PR template. Docs only.
+- `OpenHands/OpenHands` — org renamed from `All-Hands-AI`. No CONTRIBUTING.md: policy lives in the PR template (reserved `HUMAN:` section, `AGENT:` sections, "evidence that the code runs properly end-to-end. Just running unit tests is NOT sufficient") and issues must be labeled `ready-for-dev` before a PR. Docs only.
 
 ## Denylist (hard)
 
-- `matplotlib/matplotlib` — policy bans agents directly interacting with the project (issues, PRs, comments) and multi-project contribution breadth.
-- `curl/curl` — maintainer request to stop agent noise; bug bounty closed over AI slop 2026-01-31.
+- `matplotlib/matplotlib` — autonomous-agent ban.
+- `curl/curl` — maintainer request to stop agent noise.
 - `pydantic/pydantic` — welcomes AI-assisted PRs; bans mass submission across repos and unassigned PRs. Denied as a poor factory fit, not as anti-AI.
 - `stablyai/orca` — no AI restriction upstream; denied for conflict of interest (it is the runtime Foundry rides). Contribute through orca-fleet.
 

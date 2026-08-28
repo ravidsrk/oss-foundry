@@ -24,9 +24,9 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 2026 made unattended OSS agents radioactive:
 
-- matplotlib banned agents interacting with the project after a slop incident
-- curl maintainers asked agents to stop after a HackerOne flood, then closed the bounty
-- pydantic welcomes AI-assisted PRs but bans factory-pattern mass submission — the pattern we are
+- matplotlib banned autonomous-agent PRs after a slop incident
+- curl maintainers asked agents to stop after a HackerOne flood
+- pydantic welcomes AI-assisted PRs but bans mass submission across repos — the very pattern a contribution factory is
 - drive-by volume without governance is vandalism
 
 Foundry’s posture is the inverse: **contribute less, merge more, never surprise a maintainer.**
@@ -179,8 +179,8 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ### Denylist (hard)
 
-- `matplotlib/matplotlib` — bans agents directly interacting with the project (issues, PRs, comments)
-- `curl/curl` — maintainer asked agents to stop; bounty closed over AI slop
+- `matplotlib/matplotlib` — autonomous-agent ban
+- `curl/curl` — maintainer asked agents to stop
 - `pydantic/pydantic` — welcomes AI-assisted PRs; bans mass submission across repos + unassigned PRs. Denied as poor factory fit, not anti-AI
 - `stablyai/orca` — no AI restriction; denied for conflict of interest (the runtime Foundry rides). Contribute via orca-fleet
 
@@ -248,6 +248,8 @@ Policy parsed for #1476 (operator, before open):
 | reverts | 0 | | | |
 
 Merge-rate halt is **not** tripped (`opened ≥ 3` required).
+
+**Corrections 2026-08-28 (issue #3):** six allowlist facts fixed after live verification — pydantic and stablyai/orca deny reasons rewritten (both were mischaracterized as AI-restrictions), OpenHands org rename, background-agents `welcome` → `unknown` (no written policy), E2B surface re-scoped toward e2b-cookbook, awesome-copilot language. Details in [12-ledger.md](12-ledger.md).
 
 ---
 
