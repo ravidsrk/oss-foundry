@@ -23,14 +23,20 @@ spec publication; keep permanently.
 ## Decision
 
 1. **"Foundry" stays as the working name** for the operator tool. The hard revisit gate is
-   **spec publication** (ADR 0005): the spec and anything marketed externally must not ship under
-   a name that resolves to Microsoft first. Until then, external surfaces say "Foundry
-   (ravidsrk/oss-foundry)" where ambiguity could mislead.
-2. **The scorecard rename ("standing") is deferred to the same gate.** Renaming the state field
-   now would churn stored ledgers, the generated docs, and eight freshly-reviewed units for zero
-   user-facing value today. Instead, every doc that introduces the concept carries a
-   disambiguation line: *Foundry's scorecard is per-repo standing (merge rate, tone, halts) — it
-   is unrelated to OpenSSF Scorecard, the security-health scanner.*
+   **external publication of the spec** (ADR 0005): the spec or anything marketed outside this
+   repository must not ship under a name that resolves to Microsoft first. An in-repo draft may
+   carry the working name with a provisional-naming notice. Effective with this ADR, the
+   disclosure block — the fastest-hardening external surface — qualifies the name as
+   "Foundry (ravidsrk/oss-foundry)" (`factory/neighbor.ts`).
+2. **The scorecard rename ("standing") is deferred to the same gate — explicitly overriding the
+   earlier recommendation** (issue #13 comment, 2026-08-28: "Option 2 + scorecard→standing now
+   ... cheap, internal"). What changed between that comment and this ADR: the field now lives in
+   operator state files (a load-fails-closed rename means a migration), in the generated ledger
+   block, and across code that just cleared review — the "cheap" estimate predates all three. The
+   value today is low relative to that churn, not zero: the live confusion risk is carried by
+   disambiguation lines instead — *Foundry's scorecard is per-repo standing (merge rate, tone,
+   halts), unrelated to OpenSSF Scorecard, the security-health scanner* — placed at the concept's
+   first prominent use, not only at its definition.
 
 ## Consequences
 
