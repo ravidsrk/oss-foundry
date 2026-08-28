@@ -1,35 +1,46 @@
 # Live ledger — 2026-08-28
 
-Operator snapshot. Foundry does not merge. Seed: `factory/seed.ts`. Refresh this file when GitHub changes.
+Operator snapshot. Foundry does not merge. Seed: `factory/seed.ts`. The block between the
+GENERATED markers is emitted by `node --experimental-strip-types factory/cli.ts ledger` — regenerate
+it after any state change instead of hand-editing; the clock cross-checks the committed seed against
+GitHub every tick (`factory/verify-ledger.ts`, divergence fails the run), and `reconcile` absorbs
+merges/closes into local state without ever releasing the in-flight slot.
 
-## Wave 0
+<!-- GENERATED: node --experimental-strip-types factory/cli.ts ledger — do not hand-edit between these markers -->
+### Wave 0
 
-| Packet | Issue | PR | Status |
-|---|---|---|---|
-| CHANGELOG 0.5.0 | orca-fleet#42 | [#70](https://github.com/ravidsrk/orca-fleet/pull/70) | **merged** 2026-08-27T07:04:52Z. Attested **1/2** |
-| README architecture | frontguard#195 | [#196](https://github.com/ravidsrk/frontguard/pull/196) | **merged** 2026-08-28T06:40:44Z by `ravidsrk`. Not a promotion-gate merge |
-| Validator unreadable SKILL.md | orca-fleet#71 | [#72](https://github.com/ravidsrk/orca-fleet/pull/72) | **merged** 2026-08-27T11:30:04Z. Attested **2/2** |
+| packet | issue | PR | status | attested by |
+|---|---|---|---|---|
+| pkt_ravidsrk_orca-fleet_71 | [ravidsrk/orca-fleet#71](https://github.com/ravidsrk/orca-fleet/issues/71) | https://github.com/ravidsrk/orca-fleet/pull/72 | merged | operator |
+| pkt_ravidsrk_frontguard_195 | [ravidsrk/frontguard#195](https://github.com/ravidsrk/frontguard/issues/195) | https://github.com/ravidsrk/frontguard/pull/196 | merged | operator |
+| pkt_ravidsrk_orca-fleet_42 | [ravidsrk/orca-fleet#42](https://github.com/ravidsrk/orca-fleet/issues/42) | https://github.com/ravidsrk/orca-fleet/pull/70 | merged | operator |
 
-Wave 1 promotion gate (two attested Wave 0 merges on orca-fleet): **passed**.
+### Wave 1
 
-## Wave 1 — in flight (`submitted`)
+| packet | issue | PR | status | attested by |
+|---|---|---|---|---|
+| pkt_ColeMurray_background-agents_1476 | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | https://github.com/ColeMurray/background-agents/pull/1652 | submitted | operator |
 
-| Packet | Issue | PR | Status |
-|---|---|---|---|
-| Right sidebar toggle icon | [background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) | **open, ready-for-review** (not draft), blocked mergeability, +88/−1, 3 files. Head `48c2242683705b00503d3436575bf3c28b1b0c9b` |
+### Wave 2
 
-Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) is **closed** (still draft, not merged) as of 2026-08-28T10:14:36Z.
+| packet | issue | PR | status | attested by |
+|---|---|---|---|---|
+| pkt_OpenHands_OpenHands_16907 | [OpenHands/OpenHands#16907](https://github.com/OpenHands/OpenHands/issues/16907) | — | parked | — |
 
-Do **not** open the compare URL again. The upstream PR exists. Follow up. Do not merge. Do not tick.
+Foundry-attested Wave 0 merges: 3 (promotion gate: 2).
 
-## Scorecard (this control plane)
+### Scorecard
 
-- bans: 0
-- reverts: 0
-- orca-fleet: 2 opened, 2 merged, warm
-- frontguard: 1 opened, 1 merged, warm
-- background-agents: 1 opened, 0 merged, neutral
-- halt: none
+- ravidsrk/orca-fleet: opened=2 merged=2 closedUnmerged=0 noReview=0 tone=warm
+- ravidsrk/frontguard: opened=1 merged=1 closedUnmerged=0 noReview=0 tone=warm
+- ColeMurray/background-agents: opened=1 merged=0 closedUnmerged=0 noReview=0 tone=neutral
+- bans: 0  mergedTotal: 3
+<!-- /GENERATED -->
+
+Promotion gate (two attested Wave 0 merges on orca-fleet): **passed** (#70, #72).
+frontguard#196 was merged by the operator — recorded, not a promotion-gate merge, not a pattern.
+Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) is **closed** (draft, unmerged).
+Do **not** open the compare URL again. The upstream PR exists. Follow up. Do not merge.
 
 ## Corrections — 2026-08-28 (issue #3)
 
