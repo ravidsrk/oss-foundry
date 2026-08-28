@@ -55,6 +55,8 @@ export interface AllowlistedRepo {
   maxFiles: number;
   maxDiffLines: number;
   sandbox: SandboxKind;
+  /** Commit-disclosure convention the target follows: kernel-style Assisted-by, ASF-style Generated-by, or PR-body prose only (default). */
+  disclosureTrailer: "assisted-by" | "generated-by" | "pr-body-only";
   contributingUrl?: string;
   agentsMdUrl?: string;
   preferredLabels: string[];

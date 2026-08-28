@@ -98,6 +98,14 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
   if (sandbox !== "host" && sandbox !== "e2b" && sandbox !== "daytona") {
     throw new Error(`allowlist.yaml: ${id} bad sandbox`);
   }
+  const disclosureTrailer = String(r.disclosureTrailer ?? "pr-body-only");
+  if (
+    disclosureTrailer !== "assisted-by" &&
+    disclosureTrailer !== "generated-by" &&
+    disclosureTrailer !== "pr-body-only"
+  ) {
+    throw new Error(`allowlist.yaml: ${id} bad disclosureTrailer`);
+  }
   const maxFiles = Number(r.maxFiles);
   const maxDiffLines = Number(r.maxDiffLines);
   if (!Number.isFinite(maxFiles) || !Number.isFinite(maxDiffLines)) {
@@ -128,6 +136,7 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
     maxFiles,
     maxDiffLines,
     sandbox,
+    disclosureTrailer,
     preferredLabels,
     firstIssues,
   };

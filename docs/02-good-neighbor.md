@@ -31,6 +31,15 @@ A human reviewed the packet, the diff, and the tests before this draft was opene
 The factory does not merge. Maintainers own the merge.
 ```
 
+## Commit trailers
+
+Disclosure also speaks the target's dialect (`disclosureTrailer` in the allowlist):
+kernel-style `Assisted-by: Foundry`, ASF-style `Generated-by: Foundry`, or PR-body prose only
+(default). Two lines are never emitted, and the evidence gate refuses commit ranges that carry
+them: `Signed-off-by` (Foundry never certifies the DCO — a human signs outside the factory or the
+packet parks `needs-human`) and `Co-authored-by` naming an agent (Git reads that trailer as a
+person). The PR body names the trailer convention in use so maintainers see both halves.
+
 ## Lighting
 
 Every packet is `lit`: a reviewer who did not implement it reads the diff. `dark-eligible` is not representable in Foundry — the state loader refuses it at load, and the type no longer carries it. Upstream is not our default branch.
