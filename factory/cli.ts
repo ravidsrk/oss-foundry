@@ -31,7 +31,7 @@ import type { LiveIssue } from "./github-scout.ts";
 import { execFile } from "node:child_process";
 import { packetDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
-import { renderPrBody } from "./packet.ts";
+import { renderEvidencePage, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
@@ -173,6 +173,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   sync <packetId> [--threads-answered]
   reconcile
   ledger
+  evidence-page <packetId>   (maintainer-facing audit page, markdown to stdout)
 
 State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry never merges.
 Disclosure:
@@ -494,6 +495,17 @@ async function main() {
     saveFactoryState(STATE_FILE, next);
     for (const d of doctrine) console.error(`DIVERGENCE ${d}`);
     console.log(`reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length}`);
+    return;
+  }
+
+  if (cmd === "evidence-page") {
+    const id = rest[0];
+    const packet = state.packets.find((p) => p.id === id);
+    if (!packet) {
+      console.error(`unknown packet ${id}`);
+      process.exit(1);
+    }
+    console.log(renderEvidencePage(packet));
     return;
   }
 
