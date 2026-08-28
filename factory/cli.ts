@@ -9,6 +9,7 @@ import {
   applyReject,
   applyTick,
   bindingFromCompare,
+  classifyCompetition,
   findCompetingPull,
   hasInflight,
   INFLIGHT_STATUSES,
@@ -17,6 +18,7 @@ import {
   compareCommits,
   draftPullPayload,
   fetchRepoFile,
+  listCrossReferencingOpenPulls,
   listOpenPulls,
   parsePrUrl,
   syncGithubPr,
@@ -68,6 +70,7 @@ function printStatus(state: ReturnType<typeof mustLoad>) {
 async function tickWithGithub(state: ReturnType<typeof mustLoad>) {
   if (hasInflight(state.packets)) return applyTick(state);
   const competingKeys: string[] = [];
+  const adjacentKeys: string[] = [];
   const live: LiveIssue[] = [];
   for (const repo of ALLOWLIST) {
     if (repo.firstIssues.length === 0) continue;
@@ -82,8 +85,30 @@ async function tickWithGithub(state: ReturnType<typeof mustLoad>) {
       (await fetchRepoFile(repo.id, ".github/CONTRIBUTING.md"));
     for (const issue of repo.firstIssues) {
       const key = `${repo.id}#${issue.number}`;
-      if (findCompetingPull(pulls.pulls, issue.number, issue.url, repo.id)) {
+      // Cheap path first: a closing-keyword hit in the already-fetched pulls settles "competing"
+      // without spending a timeline call per issue.
+      const keywordHit = findCompetingPull(pulls.pulls, issue.number, issue.url, repo.id);
+      const crossRefs = keywordHit
+        ? { ok: true as const, urls: [] as string[] }
+        : await listCrossReferencingOpenPulls(repo.id, issue.number);
+      if (!crossRefs.ok) {
+        console.error(crossRefs.error);
+        process.exit(1);
+      }
+      const verdict = classifyCompetition(
+        { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
+        issue.number,
+        issue.url,
+        repo.id,
+      );
+      if (verdict.kind === "competing") {
+        console.error(`stand down ${key}: competing PR ${verdict.url} (${verdict.why})`);
         competingKeys.push(key);
+        continue;
+      }
+      if (verdict.kind === "adjacent") {
+        console.error(`hold ${key}: adjacent PR ${verdict.url} (${verdict.why}) — human triage before scouting`);
+        adjacentKeys.push(key);
         continue;
       }
       live.push({
@@ -99,7 +124,7 @@ async function tickWithGithub(state: ReturnType<typeof mustLoad>) {
       });
     }
   }
-  return applyTick(state, live, competingKeys);
+  return applyTick(state, live, competingKeys, adjacentKeys);
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -149,6 +174,43 @@ async function main() {
     if (!id) {
       console.error("approve requires a packet id");
       process.exit(1);
+    }
+    const packetForFreeze = state.packets.find((p) => p.id === id);
+    if (packetForFreeze && (packetForFreeze.status === "gated" || packetForFreeze.status === "frozen")) {
+      const pulls = await listOpenPulls(packetForFreeze.repoId);
+      if (!pulls.ok) {
+        console.error(pulls.error);
+        process.exit(1);
+      }
+      const crossRefs = findCompetingPull(
+        pulls.pulls,
+        packetForFreeze.issueNumber,
+        packetForFreeze.issueUrl,
+        packetForFreeze.repoId,
+      )
+        ? { ok: true as const, urls: [] as string[] }
+        : await listCrossReferencingOpenPulls(packetForFreeze.repoId, packetForFreeze.issueNumber);
+      if (!crossRefs.ok) {
+        console.error(crossRefs.error);
+        process.exit(1);
+      }
+      const verdict = classifyCompetition(
+        { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
+        packetForFreeze.issueNumber,
+        packetForFreeze.issueUrl,
+        packetForFreeze.repoId,
+      );
+      if (verdict.kind === "competing") {
+        console.error(
+          `stand down: competing PR ${verdict.url} (${verdict.why}) appeared on ${packetForFreeze.repoId}#${packetForFreeze.issueNumber} since gating. Reject or park — do not approve.`,
+        );
+        process.exit(1);
+      }
+      if (verdict.kind === "adjacent") {
+        console.error(
+          `taste gate: adjacent PR ${verdict.url} (${verdict.why}) mentions ${packetForFreeze.repoId}#${packetForFreeze.issueNumber}. You are the freeze — approve only if it does not cover the issue.`,
+        );
+      }
     }
     const result = applyApprove(state, id, flag(rest, "--note") ?? "");
     if (result.error) {
@@ -301,6 +363,35 @@ async function main() {
     if (!synced.ok) {
       console.error(synced.error);
       process.exit(1);
+    }
+    const packetForDraft = state.packets.find((p) => p.id === id);
+    if (packetForDraft) {
+      const parsed = parsePrUrl(url)!;
+      const pulls = await listOpenPulls(packetForDraft.repoId);
+      const crossRefs = await listCrossReferencingOpenPulls(packetForDraft.repoId, packetForDraft.issueNumber);
+      if (!pulls.ok || !crossRefs.ok) {
+        console.error(!pulls.ok ? pulls.error : !crossRefs.ok ? crossRefs.error : "");
+        process.exit(1);
+      }
+      const others = pulls.pulls.filter((p) => p.number !== parsed.number);
+      const otherRefs = crossRefs.urls.filter((u) => parsePrUrl(u)?.number !== parsed.number);
+      const verdict = classifyCompetition(
+        { pulls: others, crossReferencedPullUrls: otherRefs },
+        packetForDraft.issueNumber,
+        packetForDraft.issueUrl,
+        packetForDraft.repoId,
+      );
+      if (verdict.kind === "competing") {
+        console.error(
+          `stand down: competing PR ${verdict.url} (${verdict.why}) appeared on ${packetForDraft.repoId}#${packetForDraft.issueNumber}. Assist or park — do not attach.`,
+        );
+        process.exit(1);
+      }
+      if (verdict.kind === "adjacent") {
+        console.error(
+          `taste gate: adjacent PR ${verdict.url} (${verdict.why}) mentions ${packetForDraft.repoId}#${packetForDraft.issueNumber}. Proceeding — a human is at the keyboard; log the call in the ledger.`,
+        );
+      }
     }
     const result = applyAttachDraft(state, id, url, {
       draft: synced.meta.draft,
