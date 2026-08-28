@@ -873,3 +873,52 @@ test("quiet-day thresholds hold at their exact boundaries", () => {
   const scorecardRow = at45.state.scorecard.find((r) => r.repoId === submitted!.repoId);
   assert.equal(scorecardRow?.closedUnmerged, 0);
 });
+
+test("renderPrBody speaks to maintainers: no internal jargon, one closing reference", () => {
+  const packet = buildPacket({
+    repoId: "ravidsrk/orca-fleet",
+    issueNumber: 71,
+    issueTitle: "[P2] Validator: one unreadable SKILL.md must not abort the catalog",
+    issueUrl: "https://github.com/ravidsrk/orca-fleet/issues/71",
+    labels: ["documentation"],
+  });
+  const body = renderPrBody(packet);
+  assert.equal(/Policy:/.test(body), false);
+  assert.equal(/Scout score/.test(body), false);
+  assert.equal(/[Ll]ighting/.test(body), false);
+  assert.equal(body.includes(DISCLOSURE), true);
+  const closings = body.match(/close[sd]?\s+#\d+|fix(?:e[sd])?\s+#\d+|resolve[sd]?\s+#\d+/gi) ?? [];
+  assert.equal(closings.length, 1);
+  assert.equal(body.includes(packet.issueUrl), false);
+});
+
+test("evidence refuses agent sign-offs and agent co-author trailers in the commit range", () => {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  state = applyApprove(state, id, "attest").state;
+  state = applyAdvance(state, id).state;
+  state = applyAdvance(state, id).state;
+  const packet = state.packets[0];
+  const evidence = {
+    baseSha: BASE,
+    headSha: HEAD,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert" as const,
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  };
+  const bad = applyAttachEvidence(state, id, evidence, bindingFor(packet, {
+    messages: [`fix: validator\n\nFixes #${packet.issueNumber}\n\nSigned-off-by: Foundry <bot@example.com>`],
+  }));
+  assert.match(bad.error ?? "", /signed-off-by/i);
+
+  const coauthored = applyAttachEvidence(state, id, evidence, bindingFor(packet, {
+    messages: [`fix: validator\n\nFixes #${packet.issueNumber}\n\nCo-authored-by: Claude <noreply@anthropic.com>`],
+  }));
+  assert.match(coauthored.error ?? "", /co-authored-by/i);
+
+  const clean = applyAttachEvidence(state, id, evidence, bindingFor(packet));
+  assert.equal(clean.error, undefined);
+});

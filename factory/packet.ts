@@ -1,5 +1,5 @@
 import { repoById } from "./allowlist.ts";
-import { ABORT_DEFAULT, DISCLOSURE, NON_GOALS_DEFAULT } from "./neighbor.ts";
+import { ABORT_DEFAULT, commitTrailerLine, DISCLOSURE, NON_GOALS_DEFAULT } from "./neighbor.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { scoreIssue } from "./scout.ts";
 import type { PacketClass, TaskPacket } from "./types.ts";
@@ -73,31 +73,32 @@ export function buildPacket(input: {
   };
 }
 
+/** Written for the maintainer, not the factory: what changed, how it was verified, who prepared it. Internal vocabulary (policy codes, scout scores, lighting) stays in the packet record. */
 export function renderPrBody(packet: TaskPacket): string {
+  const repo = repoById(packet.repoId);
+  const scope = packet.evidence
+    ? `- Scope: ${packet.evidence.filesChanged} files, ${packet.evidence.diffLines} changed lines (caps ${repo?.maxFiles ?? "?"} / ${repo?.maxDiffLines ?? "?"}).`
+    : `- Scope caps: ${repo?.maxFiles ?? "?"} files, ${repo?.maxDiffLines ?? "?"} changed lines.`;
+  const trailer = commitTrailerLine(repo?.disclosureTrailer ?? "pr-body-only");
+  const trailerNote = trailer ? `\nCommits carry \`${trailer}\`.` : "";
   return `## Summary
-
-Fixes ${packet.issueUrl}
 
 ${packet.objective}
 
-## Acceptance
+## Verification
 
-${packet.acceptance.map((a) => `- [ ] ${a}`).join("\n")}
+- Test command: \`${repo?.testCommand ?? packet.evidence?.testCommand ?? ""}\`
+- A failing test existed before the change; reverting the change makes it fail again (negative control).
+${scope}
+- An independent reviewer read the diff and tests before this draft was opened.
 
 ## Non-goals
 
 ${packet.nonGoals.map((a) => `- ${a}`).join("\n")}
 
-## Evidence
-
-- Policy: \`${packet.policy.code}\`
-- Scout score: ${packet.scout.total}
-- Lighting: ${packet.lighting} (independent review required)
-- Tests: failing-first + revert negative control
-
 ## Disclosure
 
-${DISCLOSURE}
+${DISCLOSURE}${trailerNote}
 
 Closes #${packet.issueNumber}
 `;
