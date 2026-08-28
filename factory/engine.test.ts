@@ -27,7 +27,7 @@ import { draftPullPayload } from "./github-pr.ts";
 import { packetDivergences } from "./ledger-check.ts";
 import { witnessEvidence } from "./witness.ts";
 import { DISCLOSURE } from "./neighbor.ts";
-import { buildPacket, renderPrBody } from "./packet.ts";
+import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { runSandboxDry } from "./sandbox.ts";
 import { emptyScorecard, health } from "./scorecard.ts";
@@ -1154,4 +1154,16 @@ test("the named awesome-copilot first issue is scoutable, not invented", () => {
   assert.equal(ticked.packet?.issueNumber, 2684);
   assert.equal(ticked.packet?.policy.code, "ALLOW");
   assert.equal(ticked.packet?.policy.record?.stance, "welcome");
+});
+
+test("the evidence page binds every claim to a checkable source", () => {
+  const seed = seedState();
+  const merged = seed.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_71")!;
+  const page = renderEvidencePage(merged);
+  assert.match(page, /Attested by \*\*operator\*\*/);
+  assert.match(page, /Test command/);
+  assert.match(page, new RegExp(merged.evidence!.baseSha.slice(0, 12)));
+  assert.match(page, /attested, not witnessed/);
+  assert.equal(page.includes(DISCLOSURE), true);
+  assert.match(page, /you own the merge/);
 });

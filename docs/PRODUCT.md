@@ -362,6 +362,7 @@ Terms are defined operationally in [08-operations.md](08-operations.md) — deno
 | [adr/0002](adr/0002-draft-only.md) | Draft only, never merge |
 | [adr/0003](adr/0003-sandbox-untrusted.md) | Untrusted clones in E2B |
 | [adr/0004](adr/0004-naming.md) | Naming: Foundry + scorecard collisions, revisit at spec publication |
+| [adr/0005](adr/0005-positioning.md) | Positioning: the re-admission layer; SPEC.md v0 |
 
 ---
 

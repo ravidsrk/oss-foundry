@@ -8,6 +8,12 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 2026 made unattended OSS agents radioactive. curl’s HackerOne shutdown, matplotlib’s agent-interaction ban, and OpenClaw-style maintainer attacks all taught the same lesson: volume without governance is vandalism. (Pydantic, often cited alongside these, actually welcomes AI-assisted PRs — what it bans is factory-pattern mass submission; see the denylist reason.)
 
+Foundry's durable claim is **re-admission**: not "help agents contribute more," but the process a
+burned project could require before saying yes to agents again — parsed policy with quoted
+provenance, human attestation with identity, witnessed evidence, draft-only contact with
+disclosure, bounded follow-up, and halts that fire the hour a maintainer asks. The protocol is
+published as [SPEC.md](SPEC.md) (ADR 0005); the maintainer-facing artifact is the evidence page.
+
 Foundry is the opposite posture:
 
 - Contribute **less**, merge **more**.

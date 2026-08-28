@@ -103,3 +103,48 @@ ${DISCLOSURE}${trailerNote}
 Closes #${packet.issueNumber}
 `;
 }
+
+/** The artifact a maintainer consumes (ADR 0005): every claim on one page, each bound to a source they can check. */
+export function renderEvidencePage(packet: TaskPacket): string {
+  const attest = packet.humanAttest;
+  const ev = packet.evidence;
+  const w = ev?.witness;
+  const record = packet.policy.record;
+  const lines = [
+    `# Evidence — ${packet.repoId}#${packet.issueNumber}`,
+    "",
+    `**Issue:** [${packet.issueTitle}](${packet.issueUrl})`,
+    `**Pull request:** ${packet.prUrl ?? "not opened"}  ·  **status:** ${packet.status}`,
+    "",
+    "## Who approved this",
+    attest
+      ? `Attested by **${attest.by}** at ${attest.at}: ${attest.note}`
+      : "No human attestation on record — this packet must not reach a maintainer.",
+    "",
+    "## What your policy says",
+    record
+      ? `From \`${record.source}\` (fetched ${record.fetchedAt}, stance: ${record.stance}):\n\n> ${record.quote}`
+      : "No committed policy record; the gate relied on live-fetched docs at evaluation time.",
+    "",
+    "## What ran",
+    ev
+      ? [
+          `- Range: \`${ev.baseSha.slice(0, 12)}..${ev.headSha.slice(0, 12)}\` — ${ev.filesChanged} files, ${ev.diffLines} changed lines`,
+          `- Test command: \`${ev.testCommand}\``,
+          w
+            ? `- Witnessed by the ${w.provider} sandbox at ${w.ranAt}: tests exit ${w.testExit} at head; **exit ${w.revertExit} with the change reverted** (the proof binds). Log hashes sha256 ${w.testLogSha.slice(0, 12)}… / ${w.revertLogSha.slice(0, 12)}…`
+            : `- Negative control: ${ev.negativeControl} (recorded before machine witnessing shipped — attested, not witnessed)`,
+        ].join("\n")
+      : "No evidence manifest — this packet must not reach a maintainer.",
+    "",
+    "## Standing commitments",
+    "- Opened as a draft; you own the merge — the factory has no merge capability.",
+    "- One packet in flight; follow-up until merged, closed, or quiet.",
+    "- Say stop and the repository is halted the same hour.",
+    "",
+    "---",
+    DISCLOSURE,
+    "",
+  ];
+  return lines.join("\n");
+}
