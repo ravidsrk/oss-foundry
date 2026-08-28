@@ -55,7 +55,6 @@ Live verification found six factual errors in the allowlist; all corrected:
 
 ## Next
 
-1. Follow #1652 until quiet / merged-by-maintainer / closed.
-2. Prefer converting #1652 to **draft** until tests on that head are green.
-3. Paste verbatim disclosure if the body is edited (`factory/neighbor.ts`).
-4. Idle. One packet in flight.
+1. Follow #1652 (now **draft**, disclosure verbatim — healed 2026-08-28) until quiet / merged-by-maintainer / closed.
+2. `sync pkt_ColeMurray_background-agents_1476 --threads-answered` once ≥14 quiet days accrue — the slot releases itself.
+3. Idle. One packet in flight.

@@ -211,7 +211,7 @@ export function seedState(): FactoryState {
     prMeta: {
       url: "https://github.com/ColeMurray/background-agents/pull/1652",
       title: "feat: differentiate the right sidebar toggle icon by state",
-      draft: false,
+      draft: true,
       state: "open",
       merged: false,
       mergeable: "blocked",
@@ -219,8 +219,8 @@ export function seedState(): FactoryState {
       reviewComments: 0,
       issueComments: 1,
       headSha: "48c2242683705b00503d3436575bf3c28b1b0c9b",
-      updatedAt: "2026-08-28T10:19:46.000Z",
-      syncedAt: "2026-08-28T10:30:00.000Z",
+      updatedAt: "2026-08-28T16:16:39Z",
+      syncedAt: "2026-08-28T16:16:39Z",
     },
     followUps: [
       {
@@ -228,6 +228,20 @@ export function seedState(): FactoryState {
         at: "2026-08-28T10:14:03.000Z",
         kind: "note",
         body: "Upstream PR opened ready-for-review (doctrine miss: should have been draft). Fork rehearsal ravidsrk/background-agents#1 closed. Follow up; do not merge; do not tick.",
+        url: "https://github.com/ColeMurray/background-agents/pull/1652",
+      },
+      {
+        id: "fu_pr1652_bot_reconcile",
+        at: "2026-08-28T10:30:00.000Z",
+        kind: "bot-reconcile",
+        body: "CodeRabbit reviewed head 48c2242: no actionable comments, merge risk minimal, one docstring-coverage warning. Not a human review; noReview semantics unaffected.",
+        url: "https://github.com/ColeMurray/background-agents/pull/1652",
+      },
+      {
+        id: "fu_pr1652_drafted",
+        at: "2026-08-28T16:16:39Z",
+        kind: "note",
+        body: "Doctrine healed: draft=true live-verified at head 48c2242; verbatim DISCLOSURE confirmed in the body. GitHub's timeline attributes three draft toggles to the operator account: convert_to_draft 13:47Z, ready_for_review 14:16Z, convert_to_draft 16:16Z (final). A parallel session recorded the first conversion as done while the PR sat ready again by 14:16 — Foundry's own attestation trail has no entry for those two events; this record is corrected against the timeline. Slot stays submitted; it releases via the quiet-day rule (sync --threads-answered after >=14 quiet days).",
         url: "https://github.com/ColeMurray/background-agents/pull/1652",
       },
     ],
@@ -241,7 +255,8 @@ export function seedState(): FactoryState {
       filesChanged: 3,
       diffLines: 89,
       notes: [
-        "Opened ready, not draft. Shortened disclosure on GitHub vs renderPrBody.",
+        "Opened ready, not draft (historical miss; drafted 2026-08-28, live-verified).",
+        "Disclosure verbatim on the live body as of 2026-08-28.",
         "Fork PR #1 closed unmerged.",
       ],
     },
