@@ -8,7 +8,7 @@ Operator takeover document. This is the whole product: why it exists, how it run
 | Control plane | `factory/` TypeScript + `allowlist.yaml`. Operator loop: `node --experimental-strip-types factory/cli.ts` |
 | Data plane | [ravidsrk/orca-fleet](https://github.com/ravidsrk/orca-fleet) `oss-contribute` |
 | License | MIT |
-| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **not draft**). |
+| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **draft**, disclosure verbatim). |
 
 ---
 
@@ -230,7 +230,7 @@ Promotion rule: Wave 1 may tick only after **two Foundry-attested Wave 0 merges*
 
 | Packet | Issue | PRs | Status |
 |---|---|---|---|
-| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open, ready-for-review** (not draft), `mergeable_state=blocked`, +88/−1 across 3 files, head `48c2242` | **`submitted`** — in-flight. Do not tick another packet |
+| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open, draft** (converted 2026-08-28, live-verified), `mergeable_state=blocked`, +88/−1 across 3 files, head `48c2242` | **`submitted`** — in-flight until the quiet-day rule releases it. Do not tick another packet |
 
 Policy parsed for #1476 (operator, before open):
 
@@ -239,7 +239,7 @@ Policy parsed for #1476 (operator, before open):
 - Labels: `good first issue`, `help wanted`, `enhancement`
 - No open competing PR on #1476 at open time
 
-#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure. That is a doctrine miss. Operator next action is follow-up (mark draft if still ready; paste verbatim disclosure if editing the body; do not merge).
+#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure — a doctrine miss, healed 2026-08-28: converted to draft (live-verified) and the verbatim disclosure confirmed in the body. The slot releases via the quiet-day rule; issue #5 machine-enforces the moment of contact so this class of miss cannot recur.
 
 ### Scorecard (Foundry packets in this control plane)
 
