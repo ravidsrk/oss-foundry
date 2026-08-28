@@ -815,14 +815,15 @@ export function commitTrailerViolation(
   if (/^\s*signed-off-by:/im.test(blob)) {
     return "commit range carries a Signed-off-by trailer — Foundry never signs the DCO. A human signs outside the factory, or the packet parks needs-human.";
   }
-  const co = blob.match(/^\s*co-authored-by:(.*)$/im);
-  if (co && AGENT_NAME_RE.test(co[1] ?? "")) {
-    return "commit range credits an agent via Co-authored-by — Git reads that trailer as a person. Use the repo's disclosure trailer instead.";
+  for (const co of blob.matchAll(/^\s*co-authored-by:(.*)$/gim)) {
+    if (AGENT_NAME_RE.test(co[1] ?? "")) {
+      return "commit range credits an agent via Co-authored-by — Git reads that trailer as a person. Use the repo's disclosure trailer instead.";
+    }
   }
   const required = commitTrailerLine(convention);
   if (required) {
-    const key = required.split(":")[0];
-    const re = new RegExp(`^\\s*${key}:`, "im");
+    const [key, value] = required.split(": ");
+    const re = new RegExp(`^\\s*${key}:\\s*${value}\\b`, "im");
     if (!re.test(blob)) {
       return `commit range is missing the repo's disclosure trailer (${required}).`;
     }

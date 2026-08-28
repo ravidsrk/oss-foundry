@@ -13,6 +13,7 @@ import {
   bindingFromCompare,
   branchMentionsIssue,
   classifyCompetition,
+  commitTrailerViolation,
   evidenceIsReady,
   findCompetingPull,
   hasInflight,
@@ -921,4 +922,20 @@ test("evidence refuses agent sign-offs and agent co-author trailers in the commi
 
   const clean = applyAttachEvidence(state, id, evidence, bindingFor(packet));
   assert.equal(clean.error, undefined);
+});
+
+test("commitTrailerViolation inspects every co-author line and the configured convention", () => {
+  const humanFirstAgentSecond = [
+    "fix: x\n\nCo-authored-by: Jane Doe <jane@example.com>\nCo-authored-by: Claude <noreply@anthropic.com>",
+  ];
+  assert.match(commitTrailerViolation(humanFirstAgentSecond, "pr-body-only") ?? "", /co-authored-by/i);
+
+  const humansOnly = ["fix: x\n\nCo-authored-by: Jane <jane@example.com>\nCo-authored-by: Sam <sam@example.com>"];
+  assert.equal(commitTrailerViolation(humansOnly, "pr-body-only"), undefined);
+
+  assert.match(commitTrailerViolation(["fix: y"], "assisted-by") ?? "", /missing/i);
+  assert.equal(commitTrailerViolation(["fix: y\n\nAssisted-by: Foundry"], "assisted-by"), undefined);
+  assert.match(commitTrailerViolation(["fix: y\n\nAssisted-by: SomeOtherTool"], "assisted-by") ?? "", /missing/i);
+  assert.equal(commitTrailerViolation(["docs: z\n\nGenerated-by: Foundry"], "generated-by"), undefined);
+  assert.match(commitTrailerViolation(["docs: z\n\nAssisted-by: Foundry"], "generated-by") ?? "", /missing/i);
 });
