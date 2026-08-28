@@ -20,13 +20,23 @@ Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in fli
 
 A repo with scorecard health `stop` cannot be queued or approved. To halt everything, reject in-flight packets and stop pressing tick. The GHA default is dry (`FOUNDRY_LIVE` unset).
 
-## Metrics that matter
+## Metrics that matter — operational definitions
 
-- Merge rate (merged / opened drafts)
-- Review comments per PR
-- Time-to-quiet (open → last comment)
-- Reverts
-- Bans (must stay 0)
+Silence is the modal outcome for external agent PRs, so every KPI names its denominator.
+
+- **Merge rate** = merged / opened drafts that reached a terminal state (merged, closed-unmerged,
+  or stale-closed under the quiet-day rule). Stale-closed counts **against** the rate. A draft still
+  open and in follow-up is not yet in the denominator.
+- **Review-comment average** = mean **human, non-bot** review comments, computed **only over PRs
+  with ≥ 1 human review comment**. The `noReview` counter is reported beside it — opened drafts that
+  reached a terminal state with **zero** human review activity (a still-open silent draft is not yet
+  counted; the silent share is `noReview / terminal outcomes`, the same denominator as merge rate).
+  A low average from silence is not a low average from clean work.
+- **Time-to-quiet** = open → last human activity (comment, review, or push).
+- **Revert** = an explicit `git revert` of our merge commit, or a maintainer-stated rollback naming
+  the PR, within 30 days of merge. Post-merge edits/refactors of our code are **rework**, tracked as
+  informational notes, never counted as reverts.
+- **Bans** (must stay 0) = scorecard tone `banned`: a maintainer asked the factory to stop.
 
 PR volume is a vanity metric and is not shown as a success KPI.
 

@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 
@@ -109,6 +110,29 @@ test("v6 ledger missing later-required fields is migrated, not stranded", () => 
   assert.equal(loaded.state.scorecard[0].lastTouch, "—");
 });
 
+test("scorecard rows carry a noReview counter from birth", () => {
+  for (const row of emptyScorecard()) {
+    assert.equal(row.noReview, 0);
+  }
+});
+
+test("stored scorecard without noReview is migrated to 0, not stranded", () => {
+  const seed = seedState();
+  const scorecard = seed.scorecard.map((r) => {
+    const row = { ...r } as Record<string, unknown>;
+    delete row.noReview;
+    return row;
+  });
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "no-noreview.json");
+  writeFileSync(path, JSON.stringify({ ...seed, scorecard }));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true);
+  if (!loaded.ok) return;
+  for (const row of loaded.state.scorecard) {
+    assert.equal(row.noReview, 0);
+  }
+});
+
 test("valid state round-trips without becoming seed", () => {
   const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "ok.json");
   const seed = seedState();
@@ -119,4 +143,15 @@ test("valid state round-trips without becoming seed", () => {
   if (!loaded.ok) return;
   assert.equal(loaded.source, "file");
   assert.equal(loaded.state.ticksRun, 99);
+});
+
+test("merge rate counts terminal outcomes; silence alone cannot trip the halt", () => {
+  const silent = { ...emptyScorecard()[0], opened: 3 };
+  assert.equal(mergeRate(silent), 0);
+  assert.notEqual(health(silent), "stop");
+  const allClosed = { ...silent, closedUnmerged: 3 };
+  assert.equal(health(allClosed), "stop");
+  const mixed = { ...silent, merged: 2, closedUnmerged: 1 };
+  assert.ok(mergeRate(mixed) > 0.6);
+  assert.equal(health(mixed), "good");
 });

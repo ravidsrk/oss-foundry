@@ -8,20 +8,33 @@ export function emptyScorecard(): ScorecardRow[] {
     merged: 0,
     closedUnmerged: 0,
     reviewCommentsAvg: 0,
+    noReview: 0,
     reverts: 0,
     maintainerTone: "neutral" as const,
     lastTouch: "—",
   }));
 }
 
+/** Drafts that reached a terminal outcome. Merge rate is computed over these, per docs/08-operations.md. */
+export function terminalCount(row: ScorecardRow): number {
+  return row.merged + row.closedUnmerged;
+}
+
 export function mergeRate(row: ScorecardRow): number {
-  if (row.opened === 0) return 0;
-  return row.merged / row.opened;
+  const terminal = terminalCount(row);
+  if (terminal === 0) return 0;
+  return row.merged / terminal;
 }
 
 export function health(row: ScorecardRow): "good" | "watch" | "stop" {
   if (row.maintainerTone === "banned" || row.reverts > 0) return "stop";
-  if (row.opened >= CAPS.halt_after_opens && mergeRate(row) < CAPS.halt_merge_rate) return "stop";
+  if (
+    row.opened >= CAPS.halt_after_opens &&
+    terminalCount(row) > 0 &&
+    mergeRate(row) < CAPS.halt_merge_rate
+  ) {
+    return "stop";
+  }
   if (row.maintainerTone === "cold") return "watch";
   if (row.opened >= 2 && mergeRate(row) < 0.6) return "watch";
   return "good";
@@ -46,13 +59,17 @@ export function applyPacketToScorecard(
 export function factoryKpis(rows: ScorecardRow[]) {
   const opened = rows.reduce((a, r) => a + r.opened, 0);
   const merged = rows.reduce((a, r) => a + r.merged, 0);
+  const terminal = rows.reduce((a, r) => a + terminalCount(r), 0);
   const reverts = rows.reduce((a, r) => a + r.reverts, 0);
+  const noReview = rows.reduce((a, r) => a + r.noReview, 0);
   const banned = rows.filter((r) => r.maintainerTone === "banned").length;
   return {
     opened,
     merged,
-    mergeRate: opened === 0 ? 0 : merged / opened,
+    terminal,
+    mergeRate: terminal === 0 ? 0 : merged / terminal,
     reverts,
+    noReview,
     banned,
   };
 }

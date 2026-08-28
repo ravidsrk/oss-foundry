@@ -49,4 +49,4 @@ A denylist hit is `DENY_FORBIDDEN`. There is no override in the operator CLI.
 
 ## Removing a repo
 
-Any of: maintainer ask, one revert of our patch, merge rate < 40% after 3 opens, tone `cold` for two cycles, or a ban. Removal is immediate and logged on the scorecard.
+Any of: maintainer ask, one revert of our patch, merge rate < 40% after 3 opens with at least one terminal outcome (silence alone never halts), tone `cold` for two cycles, or a ban. Removal is immediate and logged on the scorecard.

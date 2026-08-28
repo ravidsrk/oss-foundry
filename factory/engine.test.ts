@@ -124,7 +124,7 @@ test("scorecard halt stop blocks queue and approve", () => {
   const state = blank();
   state.scorecard = state.scorecard.map((row) =>
     row.repoId === "ravidsrk/orca-fleet"
-      ? { ...row, opened: CAPS.halt_after_opens, merged: 0, maintainerTone: "neutral" as const }
+      ? { ...row, opened: CAPS.halt_after_opens, merged: 0, closedUnmerged: CAPS.halt_after_opens, maintainerTone: "neutral" as const }
       : row,
   );
   assert.equal(health(state.scorecard.find((r) => r.repoId === "ravidsrk/orca-fleet")!), "stop");
