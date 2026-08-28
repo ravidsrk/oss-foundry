@@ -40,12 +40,15 @@ read -r -s -p "Paste the token (input hidden): " FOUNDRY_PAT; echo
 export FOUNDRY_PAT
 
 step 4 "Verify the token"
-LOGIN=$(curl -sf -H "Authorization: Bearer $FOUNDRY_PAT" -H "User-Agent: oss-foundry" https://api.github.com/user | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p')
-if [ -z "$LOGIN" ]; then echo "Verification FAILED — token rejected."; exit 1; fi
-SCOPES=$(curl -sfI -H "Authorization: Bearer $FOUNDRY_PAT" -H "User-Agent: oss-foundry" https://api.github.com/user | tr -d '\r' | sed -n 's/^x-oauth-scopes: *//Ip')
+USER_JSON=$(curl -s -H "Authorization: Bearer $FOUNDRY_PAT" -H "User-Agent: oss-foundry" https://api.github.com/user || true)
+LOGIN=$(printf '%s' "$USER_JSON" | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p')
+if [ -z "$LOGIN" ]; then echo "Verification FAILED — token rejected by the API."; exit 1; fi
+SCOPES=$(curl -sI -H "Authorization: Bearer $FOUNDRY_PAT" -H "User-Agent: oss-foundry" https://api.github.com/user 2>/dev/null | tr -d '\r' | sed -n 's/^x-oauth-scopes: *//Ip' || true)
 echo "Authenticated as: $LOGIN  (scopes: ${SCOPES:-none})"
-case " ${SCOPES:-}," in *" public_repo,"*|*"public_repo,"*) : ;; *) echo "WARNING: expected exactly 'public_repo'; got '${SCOPES:-none}'. Re-mint with only public_repo."; exit 1;; esac
-case "$SCOPES" in *repo,*|repo) if [ "$SCOPES" != "public_repo" ]; then echo "WARNING: broader than public_repo — re-mint."; exit 1; fi;; esac
+if [ "${SCOPES:-}" != "public_repo" ]; then
+  echo "WARNING: expected scopes to be exactly 'public_repo'; got '${SCOPES:-none}'. Re-mint the token with only public_repo checked."
+  exit 1
+fi
 
 step 5 "Persist for the operator shell"
 cat <<S5

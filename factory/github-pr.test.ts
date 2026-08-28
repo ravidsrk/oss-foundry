@@ -190,3 +190,23 @@ test("createDraftPull refuses without the PAT and halts on secondary limits", as
   assert.equal(notDraft.ok, false);
   if (!notDraft.ok) assert.match(notDraft.error, /draft/i);
 });
+
+test("createDraftPull rejects unqualified heads and halts on 429 secondary limits", async () => {
+  const bareHead = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "foundry/issue-1", body: "Fixes #1" },
+    async () => jsonResponse(201, {}),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(bareHead.ok, false);
+  if (!bareHead.ok) assert.match(bareHead.error, /fork-qualified/);
+
+  const secondary429 = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () => jsonResponse(429, { message: "You have exceeded a secondary rate limit." }),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(secondary429.ok, false);
+  if (!secondary429.ok) assert.equal(secondary429.halt, true);
+});

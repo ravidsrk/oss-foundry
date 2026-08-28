@@ -289,7 +289,7 @@ export async function createDraftPull(
       draft?: boolean;
       message?: string;
     };
-    if (res.status === 403 && /secondary rate limit/i.test(body.message ?? "")) {
+    if ((res.status === 403 || res.status === 429) && /secondary rate limit/i.test(body.message ?? "")) {
       return {
         ok: false,
         halt: true,

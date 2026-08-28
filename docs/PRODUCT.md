@@ -273,7 +273,7 @@ It **cannot**:
 
 A human browser session opened #1652 — the last one. Future Wave 1 drafts on stranger repos go through `open-draft` with the machine account's classic `public_repo` PAT (`FOUNDRY_PAT`; see docs/07): draft hard-coded, disclosure enforced, competing-work re-checked, secondary-rate-limit = halt.
 
-The in-repo create payload hard-codes `draft: true`. There is no `POST /pulls` helper and no merge path. Operator opens the draft in the browser (`cli.ts body`).
+The in-repo create path hard-codes `draft: true` end to end: `createDraftPull` is the one `POST /pulls` surface, it exists only for drafts, and there is no merge path anywhere. `cli.ts body` remains for inspection; browser opens are emergency-only.
 
 ---
 
