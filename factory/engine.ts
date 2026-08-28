@@ -589,3 +589,18 @@ function park(
     events: [ev(kind, reason, id), ...state.events].slice(0, 80),
   };
 }
+
+/** The one place the CLI turns a compare result into an evidence binding — fastForward is derived, never asserted. */
+export function bindingFromCompare(compared: {
+  aheadBy: number;
+  filesChanged: number;
+  diffLines: number;
+  messages: string[];
+}): EvidenceBinding {
+  return {
+    fastForward: compared.aheadBy >= 1,
+    messages: compared.messages,
+    filesChanged: compared.filesChanged,
+    diffLines: compared.diffLines,
+  };
+}

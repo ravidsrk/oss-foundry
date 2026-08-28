@@ -9,6 +9,7 @@ import {
   applyHalt,
   applyQueueLive,
   applyTick,
+  bindingFromCompare,
   evidenceIsReady,
   findCompetingPull,
   hasInflight,
@@ -572,4 +573,38 @@ test("scout score carries no vestigial grok surface", () => {
   });
   assert.equal("grok" in packet.scout.parts, false);
   assert.equal("grokRationale" in packet.scout, false);
+});
+
+test("a non-ahead compare cannot reach evidence attachment as fast-forward via the CLI binding path", () => {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  state = applyApprove(state, id, "attest").state;
+  state = applyAdvance(state, id).state;
+  state = applyAdvance(state, id).state;
+  const packet = state.packets[0];
+  const stale = bindingFromCompare({
+    aheadBy: 0,
+    filesChanged: 1,
+    diffLines: 1,
+    messages: [`Fixes #${packet.issueNumber}`],
+  });
+  assert.equal(stale.fastForward, false);
+  const rejected = applyAttachEvidence(state, id, {
+    baseSha: BASE,
+    headSha: HEAD,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  }, stale);
+  assert.match(rejected.error ?? "", /fast-forward/);
+  const derived = bindingFromCompare({
+    aheadBy: 2,
+    filesChanged: 1,
+    diffLines: 1,
+    messages: [`Fixes #${packet.issueNumber}`],
+  });
+  assert.equal(derived.fastForward, true);
 });

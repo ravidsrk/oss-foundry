@@ -8,6 +8,7 @@ import {
   applyHalt,
   applyReject,
   applyTick,
+  bindingFromCompare,
   findCompetingPull,
   hasInflight,
   INFLIGHT_STATUSES,
@@ -254,12 +255,7 @@ async function main() {
       console.error("no testCommand for this repo");
       process.exit(1);
     }
-    const result = applyAttachEvidence(state, id, evidence, {
-      fastForward: compared.aheadBy >= 1,
-      messages: compared.messages,
-      filesChanged: compared.filesChanged,
-      diffLines: compared.diffLines,
-    });
+    const result = applyAttachEvidence(state, id, evidence, bindingFromCompare(compared));
     if (result.error) {
       const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
       if (parked) saveFactoryState(STATE_FILE, result.state);
