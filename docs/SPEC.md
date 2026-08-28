@@ -78,3 +78,14 @@ An implementation conforms when every MUST above is machine-enforced or human-ga
 auditable record, and when its ledger — statuses, attestations, evidence, and quotes — survives
 an adversarial read against the platform's own record. The reference implementation's test suite
 and blind-review protocol are one acceptable demonstration.
+
+This split is not arbitrary: agents open a repository's separate policy file in 3.5% of runs (12
+of 347 non-anchor runs) and comply with refuse/hand-off rules 0% of the time unaided
+(RepoComplianceBench, arXiv 2607.26819). That 3.5% excludes AGENTS.md — auto-loaded by the
+benchmark harness and the one file agents reliably do see — and counts only whether an agent goes
+on to read a further file (CONTRIBUTING.md, a PR template, a standalone policy doc); the framing
+sharpens, not weakens, the case for control outside the agent. On enforcing refuse and hand-off
+rules, the benchmark's own conclusion is direct: "A project that means them must place the
+control outside the agent: a CI check that blocks the merge, a required human review, or a bot
+that closes AI-authored pull requests." That is exactly the machine-enforced or human-gated split
+this section requires.
