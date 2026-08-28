@@ -55,6 +55,8 @@ export interface AllowlistedRepo {
   maxFiles: number;
   maxDiffLines: number;
   sandbox: SandboxKind;
+  /** Optional environment step the witness runs after clone/checkout and again after the between-runs clean (e.g. `npm ci`). */
+  setupCommand?: string;
   /** Commit-disclosure convention the target follows: kernel-style Assisted-by, ASF-style Generated-by, or PR-body prose only (default). */
   disclosureTrailer: "assisted-by" | "generated-by" | "pr-body-only";
   contributingUrl?: string;
@@ -151,7 +153,7 @@ export interface TaskPacket {
 
 /** Machine-executed proof: the sandbox ran the tests and the revert control itself. Attested exits are history; witnessed exits are the bar. */
 export interface EvidenceWitness {
-  provider: "host" | "e2b";
+  provider: "host" | "e2b" | "daytona";
   testExit: number;
   revertExit: number;
   testLogSha: string;

@@ -38,6 +38,7 @@ repos:
     wave: 0
     language: TypeScript
     aiPolicy: owner
+    setupCommand: npm ci
     testCommand: npm test
     maxFiles: 10
     maxDiffLines: 500

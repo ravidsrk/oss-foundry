@@ -41,13 +41,13 @@ SHA-bound. Copied from orca-fleet `runtime/evidence-manifest.md`:
 - `filesChanged`, `diffLines` vs repo caps
 - `notes`
 
-- `witness` (required for `draft-ready`): `{ provider: host|e2b, testExit, revertExit, testLogSha, revertLogSha, ranAt }` — the sandbox executed both runs itself; log hashes are sha256.
+- `witness` (required for `draft-ready`): `{ provider: host|e2b|daytona, testExit, revertExit, testLogSha, revertLogSha, ranAt }` — the sandbox executed both runs itself; log hashes are sha256. Trust boundary (recorded, by design): a caller with direct engine/state access can attach a shape-valid witness — that access is equivalent to editing the operator's state file; the CLI never constructs one except from an actual run.
 
 A packet without `negativeControl=red-on-revert`, real (non-placeholder) `baseSha` / `headSha`, and a `witness` whose `testExit` is 0 and `revertExit` is non-zero cannot enter `draft-ready`. The engine does not invent SHAs, and it does not take the operator's word for an exit code.
 
 ## Allowlist repo
 
-See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Optional: `policyNotes` — a free-text provenance note (why a policy value was chosen, dated). It is appended to the policy-scan blob, so keep it free of gate phrases. Optional: `disclosureTrailer` — `assisted-by` | `generated-by` | `pr-body-only` (default): the commit-disclosure convention the target follows; the evidence gate requires the matching trailer when set. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.
+See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Optional: `setupCommand` — environment step the witness runs after clone (and re-runs after the between-phases clean), e.g. `npm ci`; without it, dependency-needing suites read as red-at-head and the witness refuses. It MUST be a clean-slate installer (`npm ci`, `pnpm install --frozen-lockfile`), never an incremental one — the between-phases `git clean` excludes `node_modules`, so the re-run of this command is what guarantees a fresh dependency tree. Optional: `policyNotes` — a free-text provenance note (why a policy value was chosen, dated). It is appended to the policy-scan blob, so keep it free of gate phrases. Optional: `disclosureTrailer` — `assisted-by` | `generated-by` | `pr-body-only` (default): the commit-disclosure convention the target follows; the evidence gate requires the matching trailer when set. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.
 
 ## Policy record (`policy-records.json`)
 
