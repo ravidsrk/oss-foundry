@@ -150,6 +150,11 @@ export function renderEvidencePage(packet: TaskPacket): string {
           w
             ? `- Witnessed by the ${w.provider} sandbox at ${w.ranAt}: tests exit ${w.testExit} at head; **exit ${w.revertExit} with the change reverted** (the proof binds). Log hashes sha256 ${w.testLogSha.slice(0, 12)}… / ${w.revertLogSha.slice(0, 12)}…`
             : `- Negative control: ${ev.negativeControl} (recorded before machine witnessing shipped — attested, not witnessed)`,
+          ...(w?.testLogPath && w?.revertLogPath
+            ? [
+                `- Recompute it yourself: \`shasum -a 256 ${w.testLogPath} ${w.revertLogPath}\` — the logs those hashes cover, kept beside this page.`,
+              ]
+            : []),
         ].join("\n") + stale
       : "No evidence manifest — this packet must not reach a maintainer.",
     "",

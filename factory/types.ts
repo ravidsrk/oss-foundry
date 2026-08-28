@@ -178,7 +178,12 @@ export interface TaskPacket {
   sandboxSession?: SandboxSession;
 }
 
-/** Machine-executed proof: the sandbox ran the tests and the revert control itself. Attested exits are history; witnessed exits are the bar. */
+/**
+ * Machine-executed proof: the sandbox ran the tests and the revert control itself. Attested exits
+ * are history; witnessed exits are the bar. A witness also names its **subject** (`repoId`,
+ * `baseSha`, `headSha`) and where its two run logs were persisted, so an ingested witness cannot
+ * be re-pointed at a different packet or range and the log hashes stay recomputable from disk.
+ */
 export interface EvidenceWitness {
   provider: "host" | "e2b" | "daytona";
   testExit: number;
@@ -186,6 +191,14 @@ export interface EvidenceWitness {
   testLogSha: string;
   revertLogSha: string;
   ranAt: string;
+  /** The packet's repo this witness was produced for. The gate refuses a witness bound elsewhere. */
+  repoId: string;
+  /** The commit range this witness was produced for; must equal the manifest's own range. */
+  baseSha: string;
+  headSha: string;
+  /** Repo-root-relative paths to the persisted run logs the two sha256s hash. */
+  testLogPath: string;
+  revertLogPath: string;
 }
 
 export interface EvidenceManifest {

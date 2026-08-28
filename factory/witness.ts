@@ -15,7 +15,35 @@ export type WitnessRunner = (
   opts?: { cwd?: string },
 ) => Promise<{ exit: number; output: string }>;
 
-export type WitnessOutcome = { ok: true; witness: EvidenceWitness } | { ok: false; error: string };
+/** The two run logs, returned so the caller can persist them at the paths the witness declares. */
+export interface WitnessLogs {
+  test: string;
+  revert: string;
+}
+
+export type WitnessOutcome =
+  | { ok: true; witness: EvidenceWitness; logs: WitnessLogs }
+  | { ok: false; error: string };
+
+/** An externally produced witness plus the command it ran — the `attach-witness` ingest format. */
+export interface IngestedWitness {
+  witness: EvidenceWitness;
+  testCommand: string;
+  notes: string[];
+}
+
+/** Where a packet's run logs live, relative to the repo root. Committed beside the evidence page. */
+export const WITNESS_LOG_ROOT = "docs/evidence/logs";
+
+export function witnessLogPaths(packetId: string): {
+  testLogPath: string;
+  revertLogPath: string;
+} {
+  return {
+    testLogPath: `${WITNESS_LOG_ROOT}/${packetId}/test.log`,
+    revertLogPath: `${WITNESS_LOG_ROOT}/${packetId}/revert.log`,
+  };
+}
 
 const TEST_PATH_RE = /(^|\/)(tests?|__tests__|spec)(\/|$)|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+$|_test\.(go|py)$|_spec\.rb$/i;
 
@@ -24,7 +52,8 @@ export function isTestPath(path: string): boolean {
   return TEST_PATH_RE.test(path);
 }
 
-function sha256(text: string): string {
+/** The one digest the witness, the evidence page, and the log check all speak. */
+export function witnessLogSha(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
@@ -36,6 +65,7 @@ function sha256(text: string): string {
  */
 export async function witnessEvidence(
   input: {
+    packetId: string;
     repoId: string;
     baseSha: string;
     headSha: string;
@@ -61,7 +91,7 @@ export async function witnessEvidence(
     return {
       ok: false,
       error:
-        `${input.sandbox === "daytona" ? "Daytona" : "E2B"} execution runs on the worker host, not in this repo's CLI (ADR 0003) — run the witness there and re-attach. This CLI refuses rather than faking a green harvest.`,
+        `${input.sandbox === "daytona" ? "Daytona" : "E2B"} execution runs on the worker host, not in this repo's CLI (ADR 0003) — run the witness there, then ingest it here with \`foundry attach-witness ${input.packetId} --manifest <path>\`. This CLI refuses rather than faking a green harvest.`,
     };
   }
 
@@ -132,9 +162,135 @@ export async function witnessEvidence(
       provider: "host",
       testExit: headRun.exit,
       revertExit: revertRun.exit,
-      testLogSha: sha256(headRun.output),
-      revertLogSha: sha256(revertRun.output),
+      testLogSha: witnessLogSha(headRun.output),
+      revertLogSha: witnessLogSha(revertRun.output),
       ranAt: new Date().toISOString(),
+      repoId: input.repoId,
+      baseSha: input.baseSha,
+      headSha: input.headSha,
+      ...witnessLogPaths(input.packetId),
+    },
+    logs: { test: headRun.output, revert: revertRun.output },
+  };
+}
+
+/**
+ * Recompute both declared sha256s from the persisted logs. A hash of something nobody can produce
+ * is not evidence; this is what makes the digest on the evidence page checkable by a maintainer.
+ * The reader is a seam so the check is exercised against real files without a live clone.
+ */
+export function verifyWitnessLogs(
+  witness: EvidenceWitness,
+  read: (path: string) => string | undefined,
+): { ok: true } | { ok: false; error: string } {
+  for (const [label, path, declared] of [
+    ["test", witness.testLogPath, witness.testLogSha],
+    ["revert", witness.revertLogPath, witness.revertLogSha],
+  ] as const) {
+    if (!path) {
+      return { ok: false, error: `witness declares no ${label} log path — the sha256 is unauditable` };
+    }
+    const text = read(path);
+    if (text === undefined) {
+      return {
+        ok: false,
+        error: `${label} log ${path} is missing or unreadable — the witness sha256 cannot be recomputed`,
+      };
+    }
+    const actual = witnessLogSha(text);
+    if (actual !== declared) {
+      return {
+        ok: false,
+        error: `${label} log ${path} hashes to ${actual.slice(0, 12)}…, which does not match the witness sha256 ${declared.slice(0, 12)}… — the log on disk is not what was witnessed`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+const HEX40 = /^[0-9a-f]{40}$/i;
+const HEX64 = /^[0-9a-f]{64}$/i;
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * Parse an externally produced witness manifest. Shape validation cannot detect a lie — provenance
+ * is settled by the engine gate and the log hashes by `verifyWitnessLogs`. This only refuses input
+ * that could not have come from a run at all, so a malformed file never reaches the state machine.
+ */
+export function parseWitnessManifest(
+  raw: string,
+): { ok: true; manifest: IngestedWitness } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return {
+      ok: false,
+      error: `witness manifest is not JSON: ${err instanceof Error ? err.message : "unparseable"}`,
+    };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "witness manifest must be a JSON object" };
+  }
+  const o = parsed as Record<string, unknown>;
+  const providers: SandboxKind[] = ["host", "e2b", "daytona"];
+  if (!providers.includes(o.provider as SandboxKind)) {
+    return { ok: false, error: `witness manifest provider must be one of ${providers.join(", ")}` };
+  }
+  if (typeof o.testExit !== "number" || typeof o.revertExit !== "number") {
+    return { ok: false, error: "witness manifest must record both run exit codes as numbers" };
+  }
+  if (typeof o.testLogSha !== "string" || !HEX64.test(o.testLogSha)) {
+    return { ok: false, error: "witness manifest testLogSha must be a sha256 hex digest" };
+  }
+  if (typeof o.revertLogSha !== "string" || !HEX64.test(o.revertLogSha)) {
+    return { ok: false, error: "witness manifest revertLogSha must be a sha256 hex digest" };
+  }
+  if (!nonEmptyString(o.ranAt)) {
+    return { ok: false, error: "witness manifest must record ranAt" };
+  }
+  if (!nonEmptyString(o.repoId)) {
+    return { ok: false, error: "witness manifest must name the repoId it was produced for" };
+  }
+  if (typeof o.baseSha !== "string" || !HEX40.test(o.baseSha)) {
+    return { ok: false, error: "witness manifest baseSha must be a full 40-hex commit SHA" };
+  }
+  if (typeof o.headSha !== "string" || !HEX40.test(o.headSha)) {
+    return { ok: false, error: "witness manifest headSha must be a full 40-hex commit SHA" };
+  }
+  if (!nonEmptyString(o.testLogPath) || !nonEmptyString(o.revertLogPath)) {
+    return {
+      ok: false,
+      error: "witness manifest must reference the persisted run logs (testLogPath, revertLogPath)",
+    };
+  }
+  if (!nonEmptyString(o.testCommand)) {
+    return { ok: false, error: "witness manifest must record the testCommand that was run" };
+  }
+  const notes = Array.isArray(o.notes) && o.notes.every((n) => typeof n === "string")
+    ? (o.notes as string[])
+    : [];
+  return {
+    ok: true,
+    manifest: {
+      testCommand: o.testCommand,
+      notes,
+      witness: {
+        provider: o.provider as EvidenceWitness["provider"],
+        testExit: o.testExit,
+        revertExit: o.revertExit,
+        testLogSha: o.testLogSha.toLowerCase(),
+        revertLogSha: o.revertLogSha.toLowerCase(),
+        ranAt: o.ranAt,
+        repoId: o.repoId,
+        baseSha: o.baseSha.toLowerCase(),
+        headSha: o.headSha.toLowerCase(),
+        testLogPath: o.testLogPath,
+        revertLogPath: o.revertLogPath,
+      },
     },
   };
 }

@@ -41,9 +41,21 @@ SHA-bound. Copied from orca-fleet `runtime/evidence-manifest.md`:
 - `filesChanged`, `diffLines` vs repo caps
 - `notes`
 
-- `witness` (required for `draft-ready`): `{ provider: host|e2b|daytona, testExit, revertExit, testLogSha, revertLogSha, ranAt }` — the sandbox executed both runs itself; log hashes are sha256. Trust boundary (recorded, by design): a caller with direct engine/state access can attach a shape-valid witness — that access is equivalent to editing the operator's state file; the CLI never constructs one except from an actual run.
+- `witness` (required for `draft-ready`): `{ provider: host|e2b|daytona, testExit, revertExit, testLogSha, revertLogSha, ranAt, repoId, baseSha, headSha, testLogPath, revertLogPath }` — the sandbox executed both runs itself; log hashes are sha256.
+  - **Subject binding.** `repoId` / `baseSha` / `headSha` name the packet and range the witness was produced for. The gate refuses a witness whose subject is a different repo, or a different range than the manifest's own — so an ingested witness cannot be re-pointed at another packet.
+  - **Provenance.** `provider` must be legal for the packet's repo: `host` only when `sandbox: host` **and** `wave: 0` (ADR 0003); `e2b` / `daytona` only when they equal the repo's `sandbox`. This is checked at the state-machine gate (`witnessProvenanceViolation`, consulted by both `applyAttachEvidence` and `evidenceIsReady`), not only inside the executor — a shape-valid `host` witness on a Wave-1 `e2b` repo is refused, in the same message class as the executor's own refusal.
+  - **Persisted logs.** `testLogPath` / `revertLogPath` are repo-root-relative paths to the two run logs the hashes cover, written under `docs/evidence/logs/<packetId>/`. The evidence page prints the `shasum -a 256` line that recomputes them, so the maintainer the page is written for can check the digest instead of trusting it. `attach-witness` re-reads both logs and refuses a manifest whose hashes do not match what is on disk.
 
-A packet without `negativeControl=red-on-revert`, real (non-placeholder) `baseSha` / `headSha`, and a `witness` whose `testExit` is 0 and `revertExit` is non-zero cannot enter `draft-ready`. The engine does not invent SHAs, and it does not take the operator's word for an exit code.
+A packet without `negativeControl=red-on-revert`, real (non-placeholder) `baseSha` / `headSha`, and a `witness` whose `testExit` is 0, `revertExit` is non-zero, provenance is legal for the repo, and subject matches the packet cannot enter `draft-ready`. The engine does not invent SHAs, and it does not take the operator's word for an exit code.
+
+### Residual trust boundary (recorded, by design)
+
+Direct write access to `.foundry-state.json` remains equivalent to operator control: someone who can edit that file can write any packet in any status, and no in-process check can stop them. What changed is that this is **no longer reachable through the normal engine API**. Every path that promotes a packet — `applyAttachEvidence`, `evidenceIsReady`, `applyAdvance` — now cross-checks the witness's provider against the repo's gated sandbox and its subject against the packet, so the well-meaning operator who hits the Wave-1 refusal is pointed at `attach-witness`, not at hand-editing the ledger.
+
+Two limits are deliberate and stated rather than papered over:
+
+- The engine is pure and never touches the filesystem, so it verifies that a witness **references** its logs, not that the bytes are there. Recomputation happens in `attach-witness` (`verifyWitnessLogs`) and, for the reader, in the `shasum` line on the evidence page.
+- `loadFactoryState`'s `isWitness` still validates shape only. Shape validation cannot detect a lie; that is the gate's job, and a legacy witness that predates subject binding loads fine and is then refused at the gate rather than silently promoted.
 
 ## Allowlist repo
 

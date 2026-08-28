@@ -340,8 +340,52 @@ export function isBoundSha(sha: string | undefined): boolean {
   return true;
 }
 
-export function evidenceIsReady(evidence: EvidenceManifest | undefined): boolean {
-  if (!evidence) return false;
+/**
+ * Provenance, not shape: a witness is only evidence when it came from the environment this repo is
+ * gated to (ADR 0003) and names the packet and range it was produced for. Shape validation cannot
+ * detect a lie, so the state-machine gate — not CLI convention — settles both (issue #36).
+ * Returns undefined when there is nothing to check: an un-witnessed manifest may still attach, and
+ * `evidenceIsReady` is what refuses to promote it.
+ */
+export function witnessProvenanceViolation(
+  packet: TaskPacket,
+  evidence: EvidenceManifest,
+): string | undefined {
+  const w = evidence.witness;
+  if (!w) return undefined;
+  const repo = repoById(packet.repoId);
+  if (!repo) return `${packet.repoId} is not on the allowlist.`;
+
+  if (w.provider === "host" && (repo.sandbox !== "host" || repo.wave !== 0)) {
+    return `host witnessing is Wave 0 only (ADR 0003) — untrusted clones never run on the operator machine; ${repo.id} is Wave ${repo.wave} on ${repo.sandbox}, so its witness must come from that sandbox`;
+  }
+  if (w.provider !== "host" && w.provider !== repo.sandbox) {
+    return `witness provider ${w.provider} does not match ${repo.id}'s sandbox ${repo.sandbox} (ADR 0003) — a witness is evidence only from the environment the repo is gated to`;
+  }
+
+  if (!w.repoId || !w.baseSha || !w.headSha) {
+    return "witness names no subject — it must carry the repoId, baseSha and headSha it was produced for, or it is not evidence about this packet";
+  }
+  if (w.repoId.toLowerCase() !== packet.repoId.toLowerCase()) {
+    return `witness was produced for ${w.repoId}, not ${packet.repoId} — a witness does not transfer between packets`;
+  }
+  if (
+    w.baseSha.toLowerCase() !== evidence.baseSha.toLowerCase() ||
+    w.headSha.toLowerCase() !== evidence.headSha.toLowerCase()
+  ) {
+    return `witness was produced for commit range ${w.baseSha.slice(0, 7)}..${w.headSha.slice(0, 7)}, not ${evidence.baseSha.slice(0, 7)}..${evidence.headSha.slice(0, 7)}`;
+  }
+
+  if (!w.testLogPath || !w.revertLogPath) {
+    return "witness does not reference its persisted run logs — without testLogPath and revertLogPath the sha256 on the evidence page hashes something nobody can produce";
+  }
+  return undefined;
+}
+
+/** The promotion gate. Takes the packet, not a bare manifest: provenance is unanswerable without the subject. */
+export function evidenceIsReady(packet: TaskPacket | undefined): boolean {
+  const evidence = packet?.evidence;
+  if (!packet || !evidence) return false;
   if (evidence.negativeControl !== "red-on-revert") return false;
   if (evidence.testExit !== 0) return false;
   if (!isBoundSha(evidence.baseSha) || !isBoundSha(evidence.headSha)) return false;
@@ -350,6 +394,8 @@ export function evidenceIsReady(evidence: EvidenceManifest | undefined): boolean
   // Witnessed, not attested: the sandbox must have executed both runs itself (issue #6).
   if (!evidence.witness) return false;
   if (evidence.witness.testExit !== 0 || evidence.witness.revertExit === 0) return false;
+  // Provenanced, not merely shaped: the right sandbox, this packet, this range (issue #36).
+  if (witnessProvenanceViolation(packet, evidence)) return false;
   return true;
 }
 
@@ -485,6 +531,10 @@ export function applyAttachEvidence(
   if (evidence.baseSha.toLowerCase() === evidence.headSha.toLowerCase()) {
     return { state, error: "evidence baseSha and headSha must differ" };
   }
+  const provenance = witnessProvenanceViolation(packet, evidence);
+  if (provenance) {
+    return { state, error: provenance };
+  }
   if (!binding.fastForward) {
     return {
       state,
@@ -561,10 +611,15 @@ export function applyAdvance(
   }
 
   if (packet.status === "reviewing") {
-    if (!evidenceIsReady(packet.evidence)) {
+    if (!evidenceIsReady(packet)) {
+      const violation = packet.evidence
+        ? witnessProvenanceViolation(packet, packet.evidence)
+        : undefined;
       return {
         state,
-        error: `cannot enter draft-ready: attach SHA-bound, witnessed evidence (tests and the revert control executed by the sandbox) with red-on-revert first`,
+        error:
+          violation ??
+          `cannot enter draft-ready: attach SHA-bound, witnessed evidence (tests and the revert control executed by the sandbox) with red-on-revert first`,
       };
     }
     const overflow = scopeOverflow(

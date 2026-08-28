@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALLOWLIST, repoById } from "./allowlist.ts";
 import {
@@ -45,8 +46,14 @@ import { health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
-import { INFLIGHT_STATUSES, type EvidenceManifest, type FactoryState } from "./types.ts";
-import { witnessEvidence, type WitnessRunner } from "./witness.ts";
+import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
+import {
+  parseWitnessManifest,
+  verifyWitnessLogs,
+  witnessEvidence,
+  type WitnessLogs,
+  type WitnessRunner,
+} from "./witness.ts";
 
 const hostRunner: WitnessRunner = (step, args, opts) =>
   new Promise((resolveRun) => {
@@ -61,6 +68,29 @@ const hostRunner: WitnessRunner = (step, args, opts) =>
       resolveRun({ exit, output: `${stdout}${stderr}` });
     });
   });
+
+/**
+ * The sha256 on the evidence page is only proof if the maintainer can recompute it. Write the two
+ * run logs at the repo-root-relative paths the witness names, so the digest is checkable on disk.
+ */
+function persistWitnessLogs(witness: EvidenceWitness, logs: WitnessLogs): void {
+  for (const [path, text] of [
+    [witness.testLogPath, logs.test],
+    [witness.revertLogPath, logs.revert],
+  ] as const) {
+    const full = resolve(path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, text);
+  }
+}
+
+function readIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(resolve(path), "utf8");
+  } catch {
+    return undefined;
+  }
+}
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -232,7 +262,8 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   reject <packetId> --reason <text>
   halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
   advance <packetId>
-  evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested)
+  evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
+  attach-witness <packetId> --manifest <path>   (ingest a witness produced on the worker host; provenance and log hashes re-checked here)
   body <packetId>
   attach-draft <packetId> <prUrl>
   open-draft <packetId> --head <forkOwner:branch>   (machine-account PAT; draft-only; one create per run)
@@ -424,6 +455,7 @@ async function main() {
     console.error(`witnessing ${packet.repoId} ${base.slice(0, 7)}..${head.slice(0, 7)} (${repo.sandbox}) — cloning and running \`${repo.testCommand}\` twice`);
     const outcome = await witnessEvidence(
       {
+        packetId: packet.id,
         repoId: packet.repoId,
         baseSha: base,
         headSha: head,
@@ -439,6 +471,7 @@ async function main() {
       console.error(outcome.error);
       process.exit(1);
     }
+    persistWitnessLogs(outcome.witness, outcome.logs);
     const evidence: EvidenceManifest = {
       baseSha: base,
       headSha: head,
@@ -447,7 +480,7 @@ async function main() {
       negativeControl: outcome.witness.revertExit !== 0 ? "red-on-revert" : "failed",
       filesChanged: compared.filesChanged,
       diffLines: compared.diffLines,
-      notes: [`witnessed via CLI (${outcome.witness.provider}); logs sha256 ${outcome.witness.testLogSha.slice(0, 12)}/${outcome.witness.revertLogSha.slice(0, 12)}`],
+      notes: [`witnessed via CLI (${outcome.witness.provider}); logs sha256 ${outcome.witness.testLogSha.slice(0, 12)}/${outcome.witness.revertLogSha.slice(0, 12)} kept at ${outcome.witness.testLogPath} and ${outcome.witness.revertLogPath}`],
       witness: outcome.witness,
     };
     const result = applyAttachEvidence(state, id, evidence, bindingFromCompare(compared));
@@ -459,6 +492,80 @@ async function main() {
     }
     persist(result.state);
     console.log(`evidence attached ${id}`);
+    return;
+  }
+
+  if (cmd === "attach-witness") {
+    const id = rest[0];
+    const manifestPath = flag(rest, "--manifest");
+    if (!id || !manifestPath) {
+      console.error("attach-witness requires <packetId> --manifest <path>");
+      process.exit(1);
+    }
+    const packet = state.packets.find((p) => p.id === id);
+    if (!packet) {
+      console.error(`unknown packet ${id}`);
+      process.exit(1);
+    }
+    const repo = repoById(packet.repoId);
+    if (!repo?.testCommand) {
+      console.error("no testCommand for this repo");
+      process.exit(1);
+    }
+    const raw = readIfPresent(manifestPath);
+    if (raw === undefined) {
+      console.error(`cannot read witness manifest ${manifestPath}`);
+      process.exit(1);
+    }
+    const parsed = parseWitnessManifest(raw);
+    if (!parsed.ok) {
+      console.error(parsed.error);
+      process.exit(1);
+    }
+    const { witness, testCommand, notes } = parsed.manifest;
+    if (testCommand !== repo.testCommand) {
+      console.error(
+        `witness ran \`${testCommand}\`, but ${repo.id}'s oracle is \`${repo.testCommand}\` — a different command is not this repo's evidence`,
+      );
+      process.exit(1);
+    }
+    // The hashes must cover logs that exist here, or the digest on the evidence page proves nothing.
+    const logs = verifyWitnessLogs(witness, readIfPresent);
+    if (!logs.ok) {
+      console.error(logs.error);
+      process.exit(1);
+    }
+    console.error(
+      `ingesting ${witness.provider} witness for ${packet.repoId} ${witness.baseSha.slice(0, 7)}..${witness.headSha.slice(0, 7)} — log hashes recomputed from disk; verifying the range upstream`,
+    );
+    const compared = await compareCommits(packet.repoId, witness.baseSha, witness.headSha);
+    if (!compared.ok) {
+      console.error(compared.error);
+      process.exit(1);
+    }
+    const evidence: EvidenceManifest = {
+      baseSha: witness.baseSha,
+      headSha: witness.headSha,
+      testCommand,
+      testExit: witness.testExit,
+      negativeControl: witness.revertExit !== 0 ? "red-on-revert" : "failed",
+      filesChanged: compared.filesChanged,
+      diffLines: compared.diffLines,
+      notes: [
+        `ingested ${witness.provider} witness produced ${witness.ranAt}; logs sha256 ${witness.testLogSha.slice(0, 12)}/${witness.revertLogSha.slice(0, 12)} recomputed from ${witness.testLogPath} and ${witness.revertLogPath}`,
+        ...notes,
+      ],
+      witness,
+    };
+    const result = applyAttachEvidence(state, id, evidence, bindingFromCompare(compared));
+    if (result.error) {
+      const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
+      if (parked) persist(result.state);
+      console.error(result.error);
+      process.exit(1);
+    }
+    persist(result.state);
+    console.log(`witness ingested ${id} (${witness.provider})`);
     return;
   }
 
