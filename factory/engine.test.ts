@@ -154,9 +154,16 @@ test("scorecard halt stop blocks queue and approve", () => {
 
 test("tick idles instead of inventing #9000+ issues", () => {
   const seed = seedState();
+  const consumedFirstIssue = {
+    ...seed.packets[0],
+    id: "pkt_github_awesome-copilot_2684",
+    repoId: "github/awesome-copilot",
+    issueNumber: 2684,
+    status: "parked" as const,
+  };
   const quiet = {
     ...seed,
-    packets: seed.packets.map((p) =>
+    packets: [consumedFirstIssue, ...seed.packets].map((p) =>
       p.status === "submitted" ? { ...p, status: "followed-up" as const } : p,
     ),
   };
@@ -1131,4 +1138,20 @@ test("draft-ready requires a witnessed manifest, not an attested one", () => {
   const advanced = applyAdvance(state2, id);
   assert.equal(advanced.error, undefined);
   assert.equal(state2.packets[0].evidence?.witness?.provider, "host");
+});
+
+test("the named awesome-copilot first issue is scoutable, not invented", () => {
+  const seed = seedState();
+  const quiet = {
+    ...seed,
+    packets: seed.packets.map((p) =>
+      p.status === "submitted" ? { ...p, status: "followed-up" as const } : p,
+    ),
+  };
+  const ticked = applyTick(quiet);
+  assert.ok(ticked.packet);
+  assert.equal(ticked.packet?.repoId, "github/awesome-copilot");
+  assert.equal(ticked.packet?.issueNumber, 2684);
+  assert.equal(ticked.packet?.policy.code, "ALLOW");
+  assert.equal(ticked.packet?.policy.record?.stance, "welcome");
 });
