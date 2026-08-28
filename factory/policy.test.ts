@@ -63,3 +63,129 @@ test("files or diff over the repo cap is HOLD_SCOPE", () => {
   });
   assert.equal(diff.code, "HOLD_SCOPE");
 });
+
+const MATPLOTLIB_STYLE_BAN = `Use of Generative AI. The following uses are unacceptable: External AI tooling (e.g. bots, agents) directly interacting with the project; including creating issues, PRs or commenting on GitHub or Discourse. Pull requests that are AI generated will be closed.`;
+
+const QEMU_STYLE_BAN = `Current QEMU project policy is to DECLINE any contributions which are believed to include or derive from AI generated content. This policy may evolve as AI tools mature.`;
+
+const KERNEL_STYLE_CONDITIONAL = `AI agents MUST NOT add Signed-off-by tags. Only humans can legally certify the Developer Certificate of Origin (DCO). The human submitter is responsible for reviewing all AI-generated code and adding their own Signed-off-by tag.`;
+
+const AGENT_FRAMEWORK_README = `This repo orchestrates autonomous agents in E2B sandboxes. Each autonomous agent gets a fresh worktree and a task queue. AI slop is what these guardrails exist to prevent.`;
+
+test("descriptive mention of autonomous agents is not a ban", () => {
+  const v = evaluatePolicy({
+    repoId: "ColeMurray/background-agents",
+    agentsMd: AGENT_FRAMEWORK_README,
+    issueTitle: "icon tweak",
+  });
+  assert.equal(v.code, "ALLOW");
+});
+
+test("a ban statement denies and captures the statement as the quote", () => {
+  const v = evaluatePolicy({
+    repoId: "mcp-use/mcp-use",
+    contributing: MATPLOTLIB_STYLE_BAN,
+    issueTitle: "docs fix",
+  });
+  assert.equal(v.code, "DENY_FORBIDDEN");
+  assert.equal(
+    v.matchedPhrases.some((p) => /will be closed/i.test(p)),
+    true,
+  );
+});
+
+test("a decline-first ban statement denies", () => {
+  const v = evaluatePolicy({
+    repoId: "mcp-use/mcp-use",
+    contributing: QEMU_STYLE_BAN,
+    issueTitle: "docs fix",
+  });
+  assert.equal(v.code, "DENY_FORBIDDEN");
+});
+
+test("kernel-style DCO conditional holds CLA, not forbidden", () => {
+  const v = evaluatePolicy({
+    repoId: "mcp-use/mcp-use",
+    contributing: KERNEL_STYLE_CONDITIONAL,
+    issueTitle: "docs fix",
+  });
+  assert.equal(v.code, "HOLD_CLA");
+});
+
+test("a welcome record attaches provenance to the verdict", () => {
+  const v = evaluatePolicy({ repoId: "github/awesome-copilot", issueTitle: "add a prompt file" });
+  assert.equal(v.code, "ALLOW");
+  assert.equal(v.record?.source, "CONTRIBUTING.md");
+  assert.equal(/🤖🤖🤖/.test(v.record?.quote ?? ""), true);
+});
+
+test("a conditional record holds with the quoted condition even without fetched docs", () => {
+  const v = evaluatePolicy({ repoId: "mastra-ai/mastra", issueTitle: "docs fix" });
+  assert.equal(v.code, "HOLD_HUMAN");
+  assert.equal(/needs triage/.test(v.record?.quote ?? ""), true);
+});
+
+const MATPLOTLIB_CLAUSE_ONLY = `Use of Generative AI. The following uses are unacceptable: External AI tooling (e.g. bots, agents) directly interacting with the project; including creating issues, PRs or commenting on GitHub or Discourse.`;
+
+const ZIG_STYLE_BAN = `We do not accept contributions written by LLMs.`;
+
+const DO_NOT_ACCEPT_BAN = `We do not accept machine-generated patches.`;
+
+const PYDANTIC_WELCOME = `We welcome the use of AI when contributing to Pydantic. However, users should certify that they fully understand the code being submitted.`;
+
+const BOILERPLATE_ALLOW = `We maintain a high bar for code quality, so incomplete or untested submissions may be rejected during review. Please explain your changes clearly; issues without an explanation will be rejected.`;
+
+const ROBOT_ALLOW = `This is a robot-cleaning simulation library. Submissions are rejected by CI when tests fail.`;
+
+test("a ban clause behind an abbreviation dot still denies on its own", () => {
+  const v = evaluatePolicy({ repoId: "mcp-use/mcp-use", contributing: MATPLOTLIB_CLAUSE_ONLY, issueTitle: "docs" });
+  assert.equal(v.code, "DENY_FORBIDDEN");
+});
+
+test("active-voice refusals deny: do-not-accept phrasing", () => {
+  const zig = evaluatePolicy({ repoId: "mcp-use/mcp-use", contributing: ZIG_STYLE_BAN, issueTitle: "docs" });
+  assert.equal(zig.code, "DENY_FORBIDDEN");
+  const machine = evaluatePolicy({ repoId: "mcp-use/mcp-use", contributing: DO_NOT_ACCEPT_BAN, issueTitle: "docs" });
+  assert.equal(machine.code, "DENY_FORBIDDEN");
+});
+
+test("ordinary contributing prose is not a ban", () => {
+  const welcome = evaluatePolicy({ repoId: "mcp-use/mcp-use", contributing: PYDANTIC_WELCOME, issueTitle: "docs" });
+  assert.equal(welcome.code, "ALLOW");
+  const boilerplate = evaluatePolicy({ repoId: "mcp-use/mcp-use", contributing: BOILERPLATE_ALLOW, issueTitle: "docs" });
+  assert.equal(boilerplate.code, "ALLOW");
+  const robot = evaluatePolicy({ repoId: "mcp-use/mcp-use", contributing: ROBOT_ALLOW, issueTitle: "docs" });
+  assert.equal(robot.code, "ALLOW");
+});
+
+test("an affirmative record satisfies parse-policy-first for an unknown repo; a silent one does not", () => {
+  const affirmative = evaluatePolicy(
+    { repoId: "mcp-use/mcp-use", issueTitle: "docs" },
+    {
+      repoId: "mcp-use/mcp-use",
+      source: "CONTRIBUTING.md",
+      url: "",
+      fetchedAt: "2026-08-28",
+      stance: "welcome",
+      conditions: [],
+      quote: "We welcome all kinds of contributions!",
+    },
+  );
+  assert.equal(affirmative.code, "ALLOW");
+  assert.equal(affirmative.record?.stance, "welcome");
+
+  const silent = evaluatePolicy(
+    { repoId: "mcp-use/mcp-use", issueTitle: "docs" },
+    {
+      repoId: "mcp-use/mcp-use",
+      source: "CONTRIBUTING.md",
+      url: "",
+      fetchedAt: "2026-08-28",
+      stance: "silent",
+      conditions: [],
+      quote: "Parsed; no AI-contribution language found.",
+    },
+  );
+  assert.equal(silent.code, "DENY_UNKNOWN_POLICY");
+  assert.equal(silent.record?.stance, "silent");
+});

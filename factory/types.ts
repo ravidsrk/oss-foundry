@@ -61,6 +61,17 @@ export interface AllowlistedRepo {
   firstIssues: { number: number; title: string; url: string }[];
 }
 
+/** A parsed, quoted, dated record of what a repo's own docs say about AI contributions (policy-records.json). Evidence, not override. */
+export interface PolicyRecord {
+  repoId: string;
+  source: string;
+  url: string;
+  fetchedAt: string;
+  stance: "forbidden" | "conditional" | "welcome" | "silent";
+  conditions: string[];
+  quote: string;
+}
+
 export interface PolicyVerdict {
   allow: boolean;
   code:
@@ -72,6 +83,7 @@ export interface PolicyVerdict {
     | "HOLD_SCOPE";
   reasons: string[];
   matchedPhrases: string[];
+  record?: PolicyRecord;
 }
 
 export interface ScoutScore {
