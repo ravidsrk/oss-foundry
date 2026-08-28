@@ -10,6 +10,7 @@ import {
   applyQueueLive,
   applyTick,
   bindingFromCompare,
+  branchMentionsIssue,
   classifyCompetition,
   evidenceIsReady,
   findCompetingPull,
@@ -17,6 +18,7 @@ import {
   isBoundSha,
   isPlaceholderSha,
   mentionsIssue,
+  referencesIssue,
   type EvidenceBinding,
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
@@ -688,4 +690,40 @@ test("tick holds an adjacent-flagged issue for human triage instead of scouting 
     result.state.events.some((e) => e.message.includes("adjacent")),
     true,
   );
+});
+
+test("competition precedence and the direct reference helpers", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const repo = "ravidsrk/orca-fleet";
+  assert.equal(referencesIssue("see also #71", 71, url, repo), true);
+  assert.equal(referencesIssue("PR #71 tracks this", 71, url, repo), true);
+  assert.equal(referencesIssue("other-owner/other-repo#71", 71, url, repo), false);
+  assert.equal(referencesIssue(`context: ${url}`, 71, url, repo), true);
+  assert.equal(branchMentionsIssue("fix/71-validator", 71), true);
+  assert.equal(branchMentionsIssue("high71", 71), false);
+  assert.equal(branchMentionsIssue("fix-710", 71), false);
+
+  const both = classifyCompetition(
+    {
+      pulls: [{ title: "wip", body: "see also #71", url: "https://github.com/ravidsrk/orca-fleet/pull/9", headRef: "fix/71-x" }],
+      crossReferencedPullUrls: ["https://github.com/ravidsrk/orca-fleet/pull/9"],
+    },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(both.kind, "competing");
+  if (both.kind === "competing") assert.equal(both.why, "timeline-link");
+
+  const keywordBeatsTimeline = classifyCompetition(
+    {
+      pulls: [{ title: "fix", body: "Fixes #71", url: "https://github.com/ravidsrk/orca-fleet/pull/2" }],
+      crossReferencedPullUrls: ["https://github.com/ravidsrk/orca-fleet/pull/9"],
+    },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(keywordBeatsTimeline.kind, "competing");
+  if (keywordBeatsTimeline.kind === "competing") assert.equal(keywordBeatsTimeline.why, "closing-keyword");
 });

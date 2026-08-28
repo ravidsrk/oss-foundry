@@ -367,7 +367,13 @@ export function findCompetingPull(
   return pulls.find((pull) => mentionsIssue(`${pull.title}\n${pull.body}`, issueNumber, issueUrl, repoId));
 }
 
-/** Plain reference without a closing keyword: bare #N (not repo-prefixed), this repo's owner/repo#N, or the issue URL. Foreign owner/repo#N does not count. */
+/**
+ * Plain reference without a closing keyword: bare #N (not repo-prefixed), this repo's
+ * owner/repo#N, or the issue URL. Foreign owner/repo#N does not count. Deliberately
+ * over-inclusive: "PR #71" (a pull's own number) also matches — over-inclusion only
+ * escalates to an adjacent hold a human clears, never a silent skip. Do not "fix" this
+ * into a false negative.
+ */
 export function referencesIssue(
   text: string,
   issueNumber: number,
@@ -381,7 +387,7 @@ export function referencesIssue(
   return Boolean(issueUrl) && text.includes(issueUrl);
 }
 
-/** Head branch names that conventionally carry an issue number: fix/71, issue-71, gh_71, bug/71-slug. */
+/** Head branch names that conventionally carry an issue number: fix/71, issue-71, gh_71, bug/71-slug. `bug` is a deliberate superset of the spec's fix|issue|gh seed list. */
 export function branchMentionsIssue(headRef: string | undefined, issueNumber: number): boolean {
   if (!headRef) return false;
   const n = String(issueNumber);

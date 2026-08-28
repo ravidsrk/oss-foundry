@@ -10,6 +10,7 @@ import {
   applyTick,
   bindingFromCompare,
   classifyCompetition,
+  findCompetingPull,
   hasInflight,
   INFLIGHT_STATUSES,
 } from "./engine.ts";
@@ -84,7 +85,12 @@ async function tickWithGithub(state: ReturnType<typeof mustLoad>) {
       (await fetchRepoFile(repo.id, ".github/CONTRIBUTING.md"));
     for (const issue of repo.firstIssues) {
       const key = `${repo.id}#${issue.number}`;
-      const crossRefs = await listCrossReferencingOpenPulls(repo.id, issue.number);
+      // Cheap path first: a closing-keyword hit in the already-fetched pulls settles "competing"
+      // without spending a timeline call per issue.
+      const keywordHit = findCompetingPull(pulls.pulls, issue.number, issue.url, repo.id);
+      const crossRefs = keywordHit
+        ? { ok: true as const, urls: [] as string[] }
+        : await listCrossReferencingOpenPulls(repo.id, issue.number);
       if (!crossRefs.ok) {
         console.error(crossRefs.error);
         process.exit(1);
@@ -168,6 +174,43 @@ async function main() {
     if (!id) {
       console.error("approve requires a packet id");
       process.exit(1);
+    }
+    const packetForFreeze = state.packets.find((p) => p.id === id);
+    if (packetForFreeze && (packetForFreeze.status === "gated" || packetForFreeze.status === "frozen")) {
+      const pulls = await listOpenPulls(packetForFreeze.repoId);
+      if (!pulls.ok) {
+        console.error(pulls.error);
+        process.exit(1);
+      }
+      const crossRefs = findCompetingPull(
+        pulls.pulls,
+        packetForFreeze.issueNumber,
+        packetForFreeze.issueUrl,
+        packetForFreeze.repoId,
+      )
+        ? { ok: true as const, urls: [] as string[] }
+        : await listCrossReferencingOpenPulls(packetForFreeze.repoId, packetForFreeze.issueNumber);
+      if (!crossRefs.ok) {
+        console.error(crossRefs.error);
+        process.exit(1);
+      }
+      const verdict = classifyCompetition(
+        { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
+        packetForFreeze.issueNumber,
+        packetForFreeze.issueUrl,
+        packetForFreeze.repoId,
+      );
+      if (verdict.kind === "competing") {
+        console.error(
+          `stand down: competing PR ${verdict.url} (${verdict.why}) appeared on ${packetForFreeze.repoId}#${packetForFreeze.issueNumber} since gating. Reject or park — do not approve.`,
+        );
+        process.exit(1);
+      }
+      if (verdict.kind === "adjacent") {
+        console.error(
+          `taste gate: adjacent PR ${verdict.url} (${verdict.why}) mentions ${packetForFreeze.repoId}#${packetForFreeze.issueNumber}. You are the freeze — approve only if it does not cover the issue.`,
+        );
+      }
     }
     const result = applyApprove(state, id, flag(rest, "--note") ?? "");
     if (result.error) {
