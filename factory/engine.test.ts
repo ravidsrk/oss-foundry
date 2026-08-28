@@ -986,3 +986,18 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
   });
   assert.deepEqual(clean, []);
 });
+
+test("an absorbed close is at rest: reconcile-style re-diff reports no divergence", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
+  const absorbed = applyPrSync(state, submitted.id, closedMeta, {
+    threadsAnswered: false,
+    at: "2026-09-02T00:00:00.000Z",
+  });
+  const after = absorbed.state.packets.find((p) => p.id === submitted.id)!;
+  const live = { state: "closed" as const, merged: false, draft: closedMeta.draft, headSha: closedMeta.headSha };
+  assert.deepEqual(packetDivergences(after, live), []);
+  const unabsorbed = packetDivergences(submitted, live);
+  assert.equal(unabsorbed.some((d) => d.includes(`sync ${submitted.id}`)), true);
+});

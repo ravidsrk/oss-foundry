@@ -145,7 +145,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
 
   status
   tick
-  approve <packetId> --note <text>
+  approve <packetId> --note <text> [--by <name>]   (identity also via FOUNDRY_OPERATOR)
   reject <packetId> --reason <text>
   halt <repoId> --reason <text>
   advance <packetId>
@@ -398,18 +398,33 @@ async function main() {
   }
 
   if (cmd === "ledger") {
-    console.log("| packet | issue | PR | status |");
-    console.log("|---|---|---|---|");
-    for (const p of state.packets) {
-      console.log(
-        `| ${p.id} | [${p.repoId}#${p.issueNumber}](${p.issueUrl}) | ${p.prUrl ?? "—"} | ${p.status} |`,
-      );
+    // Emits the generated block for docs/12-ledger.md — paste between the GENERATED markers.
+    const waves: [number, string][] = [[0, "Wave 0"], [1, "Wave 1"], [2, "Wave 2"]];
+    for (const [wave, title] of waves) {
+      const packets = state.packets.filter((p) => repoById(p.repoId)?.wave === wave);
+      if (packets.length === 0) continue;
+      console.log(`### ${title}`);
+      console.log("");
+      console.log("| packet | issue | PR | status | attested by |");
+      console.log("|---|---|---|---|---|");
+      for (const p of packets) {
+        console.log(
+          `| ${p.id} | [${p.repoId}#${p.issueNumber}](${p.issueUrl}) | ${p.prUrl ?? "—"} | ${p.status} | ${p.humanAttest?.by ?? "—"} |`,
+        );
+      }
+      console.log("");
     }
+    console.log(`Foundry-attested Wave 0 merges: ${foundryAttestedWave0Merges(state.packets)} (promotion gate: 2).`);
+    console.log("");
+    console.log("### Scorecard");
     console.log("");
     for (const row of state.scorecard) {
       if (row.opened === 0) continue;
-      console.log(`- ${row.repoId}: opened=${row.opened} merged=${row.merged} closedUnmerged=${row.closedUnmerged} noReview=${row.noReview} tone=${row.maintainerTone}`);
+      console.log(
+        `- ${row.repoId}: opened=${row.opened} merged=${row.merged} closedUnmerged=${row.closedUnmerged} noReview=${row.noReview} tone=${row.maintainerTone}`,
+      );
     }
+    console.log(`- bans: ${state.bans}  mergedTotal: ${state.mergedTotal}`);
     return;
   }
 

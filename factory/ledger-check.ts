@@ -23,7 +23,10 @@ export function packetDivergences(packet: TaskPacket, live: LivePrLite): string[
   if (packet.status === "submitted" || packet.status === "followed-up") {
     if (live.merged) {
       out.push(`${packet.id}: PR merged upstream — mechanical: run \`sync ${packet.id}\` to record it`);
-    } else if (live.state === "closed") {
+    } else if (live.state === "closed" && packet.prMeta?.state !== "closed") {
+      // Only an UNABSORBED close is drift. Once sync has recorded the close (prMeta.state ===
+      // "closed"), the followed-up packet is at rest — re-reporting it forever would train the
+      // operator (and the clock) to ignore real divergence.
       out.push(`${packet.id}: PR closed unmerged — mechanical: run \`sync ${packet.id}\` to record it`);
     }
   }
