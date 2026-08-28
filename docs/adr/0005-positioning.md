@@ -10,10 +10,10 @@ Accepted (2026-08-28)
 governance" products govern your agents on your systems; nobody ships guest-side,
 pre-implementation gating against a target's own policy — while agents open policy files in 3.5%
 of runs (12 of 347 non-anchor runs) and comply with refuse/hand-off rules 0% of the time unaided
-(RepoComplianceBench, arXiv 2607.26819; the 3.5% excludes AGENTS.md, which the harness auto-loads
-and which agents reliably do see — it counts only a further file such as CONTRIBUTING.md, a PR
-template, or a standalone policy doc), and burned projects (QEMU-class) are actively drafting how
-to safely re-admit AI contributions. Maintainers will not pay (CodeRabbit gives them its product
+(RepoComplianceBench, arXiv 2607.26819), and burned projects (QEMU-class) are actively drafting
+how to safely re-admit AI contributions. That 3.5% excludes AGENTS.md, which the harness
+auto-loads and which agents reliably do see; it counts only whether the agent goes on to read
+CONTRIBUTING.md or the PR template. Maintainers will not pay (CodeRabbit gives them its product
 free); operators, OSPOs, and agent vendors needing provable good citizenship might.
 
 ## Decision
