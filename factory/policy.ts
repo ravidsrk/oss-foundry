@@ -1,5 +1,5 @@
-import { isDenied, repoById } from "./allowlist";
-import type { AllowlistedRepo, PolicyVerdict } from "./types";
+import { isDenied, repoById } from "./allowlist.ts";
+import type { AllowlistedRepo, PolicyVerdict } from "./types.ts";
 
 const FORBIDDEN_PHRASES = [
   "autonomous agents not allowed",

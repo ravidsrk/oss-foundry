@@ -1,12 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { ALLOWLIST, repoById } from "./allowlist";
-import type { LiveIssue } from "./github-scout";
-import { buildPacket, renderPrBody } from "./packet";
-import { runSandboxDry } from "./sandbox";
-import { applyPacketToScorecard } from "./scorecard";
-import { seedState } from "./seed";
-import type { FactoryEvent, FactoryState, FollowUpEntry, PrMeta, ScoutScore, TaskPacket } from "./types";
+import { ALLOWLIST, repoById } from "./allowlist.ts";
+import type { LiveIssue } from "./github-scout.ts";
+import { buildPacket, renderPrBody } from "./packet.ts";
+import { runSandboxDry } from "./sandbox.ts";
+import { applyPacketToScorecard } from "./scorecard.ts";
+import { seedState } from "./seed.ts";
+import type { FactoryEvent, FactoryState, FollowUpEntry, PrMeta, ScoutScore, TaskPacket } from "./types.ts";
 
 const KEY = "foundry-v6";
 

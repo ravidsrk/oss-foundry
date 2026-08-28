@@ -1,5 +1,5 @@
-import { repoById } from "./allowlist";
-import type { SandboxSession, TaskPacket } from "./types";
+import { repoById } from "./allowlist.ts";
+import type { SandboxSession, TaskPacket } from "./types.ts";
 
 function now() {
   return new Date().toISOString();

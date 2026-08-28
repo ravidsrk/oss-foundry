@@ -69,7 +69,7 @@ repos:
     testCommand: "true"
     maxFiles: 3
     maxDiffLines: 80
-    sandbox: host
+    sandbox: e2b
     preferredLabels: [documentation]
     firstIssues: []
 

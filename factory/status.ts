@@ -1,5 +1,5 @@
-import { repoById } from "./allowlist";
-import type { PacketStatus, PolicyVerdict, TaskPacket } from "./types";
+import { repoById } from "./allowlist.ts";
+import type { PacketStatus, PolicyVerdict, TaskPacket } from "./types.ts";
 
 export function statusTone(
   status: PacketStatus,

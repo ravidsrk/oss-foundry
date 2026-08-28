@@ -1,8 +1,8 @@
-import { repoById } from "./allowlist";
-import { ABORT_DEFAULT, NON_GOALS_DEFAULT } from "./neighbor";
-import { evaluatePolicy, demoPolicyCorpus } from "./policy";
-import { scoreIssue } from "./scout";
-import type { PacketClass, TaskPacket } from "./types";
+import { repoById } from "./allowlist.ts";
+import { ABORT_DEFAULT, NON_GOALS_DEFAULT } from "./neighbor.ts";
+import { evaluatePolicy, demoPolicyCorpus } from "./policy.ts";
+import { scoreIssue } from "./scout.ts";
+import type { PacketClass, TaskPacket } from "./types.ts";
 
 function idFor(repoId: string, issue: number) {
   return `pkt_${repoId.replace("/", "_")}_${issue}`;

@@ -1,6 +1,6 @@
-import { buildPacket, renderPrBody } from "./packet";
-import { emptyScorecard } from "./scorecard";
-import type { FactoryState, TaskPacket } from "./types";
+import { buildPacket, renderPrBody } from "./packet.ts";
+import { emptyScorecard } from "./scorecard.ts";
+import type { FactoryState, TaskPacket } from "./types.ts";
 
 function touch(
   packet: TaskPacket,

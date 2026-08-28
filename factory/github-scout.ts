@@ -1,6 +1,6 @@
-import { ALLOWLIST } from "./allowlist";
-import { rankIssues } from "./scout";
-import type { ScoutScore } from "./types";
+import { ALLOWLIST } from "./allowlist.ts";
+import { rankIssues } from "./scout.ts";
+import type { ScoutScore } from "./types.ts";
 
 export interface LiveIssue {
   repoId: string;

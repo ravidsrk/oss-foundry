@@ -1,5 +1,5 @@
-import { ALLOWLIST } from "./allowlist";
-import type { ScorecardRow, TaskPacket } from "./types";
+import { ALLOWLIST } from "./allowlist.ts";
+import type { ScorecardRow, TaskPacket } from "./types.ts";
 
 export function emptyScorecard(): ScorecardRow[] {
   return ALLOWLIST.map((repo) => ({

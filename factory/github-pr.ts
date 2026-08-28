@@ -1,6 +1,6 @@
-import type { PrMeta } from "./types";
+import type { PrMeta } from "./types.ts";
 
-export type { PrMeta } from "./types";
+export type { PrMeta } from "./types.ts";
 
 export function parsePrUrl(url: string): { owner: string; repo: string; number: number } | null {
   try {

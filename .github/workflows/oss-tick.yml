@@ -1,5 +1,5 @@
 # Foundry clock. Does NOT open pull requests.
-# Default is dry: validates allowlist + denylist disjointness.
+# Default is dry: parses allowlist.yaml and asserts denylist disjointness.
 # Set repository variable FOUNDRY_LIVE=true to file a packet issue for humans.
 
 name: oss-tick
@@ -17,20 +17,11 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Validate allowlist
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          text = Path("allowlist.yaml").read_text()
-          assert "ravidsrk/orca-fleet" in text, "Wave 0 missing"
-          deny = ["matplotlib/matplotlib", "curl/curl", "pydantic/pydantic"]
-          # denylist section must mention them; repos: section must not
-          repos = text.split("repos:")[1]
-          for d in deny:
-              assert d in text, f"{d} missing from file"
-              assert d not in repos, f"{d} leaked into repos"
-          print("allowlist ok")
-          PY
+        run: node --experimental-strip-types factory/validate-allowlist.ts
       - name: Dry notice
         if: ${{ vars.FOUNDRY_LIVE != 'true' }}
         run: echo "FOUNDRY_LIVE is not set — clock stays dry. No issues, no PRs."
@@ -44,7 +35,7 @@ jobs:
               "The 6h clock fired.",
               "",
               "This issue is a **packet request**, not a contribution.",
-              "Open Foundry, run a tick, freeze the packet, then hand it to `oss-contribute`.",
+              "Open Foundry, run `node --experimental-strip-types factory/cli.ts tick`, freeze the packet, then hand it to `oss-contribute`.",
               "",
               "Do not open a PR from this workflow.",
             ].join("\n");

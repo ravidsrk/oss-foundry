@@ -1,5 +1,5 @@
-import { repoById } from "./allowlist";
-import type { ScoutScore } from "./types";
+import { repoById } from "./allowlist.ts";
+import type { ScoutScore } from "./types.ts";
 
 export function scoreIssue(input: {
   repoId: string;
