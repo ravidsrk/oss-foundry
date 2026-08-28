@@ -329,6 +329,9 @@ export function evidenceIsReady(evidence: EvidenceManifest | undefined): boolean
   if (!isBoundSha(evidence.baseSha) || !isBoundSha(evidence.headSha)) return false;
   if (evidence.baseSha.toLowerCase() === evidence.headSha.toLowerCase()) return false;
   if (evidence.shaVerified !== true) return false;
+  // Witnessed, not attested: the sandbox must have executed both runs itself (issue #6).
+  if (!evidence.witness) return false;
+  if (evidence.witness.testExit !== 0 || evidence.witness.revertExit === 0) return false;
   return true;
 }
 
@@ -543,7 +546,7 @@ export function applyAdvance(
     if (!evidenceIsReady(packet.evidence)) {
       return {
         state,
-        error: `cannot enter draft-ready: attach SHA-bound evidence with red-on-revert first`,
+        error: `cannot enter draft-ready: attach SHA-bound, witnessed evidence (tests and the revert control executed by the sandbox) with red-on-revert first`,
       };
     }
     const overflow = scopeOverflow(

@@ -25,6 +25,7 @@ import {
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
 import { packetDivergences } from "./ledger-check.ts";
+import { witnessEvidence } from "./witness.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -61,6 +62,17 @@ function bindingFor(
     filesChanged: 1,
     diffLines: 1,
     ...extra,
+  };
+}
+
+function witnessed() {
+  return {
+    provider: "host" as const,
+    testExit: 0,
+    revertExit: 1,
+    testLogSha: "c".repeat(64),
+    revertLogSha: "d".repeat(64),
+    ranAt: "2026-08-28T16:00:00.000Z",
   };
 }
 
@@ -288,6 +300,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: ["operator-harvested"],
+    witness: witnessed(),
   }, bindingFor(state.packets[0])).state;
   assert.equal(evidenceIsReady(state.packets[0].evidence), true);
   state = applyAdvance(state, id).state;
@@ -335,6 +348,7 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
+    witness: witnessed(),
   }, bindingFor(state.packets[0])).state;
   state = applyAdvance(state, id).state;
   assert.equal(state.packets[0].status, "draft-ready");
@@ -445,6 +459,7 @@ function readyEvidence(
       filesChanged,
       diffLines,
       notes: [],
+      witness: witnessed(),
     },
     binding: bindingFor(packet, { filesChanged, diffLines }),
   };
@@ -1000,4 +1015,120 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
   assert.deepEqual(packetDivergences(after, live), []);
   const unabsorbed = packetDivergences(submitted, live);
   assert.equal(unabsorbed.some((d) => d.includes(`sync ${submitted.id}`)), true);
+});
+
+function fakeRunner(script: Record<string, { exit: number; output: string }>) {
+  const calls: string[] = [];
+  const runner = async (cmd: string, args: string[]) => {
+    const line = [cmd, ...args].join(" ");
+    calls.push(line);
+    const hit = Object.entries(script).find(([prefix]) => line.includes(prefix));
+    return hit ? hit[1] : { exit: 0, output: "" };
+  };
+  return { runner, calls };
+}
+
+test("host witness: green at head, red on revert, sha-bound logs", async () => {
+  const { runner } = fakeRunner({
+    "run-tests@head": { exit: 0, output: "42 passing" },
+    "run-tests@revert": { exit: 1, output: "3 failing" },
+  });
+  const outcome = await witnessEvidence(
+    {
+      repoId: "ravidsrk/orca-fleet",
+      baseSha: BASE,
+      headSha: HEAD,
+      testCommand: "python3 scripts/validate.py",
+      sandbox: "host",
+      wave: 0,
+    },
+    runner,
+    {},
+  );
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) {
+    assert.equal(outcome.witness.provider, "host");
+    assert.equal(outcome.witness.testExit, 0);
+    assert.notEqual(outcome.witness.revertExit, 0);
+    assert.match(outcome.witness.testLogSha, /^[0-9a-f]{64}$/);
+    assert.match(outcome.witness.revertLogSha, /^[0-9a-f]{64}$/);
+  }
+});
+
+test("host witness fails when the control stays green or tests are red at head", async () => {
+  const greenRevert = await witnessEvidence(
+    { repoId: "ravidsrk/orca-fleet", baseSha: BASE, headSha: HEAD, testCommand: "true", sandbox: "host", wave: 0 },
+    fakeRunner({ "run-tests@head": { exit: 0, output: "ok" }, "run-tests@revert": { exit: 0, output: "still ok" } }).runner,
+    {},
+  );
+  assert.equal(greenRevert.ok, false);
+  if (!greenRevert.ok) assert.match(greenRevert.error, /negative control/i);
+
+  const redHead = await witnessEvidence(
+    { repoId: "ravidsrk/orca-fleet", baseSha: BASE, headSha: HEAD, testCommand: "true", sandbox: "host", wave: 0 },
+    fakeRunner({ "run-tests@head": { exit: 2, output: "boom" } }).runner,
+    {},
+  );
+  assert.equal(redHead.ok, false);
+  if (!redHead.ok) assert.match(redHead.error, /red at head/i);
+});
+
+test("witness refuses instead of degrading: e2b without a key, host outside Wave 0", async () => {
+  const noKey = await witnessEvidence(
+    { repoId: "mcp-use/mcp-use", baseSha: BASE, headSha: HEAD, testCommand: "pnpm test", sandbox: "e2b", wave: 1 },
+    fakeRunner({}).runner,
+    {},
+  );
+  assert.equal(noKey.ok, false);
+  if (!noKey.ok) assert.match(noKey.error, /cannot witness evidence in dry-run/i);
+
+  const hostWave1 = await witnessEvidence(
+    { repoId: "mcp-use/mcp-use", baseSha: BASE, headSha: HEAD, testCommand: "pnpm test", sandbox: "host", wave: 1 },
+    fakeRunner({}).runner,
+    {},
+  );
+  assert.equal(hostWave1.ok, false);
+  if (!hostWave1.ok) assert.match(hostWave1.error, /Wave 0/);
+});
+
+test("draft-ready requires a witnessed manifest, not an attested one", () => {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  state = applyApprove(state, id, "attest").state;
+  state = applyAdvance(state, id).state;
+  state = applyAdvance(state, id).state;
+  const packet = state.packets[0];
+  const unwitnessed = {
+    baseSha: BASE,
+    headSha: HEAD,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert" as const,
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  };
+  state = applyAttachEvidence(state, id, unwitnessed, bindingFor(packet)).state;
+  const blocked = applyAdvance(state, id);
+  assert.match(blocked.error ?? "", /witness/i);
+
+  let state2 = applyTick(blank()).state;
+  state2 = applyApprove(state2, id, "attest").state;
+  state2 = applyAdvance(state2, id).state;
+  state2 = applyAdvance(state2, id).state;
+  const witnessed = {
+    ...unwitnessed,
+    witness: {
+      provider: "host" as const,
+      testExit: 0,
+      revertExit: 1,
+      testLogSha: "a".repeat(64),
+      revertLogSha: "b".repeat(64),
+      ranAt: "2026-08-28T16:00:00.000Z",
+    },
+  };
+  state2 = applyAttachEvidence(state2, id, witnessed, bindingFor(state2.packets[0])).state;
+  const advanced = applyAdvance(state2, id);
+  assert.equal(advanced.error, undefined);
+  assert.equal(state2.packets[0].evidence?.witness?.provider, "host");
 });

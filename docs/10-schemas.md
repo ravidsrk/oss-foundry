@@ -41,7 +41,9 @@ SHA-bound. Copied from orca-fleet `runtime/evidence-manifest.md`:
 - `filesChanged`, `diffLines` vs repo caps
 - `notes`
 
-A packet without `negativeControl=red-on-revert` and real (non-placeholder) `baseSha` / `headSha` cannot enter `draft-ready`. The engine does not invent SHAs.
+- `witness` (required for `draft-ready`): `{ provider: host|e2b, testExit, revertExit, testLogSha, revertLogSha, ranAt }` — the sandbox executed both runs itself; log hashes are sha256.
+
+A packet without `negativeControl=red-on-revert`, real (non-placeholder) `baseSha` / `headSha`, and a `witness` whose `testExit` is 0 and `revertExit` is non-zero cannot enter `draft-ready`. The engine does not invent SHAs, and it does not take the operator's word for an exit code.
 
 ## Allowlist repo
 

@@ -27,6 +27,7 @@ import {
   syncGithubPr,
 } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
+import { execFile } from "node:child_process";
 import { packetDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderPrBody } from "./packet.ts";
@@ -34,6 +35,21 @@ import { health } from "./scorecard.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
 import type { EvidenceManifest } from "./types.ts";
+import { witnessEvidence, type WitnessRunner } from "./witness.ts";
+
+const hostRunner: WitnessRunner = (step, args, opts) =>
+  new Promise((resolveRun) => {
+    const [cmd, cmdArgs] =
+      step === "git"
+        ? ["git", args]
+        : step === "cleanup"
+          ? ["rm", ["-rf", ...args]]
+          : ["bash", ["-lc", args[0] ?? "false"]];
+    execFile(cmd, cmdArgs, { cwd: opts?.cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const exit = err && typeof (err as { code?: unknown }).code === "number" ? ((err as { code: number }).code) : err ? 1 : 0;
+      resolveRun({ exit, output: `${stdout}${stderr}` });
+    });
+  });
 
 const STATE_FILE = resolve(".foundry-state.json");
 
@@ -149,7 +165,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   reject <packetId> --reason <text>
   halt <repoId> --reason <text>
   advance <packetId>
-  evidence <packetId> --base <sha> --head <sha> --test-exit <n> --negative <red-on-revert|pending|failed>
+  evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested)
   body <packetId>
   attach-draft <packetId> <prUrl>
   sync <packetId> [--threads-answered]
@@ -305,16 +321,9 @@ async function main() {
       console.error(`unknown packet ${id}`);
       process.exit(1);
     }
-    const testExitRaw = flag(rest, "--test-exit");
-    const negative = flag(rest, "--negative");
-    if (testExitRaw === undefined || negative === undefined) {
-      console.error(
-        "evidence requires --test-exit <n> and --negative <red-on-revert|pending|failed> (no success defaults)",
-      );
-      process.exit(1);
-    }
-    if (negative !== "red-on-revert" && negative !== "pending" && negative !== "failed") {
-      console.error("invalid --negative");
+    const repo = repoById(packet.repoId);
+    if (!repo?.testCommand) {
+      console.error("no testCommand for this repo");
       process.exit(1);
     }
     const compared = await compareCommits(packet.repoId, base, head);
@@ -322,20 +331,34 @@ async function main() {
       console.error(compared.error);
       process.exit(1);
     }
+    console.error(`witnessing ${packet.repoId} ${base.slice(0, 7)}..${head.slice(0, 7)} (${repo.sandbox}) — cloning and running \`${repo.testCommand}\` twice`);
+    const outcome = await witnessEvidence(
+      {
+        repoId: packet.repoId,
+        baseSha: base,
+        headSha: head,
+        testCommand: repo.testCommand,
+        sandbox: repo.sandbox,
+        wave: repo.wave,
+      },
+      hostRunner,
+      process.env,
+    );
+    if (!outcome.ok) {
+      console.error(outcome.error);
+      process.exit(1);
+    }
     const evidence: EvidenceManifest = {
       baseSha: base,
       headSha: head,
-      testCommand: repoById(packet.repoId)?.testCommand ?? packet.evidence?.testCommand ?? "",
-      testExit: Number(testExitRaw),
-      negativeControl: negative,
+      testCommand: repo.testCommand,
+      testExit: outcome.witness.testExit,
+      negativeControl: outcome.witness.revertExit !== 0 ? "red-on-revert" : "failed",
       filesChanged: compared.filesChanged,
       diffLines: compared.diffLines,
-      notes: ["attached via CLI"],
+      notes: [`witnessed via CLI (${outcome.witness.provider}); logs sha256 ${outcome.witness.testLogSha.slice(0, 12)}/${outcome.witness.revertLogSha.slice(0, 12)}`],
+      witness: outcome.witness,
     };
-    if (!evidence.testCommand) {
-      console.error("no testCommand for this repo");
-      process.exit(1);
-    }
     const result = applyAttachEvidence(state, id, evidence, bindingFromCompare(compared));
     if (result.error) {
       const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
