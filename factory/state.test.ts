@@ -155,3 +155,12 @@ test("merge rate counts terminal outcomes; silence alone cannot trip the halt", 
   assert.ok(mergeRate(mixed) > 0.6);
   assert.equal(health(mixed), "good");
 });
+
+test("stored packet with dark-eligible lighting is refused", () => {
+  const seed = seedState();
+  const packet = { ...seed.packets[0], lighting: "dark-eligible" };
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "dark.json");
+  writeFileSync(path, JSON.stringify({ ...seed, packets: [packet, ...seed.packets.slice(1)] }));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, false);
+});

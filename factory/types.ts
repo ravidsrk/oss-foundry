@@ -38,7 +38,8 @@ export type PacketStatus =
   | "parked"
   | "rejected";
 
-export type Lighting = "lit" | "dark-eligible";
+/** Every Foundry packet is independently reviewed. The historical `dark-eligible` value is not representable. */
+export type Lighting = "lit";
 
 export type SandboxKind = "host" | "e2b" | "daytona";
 
@@ -80,9 +81,7 @@ export interface ScoutScore {
     labels: number;
     size: number;
     freshness: number;
-    grok?: number;
   };
-  grokRationale?: string;
 }
 
 export interface FollowUpEntry {

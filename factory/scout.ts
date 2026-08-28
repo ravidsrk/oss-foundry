@@ -6,8 +6,6 @@ export function scoreIssue(input: {
   title: string;
   labels: string[];
   daysOld?: number;
-  grok?: number;
-  grokRationale?: string;
 }): ScoutScore {
   const repo = repoById(input.repoId);
   const wave = repo ? (repo.wave === 0 ? 40 : repo.wave === 1 ? 28 : 12) : 0;
@@ -27,13 +25,11 @@ export function scoreIssue(input: {
   const days = input.daysOld ?? 30;
   const freshness = days < 14 ? 12 : days < 60 ? 8 : 4;
 
-  const grok = typeof input.grok === "number" ? Math.max(0, Math.min(20, input.grok)) : undefined;
-  const total = wave + labels + size + freshness + (grok ?? 0);
+  const total = wave + labels + size + freshness;
 
   return {
     total,
-    parts: { wave, labels, size, freshness, grok },
-    grokRationale: input.grokRationale,
+    parts: { wave, labels, size, freshness },
   };
 }
 
