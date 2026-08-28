@@ -278,12 +278,18 @@ function escapeRe(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** GitHub closing keywords only — a casual mention of #N or the issue URL is not a binding. */
-export function mentionsIssue(text: string, issueNumber: number, issueUrl: string): boolean {
+/** GitHub closing keywords only. Bare #N or this packet's owner/repo#N / issue URL. Foreign owner/repo#N does not bind. */
+export function mentionsIssue(
+  text: string,
+  issueNumber: number,
+  issueUrl: string,
+  repoId: string,
+): boolean {
   const kw = String.raw`(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
   const n = String(issueNumber);
-  const closeHash = new RegExp(`${kw}\\s*:?\\s*(?:[\\w.-]+\\/[\\w.-]+)?#${n}(?!\\d)`, "i");
-  if (closeHash.test(text)) return true;
+  const closeBare = new RegExp(`${kw}\\s*:?\\s*#${n}(?!\\d)`, "i");
+  const closePrefixed = new RegExp(`${kw}\\s*:?\\s*${escapeRe(repoId)}#${n}(?!\\d)`, "i");
+  if (closeBare.test(text) || closePrefixed.test(text)) return true;
   if (issueUrl) {
     const closeUrl = new RegExp(`${kw}\\s*:?\\s*${escapeRe(issueUrl)}`, "i");
     if (closeUrl.test(text)) return true;
@@ -318,7 +324,7 @@ export function applyAttachEvidence(
     return { state, error: "evidence scope must match the compared range" };
   }
   const blob = binding.messages.join("\n");
-  if (!mentionsIssue(blob, packet.issueNumber, packet.issueUrl)) {
+  if (!mentionsIssue(blob, packet.issueNumber, packet.issueUrl, packet.repoId)) {
     return { state, error: `commit range does not close ${packet.repoId}#${packet.issueNumber}` };
   }
   const bound: EvidenceManifest = { ...evidence, shaVerified: true };
@@ -428,7 +434,7 @@ export function applyAttachDraft(
     return { state, error: `PR head ${opts.headSha.slice(0, 7)} does not match evidence head` };
   }
   const linked = `${opts.title ?? ""}\n${opts.body ?? ""}`;
-  if (!mentionsIssue(linked, packet.issueNumber, packet.issueUrl)) {
+  if (!mentionsIssue(linked, packet.issueNumber, packet.issueUrl, packet.repoId)) {
     return {
       state,
       error: `PR does not close packet issue ${packet.repoId}#${packet.issueNumber}`,

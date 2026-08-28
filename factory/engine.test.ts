@@ -11,6 +11,7 @@ import {
   hasInflight,
   isBoundSha,
   isPlaceholderSha,
+  mentionsIssue,
   type EvidenceBinding,
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
@@ -253,6 +254,21 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
   assert.ok(casualMention.error);
   assert.match(casualMention.error, /does not close/);
 
+  const foreignRepo = applyAttachEvidence(state, id, {
+    baseSha: BASE,
+    headSha: OTHER,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  }, bindingFor(state.packets[0], {
+    messages: [`Fixes other-owner/other-repo#${state.packets[0].issueNumber}`],
+  }));
+  assert.ok(foreignRepo.error);
+  assert.match(foreignRepo.error, /does not close/);
+
   state = applyAttachEvidence(state, id, {
     baseSha: BASE,
     headSha: HEAD,
@@ -267,6 +283,16 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
   state = applyAdvance(state, id).state;
   assert.equal(state.packets[0].status, "draft-ready");
   assert.ok(state.packets[0].prBody?.includes(DISCLOSURE));
+});
+
+test("mentionsIssue rejects a foreign owner/repo with the same issue number", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const repo = "ravidsrk/orca-fleet";
+  assert.equal(mentionsIssue("Fixes #71", 71, url, repo), true);
+  assert.equal(mentionsIssue("Fixes ravidsrk/orca-fleet#71", 71, url, repo), true);
+  assert.equal(mentionsIssue(`Fixes ${url}`, 71, url, repo), true);
+  assert.equal(mentionsIssue("Fixes other-owner/other-repo#71", 71, url, repo), false);
+  assert.equal(mentionsIssue("Closes matplotlib/matplotlib#71", 71, url, repo), false);
 });
 
 test("renderPrBody embeds verbatim disclosure; create payload is draft-only", () => {
