@@ -24,7 +24,7 @@ export function runSandboxDry(packet: TaskPacket): SandboxSession {
   const base = planSandbox(packet);
   const repo = repoById(packet.repoId);
   const cmds = [
-    `git clone --depth 1 https://github.com/${packet.repoId}.git`,
+    `git clone https://github.com/${packet.repoId}.git  # full clone — historical SHAs must be reachable`,
     repo?.testCommand ?? "true",
     "git diff --stat",
     "harvest patch via git format-patch / git push to fork",

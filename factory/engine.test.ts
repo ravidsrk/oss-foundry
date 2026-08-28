@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { CAPS } from "./allowlist.ts";
 import {
@@ -26,13 +28,14 @@ import {
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
 import { packetDivergences } from "./ledger-check.ts";
-import { witnessEvidence } from "./witness.ts";
+import { isTestPath, witnessEvidence } from "./witness.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { runSandboxDry } from "./sandbox.ts";
 import { emptyScorecard, health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
+import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
 import type { FactoryState } from "./types.ts";
 
@@ -1178,4 +1181,105 @@ test("the committed evidence page regenerates byte-identical from this tree", ()
   );
   assert.equal(committed.trimEnd(), renderEvidencePage(merged).trimEnd());
   assert.equal(committed.includes(DISCLOSURE), true);
+});
+
+test("test-path classifier knows suffix conventions and setup runs before tests", async () => {
+  assert.equal(isTestPath("handler_test.go"), true);
+  assert.equal(isTestPath("pkg/server/server_test.go"), true);
+  assert.equal(isTestPath("foo_test.py"), true);
+  assert.equal(isTestPath("src/contest.ts"), false);
+  assert.equal(isTestPath("src/protest/handler.ts"), false);
+  assert.equal(isTestPath("attestation.ts"), false);
+
+  const calls: string[] = [];
+  const runner = async (step: string, args: string[]) => {
+    calls.push([step, ...args].join(" "));
+    if (step === "run-tests@head") return { exit: 0, output: "ok" };
+    if (step === "run-tests@revert") return { exit: 1, output: "red" };
+    return { exit: 0, output: "" };
+  };
+  const outcome = await witnessEvidence(
+    {
+      repoId: "ravidsrk/frontguard",
+      baseSha: BASE,
+      headSha: HEAD,
+      testCommand: "npm test",
+      setupCommand: "npm ci",
+      sandbox: "host",
+      wave: 0,
+    },
+    runner as never,
+    {},
+  );
+  assert.equal(outcome.ok, true);
+  const setupIdx = calls.findIndex((c) => c.startsWith("run-setup npm ci"));
+  const headIdx = calls.findIndex((c) => c.startsWith("run-tests@head"));
+  const cleanIdx = calls.findIndex((c) => c.includes("clean -fdx"));
+  const revertIdx = calls.findIndex((c) => c.startsWith("run-tests@revert"));
+  assert.ok(setupIdx !== -1 && headIdx !== -1 && cleanIdx !== -1 && revertIdx !== -1);
+  assert.ok(setupIdx < headIdx && headIdx < cleanIdx && cleanIdx < revertIdx);
+
+  const noSetup = await witnessEvidence(
+    { repoId: "ravidsrk/orca-fleet", baseSha: BASE, headSha: HEAD, testCommand: "true", sandbox: "host", wave: 0 },
+    runner as never,
+    {},
+  );
+  assert.equal(noSetup.ok, true);
+});
+
+test("a shape-valid witness with a green revert cannot pass the engine gate", () => {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  state = applyApprove(state, id, "attest").state;
+  state = applyAdvance(state, id).state;
+  state = applyAdvance(state, id).state;
+  const packet = state.packets[0];
+  state = applyAttachEvidence(state, id, {
+    baseSha: BASE,
+    headSha: HEAD,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+    witness: {
+      provider: "host",
+      testExit: 0,
+      revertExit: 0,
+      testLogSha: "e".repeat(64),
+      revertLogSha: "f".repeat(64),
+      ranAt: "2026-08-28T18:00:00.000Z",
+    },
+  }, bindingFor(packet)).state;
+  const blocked = applyAdvance(state, id);
+  assert.match(blocked.error ?? "", /witnessed/);
+});
+
+test("daytona witnesses validate and daytona refusals name the right provider", async () => {
+  const seed = seedState();
+  const packet = { ...seed.packets[0] };
+  packet.evidence = {
+    ...packet.evidence!,
+    witness: {
+      provider: "daytona",
+      testExit: 0,
+      revertExit: 1,
+      testLogSha: "a".repeat(64),
+      revertLogSha: "b".repeat(64),
+      ranAt: "2026-08-28T18:00:00.000Z",
+    },
+  };
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "daytona.json");
+  writeFileSync(path, JSON.stringify({ ...seed, packets: [packet, ...seed.packets.slice(1)] }));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true);
+
+  const refusal = await witnessEvidence(
+    { repoId: "mcp-use/mcp-use", baseSha: BASE, headSha: HEAD, testCommand: "pnpm test", sandbox: "daytona", wave: 1 },
+    (async () => ({ exit: 0, output: "" })) as never,
+    {},
+  );
+  assert.equal(refusal.ok, false);
+  if (!refusal.ok) assert.match(refusal.error, /dry-run/i);
 });

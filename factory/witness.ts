@@ -8,7 +8,7 @@ import type { EvidenceWitness, SandboxKind, Wave } from "./types.ts";
  * (args[0] is the repo's test command, executed by the runner), "cleanup" (args[0] is a scratch
  * dir). The runner seam is what makes the protocol testable without a network or a shell.
  */
-export type WitnessStep = "git" | "run-tests@head" | "run-tests@revert" | "cleanup";
+export type WitnessStep = "git" | "run-setup" | "run-tests@head" | "run-tests@revert" | "cleanup";
 export type WitnessRunner = (
   step: WitnessStep,
   args: string[],
@@ -17,7 +17,12 @@ export type WitnessRunner = (
 
 export type WitnessOutcome = { ok: true; witness: EvidenceWitness } | { ok: false; error: string };
 
-const TEST_PATH_RE = /(^|\/)(tests?|__tests__|spec)(\/|$)|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+$/i;
+const TEST_PATH_RE = /(^|\/)(tests?|__tests__|spec)(\/|$)|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+$|_test\.(go|py)$|_spec\.rb$/i;
+
+/** Exported for probing: the classifier that decides which changed files count as tests (and stay un-reverted for the negative control). */
+export function isTestPath(path: string): boolean {
+  return TEST_PATH_RE.test(path);
+}
 
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -35,6 +40,7 @@ export async function witnessEvidence(
     baseSha: string;
     headSha: string;
     testCommand: string;
+    setupCommand?: string;
     sandbox: SandboxKind;
     wave: Wave;
   },
@@ -55,7 +61,7 @@ export async function witnessEvidence(
     return {
       ok: false,
       error:
-        "E2B execution runs on the worker host, not in this repo's CLI (ADR 0003) — run the witness there and re-attach. This CLI refuses rather than faking a green harvest.",
+        `${input.sandbox === "daytona" ? "Daytona" : "E2B"} execution runs on the worker host, not in this repo's CLI (ADR 0003) — run the witness there and re-attach. This CLI refuses rather than faking a green harvest.`,
     };
   }
 
@@ -80,14 +86,32 @@ export async function witnessEvidence(
   const checkout = await runner("git", ["-C", dir, "checkout", "--detach", input.headSha]);
   if (checkout.exit !== 0) return fail(`checkout failed: ${checkout.output.slice(0, 200)}`);
 
+  if (input.setupCommand) {
+    const setup = await runner("run-setup", [input.setupCommand], { cwd: dir });
+    if (setup.exit !== 0) {
+      return fail(`setup command failed (exit ${setup.exit}) — cannot witness without a working environment: ${setup.output.slice(0, 200)}`);
+    }
+  }
+
   const headRun = await runner("run-tests@head", [input.testCommand], { cwd: dir });
   if (headRun.exit !== 0) {
     return fail(`tests are red at head ${input.headSha.slice(0, 7)} (exit ${headRun.exit}) — nothing to witness`);
   }
 
+  // Untracked artifacts from the head run (build output, caches) must not keep the revert run
+  // green — or make it spuriously red. Clean everything the clone did not track before reverting.
+  const clean = await runner("git", ["-C", dir, "clean", "-fdx", "--exclude", "node_modules"]);
+  if (clean.exit !== 0) return fail(`clean between runs failed: ${clean.output.slice(0, 200)}`);
+  if (input.setupCommand) {
+    const resetup = await runner("run-setup", [input.setupCommand], { cwd: dir });
+    if (resetup.exit !== 0) {
+      return fail(`setup re-run after clean failed (exit ${resetup.exit}): ${resetup.output.slice(0, 200)}`);
+    }
+  }
+
   const changed = await runner("git", ["-C", dir, "diff", "--name-only", input.baseSha, input.headSha]);
   const files = changed.output.split("\n").map((f) => f.trim()).filter(Boolean);
-  const nonTest = files.filter((f) => !TEST_PATH_RE.test(f));
+  const nonTest = files.filter((f) => !isTestPath(f));
   const revertPaths = nonTest.length > 0 ? nonTest : ["."];
   const revert = await runner("git", ["-C", dir, "checkout", input.baseSha, "--", ...revertPaths]);
   if (revert.exit !== 0) return fail(`revert to base failed: ${revert.output.slice(0, 200)}`);

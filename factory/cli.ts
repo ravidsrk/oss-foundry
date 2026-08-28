@@ -11,6 +11,7 @@ import {
   applyTick,
   bindingFromCompare,
   classifyCompetition,
+  isBoundSha,
   findCompetingPull,
   hasInflight,
   INFLIGHT_STATUSES,
@@ -45,7 +46,7 @@ const hostRunner: WitnessRunner = (step, args, opts) =>
         ? ["git", args]
         : step === "cleanup"
           ? ["rm", ["-rf", ...args]]
-          : ["bash", ["-lc", args[0] ?? "false"]];
+          : ["bash", ["-lc", args[0] ?? "false"]]; // run-setup and both run-tests phases execute the repo's own commands
     execFile(cmd, cmdArgs, { cwd: opts?.cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
       const exit = err && typeof (err as { code?: unknown }).code === "number" ? ((err as { code: number }).code) : err ? 1 : 0;
       resolveRun({ exit, output: `${stdout}${stderr}` });
@@ -329,6 +330,10 @@ async function main() {
       console.error("no testCommand for this repo");
       process.exit(1);
     }
+    if (!isBoundSha(base) || !isBoundSha(head)) {
+      console.error("evidence requires full 40-hex commit SHAs for --base and --head (no refs, no placeholders) — refusing before any clone or test run");
+      process.exit(1);
+    }
     const compared = await compareCommits(packet.repoId, base, head);
     if (!compared.ok) {
       console.error(compared.error);
@@ -341,6 +346,7 @@ async function main() {
         baseSha: base,
         headSha: head,
         testCommand: repo.testCommand,
+        setupCommand: repo.setupCommand,
         sandbox: repo.sandbox,
         wave: repo.wave,
       },

@@ -127,7 +127,7 @@ function isWitness(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const o = value as Record<string, unknown>;
   return (
-    (o.provider === "host" || o.provider === "e2b") &&
+    (o.provider === "host" || o.provider === "e2b" || o.provider === "daytona") &&
     typeof o.testExit === "number" &&
     typeof o.revertExit === "number" &&
     typeof o.testLogSha === "string" &&

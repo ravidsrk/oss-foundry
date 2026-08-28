@@ -111,6 +111,7 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
   if (!Number.isFinite(maxFiles) || !Number.isFinite(maxDiffLines)) {
     throw new Error(`allowlist.yaml: ${id} needs maxFiles and maxDiffLines`);
   }
+  const setupCommand = r.setupCommand === undefined ? undefined : String(r.setupCommand);
   const testCommand = String(r.testCommand ?? "");
   if (!testCommand) throw new Error(`allowlist.yaml: ${id} needs testCommand`);
   const preferredLabels = asArray(r.preferredLabels).map((x) => String(x));
@@ -132,6 +133,7 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
     language: String(r.language ?? ""),
     aiPolicy,
     policyNotes: String(r.policyNotes ?? ""),
+    setupCommand,
     testCommand,
     maxFiles,
     maxDiffLines,
