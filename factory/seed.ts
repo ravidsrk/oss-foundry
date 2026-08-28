@@ -2,7 +2,11 @@ import { buildPacket, renderPrBody } from "./packet";
 import { emptyScorecard } from "./scorecard";
 import type { FactoryState, TaskPacket } from "./types";
 
-function touch(packet: TaskPacket, status: TaskPacket["status"], station: TaskPacket["station"]): TaskPacket {
+function touch(
+  packet: TaskPacket,
+  status: TaskPacket["status"],
+  station: TaskPacket["station"],
+): TaskPacket {
   return { ...packet, status, station, updatedAt: new Date().toISOString() };
 }
 
@@ -14,6 +18,8 @@ export function seedState(): FactoryState {
       "[P2] CHANGELOG [Unreleased] describes changes already on main; version bump pending",
     issueUrl: "https://github.com/ravidsrk/orca-fleet/issues/42",
     labels: ["documentation", "p2"],
+    agentsMd:
+      "This is our repository. Agents may open draft PRs. Human freeze still applies.",
   });
   changelog = {
     ...touch(changelog, "merged", "terminal"),
@@ -76,9 +82,10 @@ export function seedState(): FactoryState {
     issueTitle: "[docs] README Architecture still describes a src/ tree; repo is packages/ + apps/",
     issueUrl: "https://github.com/ravidsrk/frontguard/issues/195",
     labels: ["documentation"],
+    agentsMd: "This is our repository. Agents may open draft PRs.",
   });
   architecture = {
-    ...touch(architecture, "followed-up", "follow-up"),
+    ...touch(architecture, "merged", "terminal"),
     humanAttest: {
       by: "operator",
       at: "2026-08-27T07:15:00.000Z",
@@ -89,30 +96,30 @@ export function seedState(): FactoryState {
     prMeta: {
       url: "https://github.com/ravidsrk/frontguard/pull/196",
       title: "docs: README architecture matches the monorepo",
-      draft: true,
-      state: "open",
-      merged: false,
-      mergeable: "unstable",
+      draft: false,
+      state: "closed",
+      merged: true,
+      mergeable: "unknown",
       commits: 1,
       reviewComments: 0,
       issueComments: 0,
       headSha: "09882b0075d7bb8f99a76c2526504b9194ce380d",
-      updatedAt: "2026-08-27T07:11:25.000Z",
-      syncedAt: "2026-08-27T07:17:00.000Z",
+      updatedAt: "2026-08-28T06:40:44.000Z",
+      syncedAt: "2026-08-28T10:30:00.000Z",
     },
     followUps: [
       {
-        id: "fu_pr196_quiet",
-        at: "2026-08-27T07:17:00.000Z",
+        id: "fu_pr196_merged",
+        at: "2026-08-28T06:40:44.000Z",
         kind: "quiet",
-        body: "Greptile 5/5. No review threads. CI red is pre-existing on main (playwright lockfile + setup-node drift). README-only; Foundry does not merge.",
+        body: "Merged by ravidsrk 2026-08-28. Doctrine is never-merge even on owned repos; this happened. Not a Wave 1 promotion-gate merge.",
         url: "https://github.com/ravidsrk/frontguard/pull/196",
       },
       {
         id: "fu_pr196_ci",
         at: "2026-08-27T07:16:30.000Z",
         kind: "ci",
-        body: "CI failures match main since dependabot #185/#184. Not caused by this README diff.",
+        body: "CI failures matched main since dependabot #185/#184. README-only packet.",
         url: "https://github.com/ravidsrk/frontguard/actions/runs/33048625018",
       },
     ],
@@ -125,10 +132,7 @@ export function seedState(): FactoryState {
       negativeControl: "red-on-revert",
       filesChanged: 1,
       diffLines: 43,
-      notes: [
-        "Draft PR #196 quiet. Foundry does not merge.",
-        "README only. CI red is pre-existing on main.",
-      ],
+      notes: ["Merged 2026-08-28 by operator on an owned repo. Foundry still does not merge as policy."],
     },
   };
 
@@ -138,9 +142,10 @@ export function seedState(): FactoryState {
     issueTitle: "[P2] Validator: one unreadable SKILL.md must not abort the catalog",
     issueUrl: "https://github.com/ravidsrk/orca-fleet/issues/71",
     labels: ["documentation", "p2"],
+    agentsMd: "This is our repository. Agents may open draft PRs.",
   });
   unreadable = {
-    ...touch(unreadable, "followed-up", "follow-up"),
+    ...touch(unreadable, "merged", "terminal"),
     humanAttest: {
       by: "operator",
       at: "2026-08-27T07:18:00.000Z",
@@ -151,23 +156,23 @@ export function seedState(): FactoryState {
     prMeta: {
       url: "https://github.com/ravidsrk/orca-fleet/pull/72",
       title: "fix(validate): one unreadable SKILL.md must not abort the catalog",
-      draft: true,
-      state: "open",
-      merged: false,
-      mergeable: "clean",
+      draft: false,
+      state: "closed",
+      merged: true,
+      mergeable: "unknown",
       commits: 1,
       reviewComments: 0,
       issueComments: 0,
       headSha: "8c7068a5467a283de524c88e549dfa66782eeec2",
-      updatedAt: "2026-08-27T07:20:57.000Z",
-      syncedAt: "2026-08-27T10:24:00.000Z",
+      updatedAt: "2026-08-27T11:30:04.000Z",
+      syncedAt: "2026-08-28T10:30:00.000Z",
     },
     followUps: [
       {
-        id: "fu_pr72_quiet",
-        at: "2026-08-27T10:24:00.000Z",
+        id: "fu_pr72_merged",
+        at: "2026-08-27T11:30:04.000Z",
         kind: "quiet",
-        body: "Greptile 5/5. No review threads. mergeable=clean. Foundry does not merge.",
+        body: "Maintainer merged #72. Foundry-attested Wave 0 merge 2/2.",
         url: "https://github.com/ravidsrk/orca-fleet/pull/72",
       },
     ],
@@ -180,10 +185,7 @@ export function seedState(): FactoryState {
       negativeControl: "red-on-revert",
       filesChanged: 5,
       diffLines: 87,
-      notes: [
-        "Draft PR #72 quiet. Foundry does not merge.",
-        "103 tests. Badge JSON regenerated 100 → 103.",
-      ],
+      notes: ["Merged by maintainer 2026-08-27. Foundry did not click merge.", "103 tests."],
     },
   };
 
@@ -193,11 +195,56 @@ export function seedState(): FactoryState {
     issueTitle: "Differentiate the right sidebar toggle icon by state",
     issueUrl: "https://github.com/ColeMurray/background-agents/issues/1476",
     labels: ["good first issue", "help wanted", "enhancement"],
+    agentsMd:
+      "Well-formed agent PRs are welcome if they include tests, a failing-first reproduction, and a short disclosure. Keep diffs small.",
+    contributing: "No CLA. No DCO. Conventional commits.",
   });
   sidebar = {
-    ...touch(sidebar, "parked", "terminal"),
-    parkReason:
-      "Wave 1 waits on two Foundry-attested Wave 0 merges. #70 is 1/2. Frontguard #196 and orca-fleet #72 are quiet drafts.",
+    ...touch(sidebar, "submitted", "follow-up"),
+    humanAttest: {
+      by: "operator",
+      at: "2026-08-27T12:00:00.000Z",
+      note: "Wave 1 #1476. Icon + test. Caps 3 files / +88. Opened from a browser session (App 403).",
+    },
+    prUrl: "https://github.com/ColeMurray/background-agents/pull/1652",
+    prBody: renderPrBody(sidebar),
+    prMeta: {
+      url: "https://github.com/ColeMurray/background-agents/pull/1652",
+      title: "feat: differentiate the right sidebar toggle icon by state",
+      draft: false,
+      state: "open",
+      merged: false,
+      mergeable: "blocked",
+      commits: 6,
+      reviewComments: 0,
+      issueComments: 1,
+      headSha: "48c2242683705b00503d3436575bf3c28b1b0c9b",
+      updatedAt: "2026-08-28T10:19:46.000Z",
+      syncedAt: "2026-08-28T10:30:00.000Z",
+    },
+    followUps: [
+      {
+        id: "fu_pr1652_opened",
+        at: "2026-08-28T10:14:03.000Z",
+        kind: "note",
+        body: "Upstream PR opened ready-for-review (doctrine miss: should have been draft). Fork rehearsal ravidsrk/background-agents#1 closed. Follow up; do not merge; do not tick.",
+        url: "https://github.com/ColeMurray/background-agents/pull/1652",
+      },
+    ],
+    evidence: {
+      baseSha: "217511d855e58f95cdfff82b05ebd92114fc59e2",
+      headSha: "48c2242683705b00503d3436575bf3c28b1b0c9b",
+      reviewedSha: "48c2242683705b00503d3436575bf3c28b1b0c9b",
+      testCommand: "npm test",
+      testExit: 0,
+      negativeControl: "red-on-revert",
+      filesChanged: 3,
+      diffLines: 89,
+      notes: [
+        "Opened ready, not draft. Shortened disclosure on GitHub vs renderPrBody.",
+        "Fork PR #1 closed unmerged.",
+      ],
+    },
   };
 
   const matplotlib = buildPacket({
@@ -214,15 +261,17 @@ export function seedState(): FactoryState {
     issueTitle: "Document HUMAN: requirement in contributor FAQ",
     issueUrl: "https://github.com/All-Hands-AI/OpenHands/issues/16907",
     labels: ["documentation"],
+    agentsMd: "Please sign the CLA. HUMAN: required.",
+    contributing: "Developer Certificate of Origin. Sign-off required.",
   });
 
   const scorecard = emptyScorecard().map((row) => {
     if (row.repoId === "ravidsrk/orca-fleet") {
       return {
         ...row,
-        opened: 7,
-        merged: 6,
-        reviewCommentsAvg: 1.2,
+        opened: 2,
+        merged: 2,
+        reviewCommentsAvg: 0.5,
         maintainerTone: "warm" as const,
         lastTouch: "2026-08-27",
       };
@@ -231,10 +280,20 @@ export function seedState(): FactoryState {
       return {
         ...row,
         opened: 1,
-        merged: 0,
+        merged: 1,
         reviewCommentsAvg: 0,
         maintainerTone: "warm" as const,
-        lastTouch: "2026-08-27",
+        lastTouch: "2026-08-28",
+      };
+    }
+    if (row.repoId === "ColeMurray/background-agents") {
+      return {
+        ...row,
+        opened: 1,
+        merged: 0,
+        reviewCommentsAvg: 0,
+        maintainerTone: "neutral" as const,
+        lastTouch: "2026-08-28",
       };
     }
     return row;
@@ -242,55 +301,36 @@ export function seedState(): FactoryState {
 
   return {
     version: 6,
-    packets: [unreadable, architecture, changelog, sidebar, matplotlib, openhands],
+    packets: [sidebar, unreadable, architecture, changelog, matplotlib, openhands],
     events: [
       {
-        id: "evt_pr72_quiet",
-        at: "2026-08-27T10:24:00.000Z",
-        kind: "follow-up",
-        packetId: unreadable.id,
-        message:
-          "orca-fleet#72 quiet. Greptile 5/5. mergeable=clean. Foundry does not merge.",
-      },
-      {
-        id: "evt_pr72",
-        at: "2026-08-27T07:18:57.000Z",
+        id: "evt_pr1652",
+        at: "2026-08-28T10:14:03.000Z",
         kind: "draft",
-        packetId: unreadable.id,
+        packetId: sidebar.id,
         message:
-          "Wave 0 draft opened: ravidsrk/orca-fleet#72 (unreadable SKILL.md). Merge left to the maintainer.",
+          "Wave 1 upstream PR ColeMurray/background-agents#1652 opened (ready, not draft). Follow up. Do not merge. Do not tick.",
       },
       {
-        id: "evt_pr196_quiet",
-        at: "2026-08-27T07:17:00.000Z",
+        id: "evt_pr196_merged",
+        at: "2026-08-28T06:40:44.000Z",
         kind: "follow-up",
         packetId: architecture.id,
-        message:
-          "frontguard#196 quiet. Greptile 5/5. CI red is pre-existing on main. Foundry does not merge.",
+        message: "frontguard#196 merged by ravidsrk. Not a promotion-gate merge.",
       },
       {
-        id: "evt_pr196",
-        at: "2026-08-27T07:15:00.000Z",
-        kind: "draft",
-        packetId: architecture.id,
-        message:
-          "Wave 0 draft opened: ravidsrk/frontguard#196 (README architecture). Merge left to the maintainer.",
+        id: "evt_pr72_merged",
+        at: "2026-08-27T11:30:04.000Z",
+        kind: "follow-up",
+        packetId: unreadable.id,
+        message: "Maintainer merged orca-fleet#72. Foundry-attested Wave 0 merge 2/2.",
       },
       {
         id: "evt_pr70_merged",
         at: "2026-08-27T07:04:52.000Z",
         kind: "follow-up",
         packetId: changelog.id,
-        message:
-          "Maintainer merged orca-fleet#70. Foundry-attested Wave 0 merge 1/2. Wave 1 still waits.",
-      },
-      {
-        id: "evt_wave1_park",
-        at: "2026-08-27T07:14:00.000Z",
-        kind: "gate",
-        packetId: sidebar.id,
-        message:
-          "Parked ColeMurray/background-agents#1476 — Wave 1 needs two Foundry Wave 0 merges.",
+        message: "Maintainer merged orca-fleet#70. Foundry-attested Wave 0 merge 1/2.",
       },
       {
         id: "evt_pr70_follow",
@@ -300,18 +340,11 @@ export function seedState(): FactoryState {
         message: "Follow-up on orca-fleet#70: Greptile date thread answered (d91fe2f).",
       },
       {
-        id: "evt_pr70",
-        at: "2026-08-26T19:17:20.000Z",
-        kind: "draft",
-        packetId: changelog.id,
-        message: "Wave 0 draft opened: ravidsrk/orca-fleet#70 (release 0.5.0).",
-      },
-      {
         id: "evt_seed_oss",
         at: "2026-07-16T00:00:00.000Z",
         kind: "draft",
         message:
-          "oss-contribute external-run: 5 PRs + 4 review-assist comments. Merge left to maintainers.",
+          "oss-contribute external-run: 5 PRs + 4 review-assist comments. Merge left to maintainers. Not this control plane’s attested counter.",
       },
       {
         id: "evt_seed_gate",
@@ -323,8 +356,8 @@ export function seedState(): FactoryState {
     ],
     scorecard,
     ticksRun: 4,
-    lastTickAt: "2026-08-27T10:24:00.000Z",
-    mergedTotal: 6,
+    lastTickAt: "2026-08-28T10:14:03.000Z",
+    mergedTotal: 3,
     bans: 0,
     humanApprovalsRemaining: 16,
   };

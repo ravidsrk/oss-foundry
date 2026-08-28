@@ -1,6 +1,6 @@
 # Allowlist
 
-The allowlist is the product. Everything else is a pipeline.
+The allowlist is the product. Everything else is a pipeline. Sole source: [`allowlist.yaml`](../allowlist.yaml). The factory and the clock parse that file.
 
 ## Waves
 
@@ -14,13 +14,13 @@ The allowlist is the product. Everything else is a pipeline.
 
 ### Wave 0 — dogfood
 
-- `ravidsrk/orca-fleet` — [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) and [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) **merged** (Wave 0 2/2).
-- `ravidsrk/frontguard` — second packet: [#195](https://github.com/ravidsrk/frontguard/issues/195) README architecture vs the monorepo → [draft #196](https://github.com/ravidsrk/frontguard/pull/196) (quiet; CI red is pre-existing on main).
+- `ravidsrk/orca-fleet` — [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) and [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) **merged** (attested 2/2).
+- `ravidsrk/frontguard` — [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) **merged** 2026-08-28.
 
 ### Wave 1 — low-risk external
 
-- `ColeMurray/background-agents` — OpenInspect. [#1476](https://github.com/ColeMurray/background-agents/issues/1476) sidebar toggle icon → fork draft [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1). Upstream compare ready; App 403 on ColeMurray pulls.
-- `github/awesome-copilot` — docs catalog, tiny diffs.
+- `ColeMurray/background-agents` — OpenInspect. [#1476](https://github.com/ColeMurray/background-agents/issues/1476) → [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, not draft). Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) closed. **In flight.**
+- `github/awesome-copilot` — docs catalog, tiny diffs. No named first issue; tick idles rather than inventing one.
 - `e2b-dev/E2B` — the sandbox we depend on. Docs/examples only.
 - `mcp-use/mcp-use` — policy unknown until CONTRIBUTING is fetched. Gate holds.
 - `kortix-ai/suna` — same: unknown until parsed.
@@ -37,14 +37,14 @@ The allowlist is the product. Everything else is a pipeline.
 - `pydantic/pydantic` — slop-PR close rate.
 - `stablyai/orca` — contribute through orca-fleet, not drive-by.
 
-A denylist hit is `DENY_FORBIDDEN`. There is no override in the operator UI.
+A denylist hit is `DENY_FORBIDDEN`. There is no override in the operator CLI.
 
 ## Adding a repo
 
 1. Read `AGENTS.md` + `CONTRIBUTING` + last 20 closed PRs from strangers.
 2. Confirm a maintainer has merged *some* external PR in 90 days.
 3. Record `aiPolicy`, test command, caps, sandbox, preferred labels.
-4. First issue must be named (number + title + url). No “we’ll find one later.”
+4. First issue must be named (number + title + url) before the clock may select the repo. No “we’ll find one later,” and no invented issue numbers.
 5. PR against this repo’s `allowlist.yaml`. Freeze required.
 
 ## Removing a repo

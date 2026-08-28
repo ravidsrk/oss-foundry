@@ -6,7 +6,7 @@ Maintainers do not owe us review. Foundry earns the next review by how the last 
 
 1. **Parse policy first.** `AGENTS.md`, `CONTRIBUTING.md`, `.github/CODEOWNERS`, CLA bot, issue templates. Unknown policy = deny, not “try it.”
 2. **Allowlist only.** No GitHub search for random help-wanted.
-3. **One in flight.** A tick no-ops if a packet is gated, approved, implementing, reviewing, or draft-ready.
+3. **One in flight.** A tick no-ops if a packet is gated, frozen, approved, implementing, reviewing, draft-ready, or submitted. `followed-up` is not in-flight.
 4. **Draft PRs only.** Ready-for-review is a human action after CI is green.
 5. **Disclose.** PR body states Foundry + human attest. No pretending to be a solo late-night hacker.
 6. **Failing-first.** Test or repro is red before the fix exists. Revert must go red again.

@@ -1,14 +1,14 @@
 # Foundry — Product Bible
 
-**Operator takeover document.** Written 2026-08-28. This is the whole product: why it exists, how it runs, what has shipped, what is blocked, and what you do next.
+Operator takeover document. This is the whole product: why it exists, how it runs, what has shipped, what is blocked, and what you do next.
 
 | | |
 |---|---|
 | Public repo | https://github.com/ravidsrk/oss-foundry |
-| Console | TanStack Start app on `0.0.0.0:8080` (Grok preview). Persist key `foundry-v6` |
+| Control plane | `factory/` TypeScript + `allowlist.yaml`. Operator loop: `node --experimental-strip-types factory/cli.ts` |
 | Data plane | [ravidsrk/orca-fleet](https://github.com/ravidsrk/orca-fleet) `oss-contribute` |
 | License | MIT |
-| Status | Wave 0 **2/2 attested merges**. Wave 1 packet implemented. **Upstream PR not opened** (GitHub App 403). |
+| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **not draft**). |
 
 ---
 
@@ -35,22 +35,26 @@ Foundry’s posture is the inverse: **contribute less, merge more, never surpris
 
 ## 3. Hard constraints (absolute)
 
-These cannot be relaxed by a tick, a prompt, or “just this once.”
+These cannot be relaxed by a tick, a prompt, or “just this once.” The factory engine refuses the packet.
 
-1. **Allowlist only.** If a repo is not in [`allowlist.yaml`](../allowlist.yaml), it does not exist.
-2. **Denylist is absolute.** `matplotlib/matplotlib`, `curl/curl`, `pydantic/pydantic`, `stablyai/orca`. No override in the UI.
-3. **One packet in flight.** Gated / frozen / approved / implementing / reviewing / draft-ready blocks a new tick.
-4. **Draft PRs only.** Never merge. Never `--admin`. Never forge CLA/DCO. Never click Ready except as a human after CI is green.
-5. **Disclose Foundry + human attest** in every PR body.
-6. **Parse policy first.** `AGENTS.md` / `CONTRIBUTING` unknown ⇒ deny, not “try it.”
-7. **Wave 1+ in E2B** (or dry-run). Wave 0 may use a host worktree on repos we own.
-8. **Stop the same hour** a maintainer asks.
-9. **Failing-first.** Test or repro is red before the fix. Revert must go red again.
+1. **Allowlist only.** If a repo is not in [`allowlist.yaml`](../allowlist.yaml), it does not exist. YAML is the only source; `factory/` and the clock parse that file.
+2. **Denylist is absolute.** `matplotlib/matplotlib`, `curl/curl`, `pydantic/pydantic`, `stablyai/orca`. No override in the CLI.
+3. **One packet in flight.** `gated` / `frozen` / `approved` / `implementing` / `reviewing` / `draft-ready` / **`submitted`** blocks a new tick. `followed-up` is not in-flight.
+4. **Draft PRs only.** Never merge. Never `--admin`. Never forge CLA/DCO. Never click Ready except as a human after CI is green. The create helper hard-codes `draft: true`.
+5. **Disclose Foundry + human attest** in every PR body (verbatim block below).
+6. **Parse policy first.** No `AGENTS.md` / `CONTRIBUTING` blob ⇒ `DENY_UNKNOWN_POLICY`. There is no canned welcome corpus. Unknown `aiPolicy` without fetched docs is deny.
+7. **Wave 1+ in E2B** (or dry-run labeled as dry-run). Wave 0 may use a host worktree on repos we own. Secrets never enter the box.
+8. **Stop the same hour** a maintainer asks (denylist + scorecard tone `banned`).
+9. **Failing-first.** Test or repro is red before the fix. Revert must go red again. The engine does not stamp placeholder SHAs or auto-`red-on-revert`.
 10. **Scope caps.** Per-repo `maxFiles` / `maxDiffLines`. Overflow = park.
 11. **No competing PRs.** If upstream already has an open PR on the issue, assist or stand down.
 12. **Follow up until quiet / merged / closed.** A rotting draft is still slop.
 
-Disclosure block (verbatim):
+Promotion: Wave 1+ packets cannot be queued until **two Foundry-attested Wave 0 merges** exist (`status === "merged"` and `humanAttest` on a Wave 0 repo).
+
+Scorecard halt: a repo with health `stop` cannot be queued or approved.
+
+Disclosure block (verbatim; `factory/neighbor.ts` `DISCLOSURE`):
 
 ```
 This patch was prepared by Foundry, an operator-gated contribution factory.
@@ -68,7 +72,7 @@ The factory does not merge. Maintainers own the merge.
         ▼
  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
  │ 1 Scout     │ → │ 2 Policy    │ → │ 3 Freeze    │ → │ 4 Implement │
- │ Grok rank   │   │ AGENTS.md   │   │ human only  │   │ sandboxed   │
+ │ heuristic   │   │ AGENTS.md   │   │ human only  │   │ sandboxed   │
  └─────────────┘   └─────────────┘   └─────────────┘   └──────┬──────┘
                                                               │
                        ┌─────────────┐   ┌─────────────┐      │
@@ -79,22 +83,24 @@ The factory does not merge. Maintainers own the merge.
 
 | Plane | What | Stack |
 |---|---|---|
-| Control | Allowlist, policy, freeze, clock, scorecard, operator UI | TypeScript, TanStack Start, React 19, Tailwind v4, zustand persist (`foundry-v6`) |
+| Control | Allowlist, policy, freeze, clock, scorecard, operator CLI | TypeScript in `factory/`, `allowlist.yaml`, Node 22+ |
 | Data | Patch build, tests, evidence manifest | orca-fleet `oss-contribute` / Orca workers |
-| GitHub | Fork → upstream **draft** | REST, User-Agent `oss-foundry`. App: contents read upstream, write on operator forks, PR write (draft). **No admin. No merge.** |
+| GitHub | Fork → upstream **draft** | REST, User-Agent `oss-foundry`. Create helper is draft-only. **No admin. No merge.** |
 
 Foundry does **not** replace Orca, Mastra, or HeyCMO. ADR 0001: extend, don’t replace.
+
+There is **no** TanStack operator console in this repository. The freeze/tick/draft-body loop is the CLI.
 
 ### Trust boundaries
 
 | Boundary | Rule |
 |---|---|
 | Allowlist | Unlisted = invisible |
-| Policy | Forbidden phrases beat “but the issue is tiny” |
+| Policy | Forbidden phrases beat “but the issue is tiny.” No fetched docs = deny |
 | Freeze | First 20 packets always human. Forever on CLA/DCO and Wave 2. Wave 1+ never auto-freeze |
-| Sandbox | Wave 1+ clones never hit the operator laptop. No GitHub App keys, SSH, npm tokens, or `.env` in the box |
+| Sandbox | Wave 1+ clones never hit the operator laptop. Dry-run is labeled `dry-run`, not harvested |
 | Reviewer | Blind to implementer traces. Diff + tests only. Reviewed SHA = head SHA at draft |
-| GitHub | Draft only |
+| GitHub | Draft only. No merge helper |
 
 ---
 
@@ -102,12 +108,12 @@ Foundry does **not** replace Orca, Mastra, or HeyCMO. ADR 0001: extend, don’t 
 
 | # | Station | Does |
 |---|---|---|
-| 1 | Scout | Allowlist issues only. Drop denylist, RFC/meta, issues with an in-flight maintainer PR. Heuristic + optional Grok overlay (user-initiated, never on page load) |
+| 1 | Scout | Allowlist issues only. Drop denylist, RFC/meta, issues with an in-flight maintainer PR. Heuristic rank. Clock / CLI never invent issue numbers |
 | 2 | Policy | Deterministic. Grok has no vote |
-| 3 | Freeze | Operator Approve (attest) or Reject (park) |
-| 4 | Implement | One playbook pack. Failing-first. Wave 0 host / Wave 1+ E2B |
-| 5 | Review | Independent, lit. Negative control: revert goes red |
-| 6 | Draft | Fork → upstream draft. Body from `renderPrBody` |
+| 3 | Freeze | Operator `approve` (attest) or `reject` (park). Denied / halted packets cannot be approved |
+| 4 | Implement | One playbook pack. Failing-first. Wave 0 host / Wave 1+ E2B. Console/CLI dry-run does not fake a green harvest |
+| 5 | Review | Independent, lit. Negative control: revert goes red. Evidence attached by the operator, not invented |
+| 6 | Draft | Fork → upstream draft. Body from `renderPrBody`. Create helper sets `draft: true` |
 | 7 | Follow-up | Sync live PR. Answer threads. Mark quiet. **Never merge.** Scorecard on merged / closed-unmerged |
 
 ### Policy codes
@@ -116,7 +122,7 @@ Foundry does **not** replace Orca, Mastra, or HeyCMO. ADR 0001: extend, don’t 
 |---|---|
 | `ALLOW` | May enter freeze |
 | `DENY_FORBIDDEN` | Ban-list or “no AI PRs.” Terminal |
-| `DENY_UNKNOWN_POLICY` | Fetch docs and retry |
+| `DENY_UNKNOWN_POLICY` | Fetch docs and retry. Also used for unlisted repos |
 | `HOLD_CLA` | Park `needs-human`. Never forge |
 | `HOLD_HUMAN` | Wave 2 / HUMAN: markers |
 | `HOLD_SCOPE` | Caps or RFC shape |
@@ -125,7 +131,7 @@ Foundry does **not** replace Orca, Mastra, or HeyCMO. ADR 0001: extend, don’t 
 
 `scouted` → `gated` → `frozen` → `approved` → `implementing` → `reviewing` → `draft-ready` → `submitted` → `followed-up` → `merged` | `parked` | `rejected`
 
-`hasInflight` gates only: `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`. `followed-up` is **not** in-flight.
+`hasInflight` gates: `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`, **`submitted`**. `followed-up` is **not** in-flight.
 
 ### Scorecard halt
 
@@ -137,6 +143,8 @@ Stop a repo when:
 
 Watch when tone is `cold`, or opened ≥ 2 and merge rate < 60%.
 
+A `stop` repo is unselectable until a human edits `allowlist.yaml`.
+
 PR volume is a vanity metric. Not shown as a success KPI.
 
 ---
@@ -146,7 +154,7 @@ PR volume is a vanity metric. Not shown as a success KPI.
 | Wave | Who | Sandbox | Human freeze |
 |---|---|---|---|
 | 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | First 20 factory-wide, then mechanical if `aiPolicy: owner` |
-| 1 | AI-welcome, small blast radius | E2B | **Always** |
+| 1 | AI-welcome, small blast radius | E2B (dry-run in this repo) | **Always** |
 | 2 | Adjacent (Mastra, OpenHands) | E2B | Always + HUMAN/DCO holds |
 
 Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_rate: 0.4`, `halt_after_opens: 3`.
@@ -158,8 +166,8 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ### Wave 1
 
-- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: welcome`. First issue **#1476**
-- `github/awesome-copilot` — Markdown docs
+- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: welcome`. First issue **#1476** (in flight as #1652)
+- `github/awesome-copilot` — Markdown docs. No named first issue yet; clock idles rather than inventing one
 - `e2b-dev/E2B` — docs/examples only
 - `mcp-use/mcp-use` — policy **unknown** until CONTRIBUTING parsed
 - `kortix-ai/suna` — policy **unknown** until parsed
@@ -178,27 +186,25 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ---
 
-## 7. Console and files
-
-Operator console: React 19 + TanStack Start + Tailwind v4 + zustand persist.
+## 7. Files
 
 | Path | Role |
 |---|---|
 | [`allowlist.yaml`](../allowlist.yaml) | The product. Only repos the factory may see |
-| [`src/lib/foundry/`](../src/lib/foundry/) | Control-plane modules |
-| `store.ts` | Persist key **`foundry-v6`**. `skipHydration` so hydrate doesn’t block paint |
-| `seed.ts` | Ledger seed (must stay in sync with GitHub reality) |
-| `policy.ts` | Deterministic gate + tests in `policy.test.ts` |
-| `packet.ts` | `buildPacket` / `renderPrBody` |
-| `github-scout.ts` | Live issue fetch. User-Agent `oss-foundry`. `GH_TOKEN` for rate limits |
-| `github-pr.ts` | Draft-only PR helper |
-| `sandbox.ts` | E2B lifecycle, dry-run in console |
-| `scorecard.ts` | Halt rules |
-| `scout-ai.ts` | Grok overlay, model `grok-4.5`, user-initiated, `max_tokens: 280` |
-| [`.github/workflows/oss-tick.yml`](../.github/workflows/oss-tick.yml) | Clock. **Dry unless `FOUNDRY_LIVE=true`.** Never opens PRs by default |
+| [`factory/`](../factory/) | Control-plane modules (policy, engine, packet, scout, sandbox, scorecard) |
+| [`factory/cli.ts`](../factory/cli.ts) | Operator freeze / tick / draft-body loop |
+| [`factory/seed.ts`](../factory/seed.ts) | Ledger seed; must stay in sync with GitHub |
+| [`factory/policy.ts`](../factory/policy.ts) | Deterministic gate |
+| [`factory/engine.ts`](../factory/engine.ts) | Tick / queue / approve / advance; honors hard rules |
+| [`factory/packet.ts`](../factory/packet.ts) | `buildPacket` / `renderPrBody` |
+| [`factory/github-pr.ts`](../factory/github-pr.ts) | Draft-only create payload + live PR sync. **No merge.** |
+| [`factory/sandbox.ts`](../factory/sandbox.ts) | Dry-run plan. Never auto-harvests as green |
+| [`factory/scorecard.ts`](../factory/scorecard.ts) | Halt rules; engine consults `health()` |
+| [`.github/workflows/oss-tick.yml`](../.github/workflows/oss-tick.yml) | Clock. Parses YAML. **Dry unless `FOUNDRY_LIVE=true`.** Never opens contribution PRs |
 | [`docs/`](.) | Protocol. This file is the takeover bible |
+| [`CONTEXT.md`](../CONTEXT.md) | Glossary |
 
-Routes: `/` board, `/queue`, `/queue/$packetId`, `/allowlist`, `/stations`, `/scorecard`, `/sandbox`, `/docs`, `/protocol`.
+Tests: `node --experimental-strip-types --test factory/` (Node 22+).
 
 ---
 
@@ -206,55 +212,46 @@ Routes: `/` board, `/queue`, `/queue/$packetId`, `/allowlist`, `/stations`, `/sc
 
 `foundryAttestedWave0Merges` = packets with `status === "merged"` **and** `humanAttest` on Wave 0.
 
-### Wave 0 — 2/2 attested merges (promotion gate passed)
+### Wave 0
 
 | Packet | Issue | PR | Status |
 |---|---|---|---|
-| CHANGELOG 0.5.0 | orca-fleet#42 | [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) | **merged** 2026-08-27T07:04:52Z by maintainer. Follow-up `d91fe2f` (changelog date UTC). Greptile 5/5 |
-| README architecture | frontguard#195 | [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) | **quiet draft**. Greptile 5/5. CI red is **pre-existing on main** (playwright lockfile + setup-node from dependabot #185/#184). README only. Do not merge. Do not “fix CI” in this packet |
-| Validator unreadable SKILL.md | orca-fleet#71 | [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) | **merged** 2026-08-27T11:30:04Z by maintainer. `read_text_safe`, 103 tests, 5 files +72/−15. Greptile 5/5 |
+| CHANGELOG 0.5.0 | orca-fleet#42 | [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) | **merged** 2026-08-27T07:04:52Z. Follow-up `d91fe2f`. Attested merge **1/2** |
+| README architecture | frontguard#195 | [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) | **merged** 2026-08-28T06:40:44Z by `ravidsrk`. Doctrine is “Foundry never clicks merge, even on a repo we own.” This merge happened; it does not count as a promotion-gate merge for Wave 1 (promotion is orca-fleet#70 + #72). Do not treat it as a pattern |
+| Validator unreadable SKILL.md | orca-fleet#71 | [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) | **merged** 2026-08-27T11:30:04Z. Attested merge **2/2** |
 
-Promotion rule: Wave 1 may tick only after **two Foundry-attested Wave 0 merges**. That is now true (#70 and #72). Historical oss-contribute (5 PRs) counts as mission evidence, not as this control plane’s counter.
+Promotion rule: Wave 1 may tick only after **two Foundry-attested Wave 0 merges**. That is true (#70 and #72). Historical oss-contribute (5 PRs) counts as mission evidence, not as this control plane’s counter.
 
-### Wave 1 — implemented, upstream PR **not opened**
+### Wave 1 — in flight
 
-| Packet | Issue | Branch | Fork PR | Upstream |
-|---|---|---|---|---|
-| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | `foundry/issue-1476-sidebar-toggle-icon` @ `217511d855e58f95cdfff82b05ebd92114fc59e2` | [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) draft, Greptile **5/5**, mergeable=clean | **missing — App 403** |
+| Packet | Issue | PRs | Status |
+|---|---|---|---|
+| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open, ready-for-review** (not draft), `mergeable_state=blocked`, +88/−1 across 3 files, head `48c2242` | **`submitted`** — in-flight. Do not tick another packet |
 
-Policy parsed:
+Policy parsed for #1476 (operator, before open):
 
 - `AGENTS.md`: no AI ban, conventional commits, welcome
 - `CONTRIBUTING.md`: no CLA/DCO
 - Labels: `good first issue`, `help wanted`, `enhancement`
-- No open competing PR on #1476
+- No open competing PR on #1476 at open time
 
-Patch:
+#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure. That is a doctrine miss. Operator next action is follow-up (mark draft if still ready; paste verbatim disclosure if editing the body; do not merge).
 
-- Closed: existing `RightSidebarIcon` (outline + right rail `line x1=15`)
-- Open: `RightSidebarOpenIcon` filled right rail (`packages/web/src/components/ui/right-sidebar-open-icon.tsx`)
-- `session-header.tsx` switches on `isDesktopDetailsOpen`
-- Tests: `session-header-sidebar-icon.test.tsx`
-- Files: 3. Diff +88 / −1
-- ARIA label / `aria-expanded` unchanged
-
-### Scorecard (approx)
+### Scorecard (Foundry packets in this control plane)
 
 | Repo | opened | merged | tone | halt |
 |---|---|---|---|---|
-| ravidsrk/orca-fleet | 8 | 7 | warm | no |
-| ravidsrk/frontguard | 1 | 0 | warm | no (only 1 open; CI not our fault) |
-| ColeMurray/background-agents | 1 (fork) | 0 | neutral | no |
+| ravidsrk/orca-fleet | 2 | 2 | warm | no |
+| ravidsrk/frontguard | 1 | 1 | warm | no |
+| ColeMurray/background-agents | 1 | 0 | neutral | no |
 | bans | 0 | | | |
 | reverts | 0 | | | |
 
 Merge-rate halt is **not** tripped (`opened ≥ 3` required).
 
-Do **not** open another Wave 0 draft for vanity volume while #196 sits quiet.
-
 ---
 
-## 9. GitHub App limitation (why Wave 1 is stuck)
+## 9. GitHub App limitation
 
 The connected GitHub token is a **GitHub App user-to-server token** (`ghu_`, empty `X-OAuth-Scopes`).
 
@@ -268,93 +265,41 @@ It **cannot**:
 
 - `POST /repos/ColeMurray/background-agents/pulls` → **403 Resource not accessible by integration**
 
-Reconnect did not fix this. The App is not installed on ColeMurray/background-agents and does not have `public_repo` OAuth scope.
+A human browser session opened #1652. Future Wave 1 drafts on stranger repos need the same: operator browser, **as draft**, body from `renderPrBody`.
 
-**Only a human browser session can open the upstream PR.** That is now the operator’s job (you).
-
----
-
-## 10. Your first action — open the Wave 1 draft
-
-Compare (create as **Draft**):
-
-https://github.com/ColeMurray/background-agents/compare/main...ravidsrk:foundry/issue-1476-sidebar-toggle-icon?quick_pull=1
-
-### Title
-
-```
-feat: differentiate the right sidebar toggle icon by state
-```
-
-### Body (paste verbatim)
-
-```
-## Summary
-
-Fixes https://github.com/ColeMurray/background-agents/issues/1476
-
-The desktop right-sidebar toggle used the same outline icon whether the details pane was open or closed. `aria-expanded` already flipped; the glyph did not.
-
-- Closed: keep existing `RightSidebarIcon` (outline + right rail)
-- Open: `RightSidebarOpenIcon` (filled right rail)
-- Toggle behavior and accessible name unchanged
-
-## Acceptance
-
-- [x] Open and closed states are visually distinct from the icon alone
-- [x] Icon updates with `isDesktopDetailsOpen`
-- [x] Tests cover both glyphs (`session-header-sidebar-icon.test.tsx`)
-- [x] Existing header test still matches the shared rail line
-
-## Files
-
-- `packages/web/src/components/session-header.tsx`
-- `packages/web/src/components/ui/right-sidebar-open-icon.tsx`
-- `packages/web/src/components/session-header-sidebar-icon.test.tsx`
-
-+88 / −1 across 3 files.
-
-## Disclosure
-
-This patch was prepared by Foundry, an operator-gated contribution factory.
-A human reviewed the packet, the diff, and the tests before this draft was opened.
-The factory does not merge. Maintainers own the merge.
-
-Closes #1476
-```
-
-After it opens: record the PR number, keep it draft, follow up until quiet. **Do not merge.**
+The in-repo create helper still hard-codes `draft: true` for when the App *can* post (owned forks). It exposes no merge path.
 
 ---
 
-## 11. Operator takeover checklist
+## 10. Operator loop
+
+```
+node --experimental-strip-types factory/cli.ts status
+node --experimental-strip-types factory/cli.ts tick
+node --experimental-strip-types factory/cli.ts approve <packetId> --note "…"
+node --experimental-strip-types factory/cli.ts body <packetId>
+```
 
 Daily:
 
-- [ ] Read the Board / this ledger
-- [ ] Answer any review thread before starting a new packet
-- [ ] If a maintainer says stop → denylist same hour
+- Read `status` / this ledger
+- Answer any review thread before starting a new packet
+- If a maintainer says stop → denylist same hour
 
 Now:
 
-- [ ] Open ColeMurray #1476 upstream draft (section 10)
-- [ ] Leave frontguard#196 draft. Do not merge. Do not pile on CI
-- [ ] Do not open another Wave 0 packet
-- [ ] Do not tick Wave 1 again until #1476 is quiet/merged/closed (one in flight)
-
-This week after #1476 is in follow-up:
-
-- [ ] Watch Greptile / CI on the upstream PR
-- [ ] Reply to review threads; do not argue
-- [ ] Next Wave 1 candidate only after #1476 leaves in-flight: prefer `github/awesome-copilot` (tiny Markdown) over unknown-policy repos
+- [ ] Follow ColeMurray#1652 until quiet / merged / closed. **Do not merge.**
+- [ ] Prefer marking #1652 **draft** until CI/tests on that head are green
+- [ ] Do not tick. #1652 is `submitted` (in-flight)
+- [ ] Do not open awesome-copilot or any other Wave 1 packet
 
 Never:
 
 - [ ] `gh pr merge`
-- [ ] `FOUNDRY_LIVE=true` until you personally want the clock to propose packets (it still must not auto-open PRs)
+- [ ] `FOUNDRY_LIVE=true` until you personally want the clock to file a *packet request issue* on oss-foundry (it still must not auto-open contribution PRs)
 - [ ] Put GitHub App private keys in E2B
 - [ ] Touch denylist repos
-- [ ] Farm random `good-first-issue`
+- [ ] Farm random `good-first-issue` or invent issue numbers
 
 ### Incident: slop accusation
 
@@ -366,7 +311,7 @@ Never:
 
 ---
 
-## 12. 90-day success
+## 11. 90-day success
 
 - ≥ 1 merged PR on a Wave 1 repo that is not ours
 - Merge rate ≥ 60% on opened drafts
@@ -376,15 +321,15 @@ Never:
 
 ---
 
-## 13. v1 vs v2
+## 12. v1 vs v2
 
-**v1 (safe today):** allowlist, deterministic policy, one-in-flight, human freeze, draft PR body, Wave 0 dogfood.
+**v1 (enforced today):** allowlist YAML as sole source, deterministic policy, one-in-flight including `submitted`, human freeze via CLI, draft PR body, Wave 0 dogfood, clock that parses YAML and stays dry, halt consulted, no invented issues, no placeholder evidence.
 
-**v2 (wired, credentials outside git):** Grok scout overlay, live GitHub scout, E2B sandbox lifecycle (console is dry-run), follow-up station, scorecard halt. Clock stays dry unless `FOUNDRY_LIVE` is set on the operator host.
+**v2 (adapters, credentials outside git):** live GitHub scout (user-initiated), E2B session lifecycle labeled dry-run unless a key is present on the worker host, follow-up PR sync, draft-only create on repos the App can write. Grok scout overlay is **not shipped**. Clock stays dry unless `FOUNDRY_LIVE` is set.
 
 ---
 
-## 14. Related protocol docs
+## 13. Related protocol docs
 
 | Doc | Topic |
 |---|---|
@@ -394,22 +339,21 @@ Never:
 | [03-allowlist.md](03-allowlist.md) | Waves, adding/removing a repo |
 | [04-stations.md](04-stations.md) | Scout → follow-up |
 | [05-v1.md](05-v1.md) | v1 scope |
-| [06-v2.md](06-v2.md) | Grok, E2B, halt, GitHub App |
+| [06-v2.md](06-v2.md) | Scout, sandbox, halt, GitHub App |
 | [07-github-app.md](07-github-app.md) | Least privilege |
 | [08-operations.md](08-operations.md) | Daily / halt / incident |
 | [09-ethics.md](09-ethics.md) | Will / will not |
 | [10-schemas.md](10-schemas.md) | YAML / packet schemas |
 | [11-reuse.md](11-reuse.md) | What we reuse from orca-fleet |
+| [12-ledger.md](12-ledger.md) | Live packet table |
 | [adr/0001](adr/0001-extend-not-replace-orca.md) | Extend Orca, don’t replace |
 | [adr/0002](adr/0002-draft-only.md) | Draft only, never merge |
 | [adr/0003](adr/0003-sandbox-untrusted.md) | Untrusted clones in E2B |
 
 ---
 
-## 15. Handoff note
+## 14. Handoff note
 
-Grok (this session) built the control plane, ran Wave 0 through two attested maintainer merges, implemented Wave 1 #1476 on the fork, and could not open the ColeMurray PR because of GitHub App 403.
-
-You own: the browser click that opens the draft, all future freezes, all follow-up, allowlist edits, and the halt switch.
+You own: follow-up on #1652, all future freezes, allowlist edits, and the halt switch.
 
 Foundry still does not merge. Even on repos you own.

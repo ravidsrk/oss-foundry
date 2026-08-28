@@ -2,26 +2,23 @@
 
 ## Daily
 
-- Read the Board. If a packet is `draft-ready`, open the draft on GitHub yourself.
+- `node --experimental-strip-types factory/cli.ts status`
 - Answer any review thread before running another tick.
 - If a maintainer replies “please stop,” remove the repo the same hour.
 
 ## Tick cadence
 
-Every 6 hours, **or** operator button. Never both overlapping. One packet in flight.
+Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in flight, including `submitted`.
 
-## First week (Wave 0 only)
+## Current (2026-08-28)
 
-1. Freeze `orca-fleet#42`. Done — [PR #70](https://github.com/ravidsrk/orca-fleet/pull/70) merged by the maintainer 2026-08-27 (Foundry 1/2).
-2. Run it through `oss-contribute` / Orca, not through a stranger’s repo.
-3. Open a **draft** PR. Foundry never clicks merge — even on a repo you own.
-4. Follow up until quiet. Second packet: [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) (quiet; CI red is pre-existing on main).
-5. Third packet: [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72) **merged** 2026-08-27T11:30:04Z (Foundry 2/2). Wave 1 unparked: [background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) draft on fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) (Greptile 5/5, mergeable=clean). App 403 on upstream `ColeMurray` pulls — operator opens the compare URL. Foundry does not merge.
-
+1. Wave 0 attested 2/2: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72).
+2. [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) merged by `ravidsrk`. Do not repeat operator-merge on a Foundry packet.
+3. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652). Follow up. Do not merge. Do not tick.
 
 ## Halt switch
 
-`useFoundry.getState()` will still tick Wave 0 if Wave 1 is halted. To halt everything, reject in-flight packets and stop pressing Run tick. The GHA default is dry (`FOUNDRY_LIVE` unset).
+A repo with scorecard health `stop` cannot be queued or approved. To halt everything, reject in-flight packets and stop pressing tick. The GHA default is dry (`FOUNDRY_LIVE` unset).
 
 ## Metrics that matter
 

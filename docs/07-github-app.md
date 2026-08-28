@@ -26,7 +26,9 @@ PATs inherit the operator’s social graph. A leaked PAT is a reputation inciden
 
 ## Draft discipline
 
-The App’s `pull_request.create` wrapper sets `draft: true` unconditionally. Marking ready-for-review is not in the App’s method set; a human uses the browser.
+`factory/github-pr.ts` `draftPullPayload` sets `draft: true` unconditionally. There is no merge / `--admin` helper in that module. Marking ready-for-review is not in the method set; a human uses the browser.
+
+The App is installed on `ravidsrk` only. `POST /repos/ColeMurray/background-agents/pulls` is **403**. ColeMurray#1652 was opened in a browser session, ready rather than draft — a doctrine miss to follow up, not a reason to add a merge helper.
 
 ## Secrets
 
@@ -36,6 +38,6 @@ Live in the operator host / GHA environment:
 - `FOUNDRY_APP_PRIVATE_KEY`
 - `FOUNDRY_INSTALLATION_ID`
 - `E2B_API_KEY` (v2)
-- `XAI_API_KEY` (scout overlay; already injected in this preview)
+- `XAI_API_KEY` (optional; Grok overlay is not shipped)
 
 Never in `allowlist.yaml`, never in the E2B box, never in a packet.

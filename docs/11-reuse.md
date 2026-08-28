@@ -25,4 +25,4 @@ Out of scope. Do not port Foundry into the marketing-agent monorepo.
 
 ## Grok / xAI
 
-Scout overlay only. Code patches still belong to the Orca worker model. This split is load-bearing: Grok is cheap and good at policy-ish ranking; it is not the implementer.
+Not shipped as a scout overlay. Code patches still belong to the Orca worker model. Do not use Grok as the implementer.
