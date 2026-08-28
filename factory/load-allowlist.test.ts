@@ -22,11 +22,12 @@ test("omitted wave is not coerced to Wave 0 host-trusted", () => {
 test("Wave 2 host sandbox is rejected at load", () => {
   const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
   const host = yaml.replace(
-    "  - id: All-Hands-AI/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: e2b",
-    "  - id: All-Hands-AI/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: host",
+    "  - id: OpenHands/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: e2b",
+    "  - id: OpenHands/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: host",
   );
+  assert.notEqual(host, yaml, "fixture replace matched nothing — committed entry drifted from this test");
   const parsed = parseAllowlistYaml(host);
-  assert.throws(() => assertAllowlist(parsed), /Wave 1\+ repo All-Hands-AI\/OpenHands must not use host sandbox/);
+  assert.throws(() => assertAllowlist(parsed), /Wave 1\+ repo OpenHands\/OpenHands must not use host sandbox/);
 });
 
 test("a denylist id among repos fails assertion", () => {

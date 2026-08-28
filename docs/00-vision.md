@@ -6,7 +6,7 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 ## Why this exists
 
-2026 made unattended OSS agents radioactive. curl’s HackerOne queue, matplotlib’s autonomous-agent ban, Pydantic’s slop-PR close rate, and OpenClaw-style maintainer attacks all taught the same lesson: volume without governance is vandalism.
+2026 made unattended OSS agents radioactive. curl’s HackerOne shutdown, matplotlib’s agent-interaction ban, and OpenClaw-style maintainer attacks all taught the same lesson: volume without governance is vandalism. (Pydantic, often cited alongside these, actually welcomes AI-assisted PRs — what it bans is factory-pattern mass submission; see the denylist reason.)
 
 Foundry is the opposite posture:
 

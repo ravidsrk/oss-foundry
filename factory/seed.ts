@@ -256,10 +256,10 @@ export function seedState(): FactoryState {
   });
 
   const openhands = buildPacket({
-    repoId: "All-Hands-AI/OpenHands",
+    repoId: "OpenHands/OpenHands",
     issueNumber: 16907,
     issueTitle: "Document HUMAN: requirement in contributor FAQ",
-    issueUrl: "https://github.com/All-Hands-AI/OpenHands/issues/16907",
+    issueUrl: "https://github.com/OpenHands/OpenHands/issues/16907",
     labels: ["documentation"],
     agentsMd: "Please sign the CLA. HUMAN: required.",
     contributing: "Developer Certificate of Origin. Sign-off required.",
