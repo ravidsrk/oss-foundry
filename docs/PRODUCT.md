@@ -44,7 +44,7 @@ These cannot be relaxed by a tick, a prompt, or “just this once.” The factor
 5. **Disclose Foundry + human attest** in every PR body (verbatim block below).
 6. **Parse policy first.** No `AGENTS.md` / `CONTRIBUTING` blob ⇒ `DENY_UNKNOWN_POLICY`. There is no canned welcome corpus. Unknown `aiPolicy` without fetched docs is deny.
 7. **Wave 1+ in E2B** (or dry-run labeled as dry-run). Wave 0 may use a host worktree on repos we own. Secrets never enter the box.
-8. **Stop the same hour** a maintainer asks (denylist + scorecard tone `banned`).
+8. **Stop the same hour** a maintainer asks (denylist + scorecard tone `banned`; scorecard = per-repo standing, see §5 — unrelated to OpenSSF Scorecard).
 9. **Failing-first.** Test or repro is red before the fix. Revert must go red again. The engine does not stamp placeholder SHAs or auto-`red-on-revert`.
 10. **Scope caps.** Per-repo `maxFiles` / `maxDiffLines`. Overflow = park.
 11. **No competing PRs.** If upstream already has an open PR on the issue, assist or stand down.
@@ -57,7 +57,7 @@ Scorecard halt: a repo with health `stop` cannot be queued or approved.
 Disclosure block (verbatim; `factory/neighbor.ts` `DISCLOSURE`):
 
 ```
-This patch was prepared by Foundry, an operator-gated contribution factory.
+This patch was prepared by Foundry (ravidsrk/oss-foundry), an operator-gated contribution factory.
 A human reviewed the packet, the diff, and the tests before this draft was opened.
 The factory does not merge. Maintainers own the merge.
 ```
@@ -136,6 +136,8 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 `submitted` → `followed-up` is bounded (ADR 0002, `applyPrSync`): threads answered + PR quiet ≥ 14 days releases the slot; maintainer activity on a `followed-up` packet re-blocks the tick until answered; ≥ 45 quiet days records a `stale-intent` note (`closedUnmerged` + polite close is a human act). Maintainer silence cannot idle the factory indefinitely.
 
 ### Scorecard halt
+
+*Foundry's scorecard is per-repo standing; it is unrelated to OpenSSF Scorecard (ADR 0004).*
 
 Stop a repo when:
 
@@ -359,6 +361,7 @@ Terms are defined operationally in [08-operations.md](08-operations.md) — deno
 | [adr/0001](adr/0001-extend-not-replace-orca.md) | Extend Orca, don’t replace |
 | [adr/0002](adr/0002-draft-only.md) | Draft only, never merge |
 | [adr/0003](adr/0003-sandbox-untrusted.md) | Untrusted clones in E2B |
+| [adr/0004](adr/0004-naming.md) | Naming: Foundry + scorecard collisions, revisit at spec publication |
 
 ---
 

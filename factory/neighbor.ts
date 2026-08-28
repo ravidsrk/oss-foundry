@@ -1,4 +1,4 @@
-export const DISCLOSURE = `This patch was prepared by Foundry, an operator-gated contribution factory.
+export const DISCLOSURE = `This patch was prepared by Foundry (ravidsrk/oss-foundry), an operator-gated contribution factory.
 A human reviewed the packet, the diff, and the tests before this draft was opened.
 The factory does not merge. Maintainers own the merge.`;
 
