@@ -271,7 +271,7 @@ It **cannot**:
 
 - `POST /repos/ColeMurray/background-agents/pulls` → **403 Resource not accessible by integration**
 
-A human browser session opened #1652. Future Wave 1 drafts on stranger repos need the same: operator browser, **as draft**, body from `renderPrBody`.
+A human browser session opened #1652 — the last one. Future Wave 1 drafts on stranger repos go through `open-draft` with the machine account's classic `public_repo` PAT (`FOUNDRY_PAT`; see docs/07): draft hard-coded, disclosure enforced, competing-work re-checked, secondary-rate-limit = halt.
 
 The in-repo create payload hard-codes `draft: true`. There is no `POST /pulls` helper and no merge path. Operator opens the draft in the browser (`cli.ts body`).
 

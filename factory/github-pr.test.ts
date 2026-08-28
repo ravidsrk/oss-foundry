@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareCommits, fetchRepoFile, listCrossReferencingOpenPulls, listOpenPulls } from "./github-pr.ts";
+import { compareCommits, createDraftPull, fetchRepoFile, listCrossReferencingOpenPulls, listOpenPulls } from "./github-pr.ts";
 
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
@@ -121,4 +121,72 @@ test("listCrossReferencingOpenPulls keeps only open cross-referenced pull reques
 
   const failed = await listCrossReferencingOpenPulls("ravidsrk/orca-fleet", 71, async () => jsonResponse(500, {}));
   assert.equal(failed.ok, false);
+});
+
+test("createDraftPull opens draft-only with the machine-account PAT", async () => {
+  let captured: { url?: string; auth?: string | null; body?: Record<string, unknown> } = {};
+  const created = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "feat: icon", head: "ravidsrk:foundry/issue-1476", body: "Fixes #1476" },
+    async (url, init) => {
+      captured = {
+        url: String(url),
+        auth: new Headers(init?.headers).get("Authorization"),
+        body: JSON.parse(String(init?.body)),
+      };
+      return jsonResponse(201, {
+        html_url: "https://github.com/ColeMurray/background-agents/pull/1700",
+        number: 1700,
+        draft: true,
+      });
+    },
+    { FOUNDRY_PAT: "ghp_machineaccount" },
+  );
+  assert.equal(created.ok, true);
+  if (created.ok) assert.equal(created.url, "https://github.com/ColeMurray/background-agents/pull/1700");
+  assert.equal(captured.url, "https://api.github.com/repos/ColeMurray/background-agents/pulls");
+  assert.equal(captured.auth, "Bearer ghp_machineaccount");
+  assert.equal(captured.body?.draft, true);
+  assert.equal(captured.body?.base, "main");
+});
+
+test("createDraftPull refuses without the PAT and halts on secondary limits", async () => {
+  const missing = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () => jsonResponse(201, {}),
+    {},
+  );
+  assert.equal(missing.ok, false);
+  if (!missing.ok) assert.match(missing.error, /FOUNDRY_PAT/);
+
+  const secondary = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () => jsonResponse(403, { message: "You have exceeded a secondary rate limit. Please wait." }),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(secondary.ok, false);
+  if (!secondary.ok) {
+    assert.equal(secondary.halt, true);
+    assert.match(secondary.error, /halt/i);
+  }
+
+  const forbidden = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () => jsonResponse(403, { message: "Resource not accessible" }),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(forbidden.ok, false);
+  if (!forbidden.ok) assert.equal(forbidden.halt, undefined);
+
+  const notDraft = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () => jsonResponse(201, { html_url: "https://x/pull/1", number: 1, draft: false }),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(notDraft.ok, false);
+  if (!notDraft.ok) assert.match(notDraft.error, /draft/i);
 });

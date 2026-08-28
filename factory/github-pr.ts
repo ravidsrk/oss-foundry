@@ -239,3 +239,81 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
     };
   }
 }
+
+export type CreateDraftResult =
+  | { ok: true; url: string; number: number }
+  | { ok: false; error: string; halt?: true };
+
+/**
+ * The moment of contact, machine-enforced (issue #5). Opens a fork→upstream DRAFT pull request
+ * with the dedicated machine account's classic `public_repo` PAT (`FOUNDRY_PAT`) — the only
+ * credential type GitHub documents for writes to unaffiliated public repos; App tokens 403 by
+ * design (intersection model, docs/07). draft: true is hard-coded via draftPullPayload; there is
+ * no ready-for-review or merge surface here. One create per CLI invocation; a secondary-rate-limit
+ * response is a factory halt signal, not a retry.
+ */
+export async function createDraftPull(
+  repoId: string,
+  input: { title: string; head: string; base?: string; body: string },
+  fetchImpl: typeof fetch = fetch,
+  env: Record<string, string | undefined> = process.env,
+): Promise<CreateDraftResult> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
+  const pat = env.FOUNDRY_PAT;
+  if (!pat) {
+    return {
+      ok: false,
+      error:
+        "FOUNDRY_PAT is not set — the machine account's classic public_repo PAT opens drafts on repos the App is not installed on (the App 403s there by design). Run scripts/machine-account-wizard.sh, export FOUNDRY_PAT on the operator host, and retry. Never commit it; never put it in the E2B box.",
+    };
+  }
+  if (!/^[\w-]+:[\w./-]+$/.test(input.head)) {
+    return { ok: false, error: `head must be fork-qualified (owner:branch), got ${input.head}` };
+  }
+  const payload = draftPullPayload(input);
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
+      method: "POST",
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "oss-foundry",
+        Authorization: `Bearer ${pat}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      html_url?: string;
+      number?: number;
+      draft?: boolean;
+      message?: string;
+    };
+    if (res.status === 403 && /secondary rate limit/i.test(body.message ?? "")) {
+      return {
+        ok: false,
+        halt: true,
+        error:
+          "GitHub secondary rate limit on content creation — HALT the factory (AUP: excessive automated bulk activity). Do not retry; investigate before any further create.",
+      };
+    }
+    if (res.status === 403) {
+      return {
+        ok: false,
+        error: `GitHub 403 creating the draft on ${repoId}: ${body.message ?? "forbidden"}. Check: PAT is classic with public_repo scope; the upstream has not restricted PR creation to collaborators (Feb 2026 repo settings).`,
+      };
+    }
+    if (res.status !== 201) {
+      return { ok: false, error: `GitHub ${res.status} creating the draft on ${repoId}: ${body.message ?? "error"}` };
+    }
+    if (body.draft !== true) {
+      return {
+        ok: false,
+        error: "upstream returned a non-draft pull request — stand down and inspect before proceeding; Foundry opens drafts only.",
+      };
+    }
+    return { ok: true, url: body.html_url ?? "", number: body.number ?? 0 };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}

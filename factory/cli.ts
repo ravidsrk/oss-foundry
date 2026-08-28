@@ -19,6 +19,7 @@ import {
 } from "./engine.ts";
 import {
   compareCommits,
+  createDraftPull,
   draftPullPayload,
   fetchRepoFile,
   listCrossReferencingOpenPulls,
@@ -168,6 +169,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested)
   body <packetId>
   attach-draft <packetId> <prUrl>
+  open-draft <packetId> --head <forkOwner:branch>   (machine-account PAT; draft-only; one create per run)
   sync <packetId> [--threads-answered]
   reconcile
   ledger
@@ -387,6 +389,81 @@ async function main() {
     });
     console.log("---");
     console.log(`create payload draft=${payload.draft} (no merge helper)`);
+    return;
+  }
+
+  if (cmd === "open-draft") {
+    const id = rest[0];
+    const head = flag(rest, "--head");
+    if (!id || !head) {
+      console.error("open-draft requires <packetId> --head <forkOwner:branch>");
+      process.exit(1);
+    }
+    const packet = state.packets.find((p) => p.id === id);
+    if (!packet) {
+      console.error(`unknown packet ${id}`);
+      process.exit(1);
+    }
+    if (packet.status !== "draft-ready" || packet.prUrl) {
+      console.error(`open-draft needs a draft-ready packet with no PR; ${id} is ${packet.status}${packet.prUrl ? ` with ${packet.prUrl}` : ""}`);
+      process.exit(1);
+    }
+    const pulls = await listOpenPulls(packet.repoId);
+    const crossRefs = pulls.ok
+      ? findCompetingPull(pulls.pulls, packet.issueNumber, packet.issueUrl, packet.repoId)
+        ? { ok: true as const, urls: [] as string[] }
+        : await listCrossReferencingOpenPulls(packet.repoId, packet.issueNumber)
+      : pulls;
+    if (!pulls.ok || !crossRefs.ok) {
+      console.error(!pulls.ok ? pulls.error : (crossRefs as { error: string }).error);
+      process.exit(1);
+    }
+    const verdict = classifyCompetition(
+      { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
+      packet.issueNumber,
+      packet.issueUrl,
+      packet.repoId,
+    );
+    if (verdict.kind === "competing") {
+      console.error(`stand down: competing PR ${verdict.url} (${verdict.why}). Assist or park — do not open.`);
+      process.exit(1);
+    }
+    if (verdict.kind === "adjacent") {
+      console.error(`taste gate: adjacent PR ${verdict.url} (${verdict.why}) — you are the human; open only if it does not cover the issue.`);
+    }
+    const body = packet.prBody ?? renderPrBody(packet);
+    if (!body.includes(DISCLOSURE)) {
+      console.error("refusing to open: the PR body does not carry the verbatim disclosure block");
+      process.exit(1);
+    }
+    const created = await createDraftPull(packet.repoId, {
+      title: packet.issueTitle,
+      head,
+      body,
+    });
+    if (!created.ok) {
+      if (created.halt) console.error("=== FACTORY HALT SIGNAL — secondary rate limit ===");
+      console.error(created.error);
+      process.exit(1);
+    }
+    console.log(`opened draft ${created.url}`);
+    const synced = await syncGithubPr({ url: created.url });
+    if (!synced.ok) {
+      console.error(`draft opened but sync failed (${synced.error}) — run: attach-draft ${id} ${created.url}`);
+      process.exit(1);
+    }
+    const attached = applyAttachDraft(state, id, created.url, {
+      draft: synced.meta.draft,
+      headSha: synced.meta.headSha,
+      title: synced.title,
+      body: synced.body,
+    });
+    if (attached.error) {
+      console.error(`draft opened but not recorded (${attached.error}) — run: attach-draft ${id} ${created.url}`);
+      process.exit(1);
+    }
+    saveFactoryState(STATE_FILE, attached.state);
+    console.log(`attached ${created.url} (draft=${synced.meta.draft}) — packet submitted`);
     return;
   }
 
