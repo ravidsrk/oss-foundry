@@ -1,4 +1,5 @@
 import { ALLOWLIST, isDenied, repoById } from "./allowlist.ts";
+import { parsePrUrl } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { planSandbox, runSandboxDry } from "./sandbox.ts";
@@ -243,17 +244,26 @@ function pickCandidate(
 }
 
 export function isPlaceholderSha(sha: string | undefined): boolean {
-  if (!sha) return true;
+  return !isBoundSha(sha);
+}
+
+/** Full SHA-1, not abbreviated, not a known fake, not a single repeated nibble. */
+export function isBoundSha(sha: string | undefined): boolean {
+  if (!sha) return false;
   const s = sha.trim().toLowerCase();
-  if (s === "origin/head" || s.startsWith("deadbeef")) return true;
-  return !/^[0-9a-f]{7,40}$/.test(s);
+  if (s === "origin/head" || s.startsWith("deadbeef")) return false;
+  if (!/^[0-9a-f]{40}$/.test(s)) return false;
+  if (/^([0-9a-f])\1{39}$/.test(s)) return false;
+  return true;
 }
 
 export function evidenceIsReady(evidence: EvidenceManifest | undefined): boolean {
   if (!evidence) return false;
   if (evidence.negativeControl !== "red-on-revert") return false;
   if (evidence.testExit !== 0) return false;
-  if (isPlaceholderSha(evidence.baseSha) || isPlaceholderSha(evidence.headSha)) return false;
+  if (!isBoundSha(evidence.baseSha) || !isBoundSha(evidence.headSha)) return false;
+  if (evidence.baseSha.toLowerCase() === evidence.headSha.toLowerCase()) return false;
+  if (evidence.shaVerified !== true) return false;
   return true;
 }
 
@@ -261,13 +271,21 @@ export function applyAttachEvidence(
   state: FactoryState,
   id: string,
   evidence: EvidenceManifest,
+  verify: (repoId: string, sha: string) => boolean,
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
-  if (isPlaceholderSha(evidence.baseSha) || isPlaceholderSha(evidence.headSha)) {
-    return { state, error: "evidence SHAs must be real git objects, not placeholders" };
+  if (!isBoundSha(evidence.baseSha) || !isBoundSha(evidence.headSha)) {
+    return { state, error: "evidence SHAs must be full 40-char git objects, not placeholders" };
   }
-  const packets = state.packets.map((p) => (p.id === id ? bump(p, { evidence }) : p));
+  if (evidence.baseSha.toLowerCase() === evidence.headSha.toLowerCase()) {
+    return { state, error: "evidence baseSha and headSha must differ" };
+  }
+  if (!verify(packet.repoId, evidence.baseSha) || !verify(packet.repoId, evidence.headSha)) {
+    return { state, error: `SHA not found on ${packet.repoId}` };
+  }
+  const bound: EvidenceManifest = { ...evidence, shaVerified: true };
+  const packets = state.packets.map((p) => (p.id === id ? bump(p, { evidence: bound }) : p));
   return {
     state: {
       ...state,
@@ -350,11 +368,27 @@ export function applyAttachDraft(
   state: FactoryState,
   id: string,
   url: string,
+  opts: { draft: boolean; headSha?: string },
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
   if (packet.status !== "draft-ready" && packet.status !== "submitted") {
     return { state, error: `cannot attach draft from status ${packet.status}` };
+  }
+  const parsed = parsePrUrl(url);
+  if (!parsed) return { state, error: "Not a GitHub pull request URL." };
+  const name = packet.repoId.split("/")[1];
+  if (parsed.repo !== name) {
+    return {
+      state,
+      error: `PR ${parsed.owner}/${parsed.repo}#${parsed.number} does not match packet repo ${packet.repoId}`,
+    };
+  }
+  if (opts.draft !== true) {
+    return { state, error: "PR must be a draft. Foundry will not attach a ready-for-review pull request." };
+  }
+  if (opts.headSha && packet.evidence?.headSha && opts.headSha !== packet.evidence.headSha) {
+    return { state, error: `PR head ${opts.headSha.slice(0, 7)} does not match evidence head` };
   }
   const alreadyOpened = packet.status === "submitted" || Boolean(packet.prUrl);
   const packets = state.packets.map((p) =>

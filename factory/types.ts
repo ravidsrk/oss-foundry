@@ -146,6 +146,8 @@ export interface EvidenceManifest {
   filesChanged: number;
   diffLines: number;
   notes: string[];
+  /** True only after a repo commit lookup succeeded for base and head. */
+  shaVerified?: boolean;
 }
 
 export interface SandboxSession {

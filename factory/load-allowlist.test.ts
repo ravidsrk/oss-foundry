@@ -10,6 +10,16 @@ test("committed allowlist.yaml parses and keeps denylist disjoint", () => {
   assert.equal(parsed.repos.some((r) => r.id === "stablyai/orca"), false);
 });
 
+test("Wave 2 host sandbox is rejected at load", () => {
+  const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
+  const host = yaml.replace(
+    "  - id: All-Hands-AI/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: e2b",
+    "  - id: All-Hands-AI/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: host",
+  );
+  const parsed = parseAllowlistYaml(host);
+  assert.throws(() => assertAllowlist(parsed), /Wave 1\+ repo All-Hands-AI\/OpenHands must not use host sandbox/);
+});
+
 test("a denylist id among repos fails assertion", () => {
   const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
   const leaked = yaml.replace(

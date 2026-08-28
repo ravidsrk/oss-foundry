@@ -65,7 +65,31 @@ export async function createGithubDraftPr(
   }
 }
 
-export async function syncGithubPr(data: { url: string }) {
+export async function commitExists(
+  repoId: string,
+  sha: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "oss-foundry",
+  };
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/commits/${sha}`, {
+      headers,
+    });
+    if (!res.ok) return { ok: false, error: `GitHub ${res.status} for ${repoId}@${sha.slice(0, 7)}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
+export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetch = fetch) {
     const parsed = parsePrUrl(data.url);
     if (!parsed) return { ok: false as const, error: "Not a GitHub pull request URL." };
 
@@ -77,7 +101,7 @@ export async function syncGithubPr(data: { url: string }) {
     if (token) headers.Authorization = `Bearer ${token}`;
 
     try {
-      const res = await fetch(
+      const res = await fetchImpl(
         `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
         { headers },
       );

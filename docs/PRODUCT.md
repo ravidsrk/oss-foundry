@@ -204,7 +204,7 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 | [`docs/`](.) | Protocol. This file is the takeover bible |
 | [`CONTEXT.md`](../CONTEXT.md) | Glossary |
 
-Tests: `node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts` (Node 22+).
+Tests: `node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts` (Node 22+).
 
 ---
 

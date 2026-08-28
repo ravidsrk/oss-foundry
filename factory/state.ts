@@ -1,0 +1,52 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { seedState } from "./seed.ts";
+import type { FactoryState } from "./types.ts";
+
+export function isFactoryState(value: unknown): value is FactoryState {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    o.version === 6 &&
+    Array.isArray(o.packets) &&
+    Array.isArray(o.events) &&
+    Array.isArray(o.scorecard) &&
+    typeof o.ticksRun === "number" &&
+    typeof o.mergedTotal === "number" &&
+    typeof o.bans === "number" &&
+    typeof o.humanApprovalsRemaining === "number" &&
+    (o.lastTickAt === null || typeof o.lastTickAt === "string")
+  );
+}
+
+export function loadFactoryState(
+  path: string,
+  seed: () => FactoryState = seedState,
+): { ok: true; state: FactoryState; source: "file" | "seed" } | { ok: false; error: string } {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { ok: true, state: seed(), source: "seed" };
+    return { ok: false, error: `cannot read ${path}: ${err instanceof Error ? err.message : "unreadable"}` };
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isFactoryState(parsed)) {
+      return {
+        ok: false,
+        error: `refusing to load ${path}: not a Foundry v6 state file. Fix or remove it; will not overwrite with seed.`,
+      };
+    }
+    return { ok: true, state: parsed, source: "file" };
+  } catch (err) {
+    return {
+      ok: false,
+      error: `refusing to load ${path}: ${err instanceof Error ? err.message : "malformed JSON"}. Fix or remove it; will not overwrite with seed.`,
+    };
+  }
+}
+
+export function saveFactoryState(path: string, state: FactoryState): void {
+  writeFileSync(path, JSON.stringify(state, null, 2));
+}

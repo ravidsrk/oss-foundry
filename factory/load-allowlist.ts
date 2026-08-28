@@ -71,7 +71,7 @@ export function assertAllowlist(parsed: ParsedAllowlist): void {
     if (denyIds.has(repo.id)) throw new Error(`allowlist.yaml: denylist id leaked into repos: ${repo.id}`);
     if (repoIds.has(repo.id)) throw new Error(`allowlist.yaml: duplicate repo ${repo.id}`);
     repoIds.add(repo.id);
-    if (repo.wave === 1 && repo.sandbox === "host") {
+    if (repo.wave >= 1 && repo.sandbox === "host") {
       throw new Error(`allowlist.yaml: Wave 1+ repo ${repo.id} must not use host sandbox`);
     }
   }

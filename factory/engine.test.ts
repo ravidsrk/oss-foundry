@@ -3,11 +3,13 @@ import { test } from "node:test";
 import {
   applyAdvance,
   applyApprove,
+  applyAttachDraft,
   applyAttachEvidence,
   applyQueueLive,
   applyTick,
   evidenceIsReady,
   hasInflight,
+  isBoundSha,
   isPlaceholderSha,
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
@@ -32,6 +34,13 @@ function blank(): FactoryState {
     bans: 0,
     humanApprovalsRemaining: 20,
   };
+}
+
+const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
+const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
+const KNOWN = new Set([BASE, HEAD]);
+function verifyKnown(_repo: string, sha: string) {
+  return KNOWN.has(sha.toLowerCase());
 }
 
 function live(
@@ -176,21 +185,48 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  });
+  }, verifyKnown);
   assert.ok(fake.error);
   assert.equal(isPlaceholderSha("deadbeefab"), true);
-  assert.equal(isPlaceholderSha("d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d"), false);
+  assert.equal(isBoundSha(HEAD), true);
+  assert.equal(isPlaceholderSha(HEAD), false);
+
+  const fabricated = applyAttachEvidence(state, id, {
+    baseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    headSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  }, verifyKnown);
+  assert.ok(fabricated.error);
+  assert.match(fabricated.error, /placeholder|not found/i);
+
+  const unknownHex = applyAttachEvidence(state, id, {
+    baseSha: BASE,
+    headSha: "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  }, verifyKnown);
+  assert.ok(unknownHex.error);
+  assert.match(unknownHex.error, /not found/);
 
   state = applyAttachEvidence(state, id, {
-    baseSha: "251fe899c5bd843a7dad71d908c0af3bfcea79e1",
-    headSha: "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d",
+    baseSha: BASE,
+    headSha: HEAD,
     testCommand: "true",
     testExit: 0,
     negativeControl: "red-on-revert",
     filesChanged: 1,
     diffLines: 1,
     notes: ["operator-harvested"],
-  }).state;
+  }, verifyKnown).state;
   assert.equal(evidenceIsReady(state.packets[0].evidence), true);
   state = applyAdvance(state, id).state;
   assert.equal(state.packets[0].status, "draft-ready");
@@ -210,4 +246,61 @@ test("renderPrBody embeds verbatim disclosure; create payload is draft-only", ()
   const payload = draftPullPayload({ title: "t", head: "foundry/x", body });
   assert.equal(payload.draft, true);
   assert.equal("merge" in payload, false);
+});
+
+test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
+  let state = applyTick(blank()).state;
+  const id = state.packets[0].id;
+  state = applyApprove(state, id, "attest").state;
+  state = applyAdvance(state, id).state;
+  state = applyAdvance(state, id).state;
+  state = applyAttachEvidence(state, id, {
+    baseSha: BASE,
+    headSha: HEAD,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  }, verifyKnown).state;
+  state = applyAdvance(state, id).state;
+  assert.equal(state.packets[0].status, "draft-ready");
+  const openedBefore = state.scorecard.find((r) => r.repoId === state.packets[0].repoId)?.opened ?? 0;
+
+  const typo = applyAttachDraft(state, id, "not-a-url", { draft: true });
+  assert.ok(typo.error);
+  assert.match(typo.error, /Not a GitHub pull request URL/);
+
+  const otherRepo = applyAttachDraft(
+    state,
+    id,
+    "https://github.com/matplotlib/matplotlib/pull/1",
+    { draft: true },
+  );
+  assert.ok(otherRepo.error);
+  assert.match(otherRepo.error, /does not match packet repo/);
+
+  const ready = applyAttachDraft(
+    state,
+    id,
+    `https://github.com/${state.packets[0].repoId}/pull/99`,
+    { draft: false },
+  );
+  assert.ok(ready.error);
+  assert.match(ready.error, /must be a draft/);
+  assert.equal(ready.state.packets[0].status, "draft-ready");
+  assert.equal(
+    ready.state.scorecard.find((r) => r.repoId === state.packets[0].repoId)?.opened ?? 0,
+    openedBefore,
+  );
+
+  const ok = applyAttachDraft(
+    state,
+    id,
+    `https://github.com/${state.packets[0].repoId}/pull/99`,
+    { draft: true, headSha: HEAD },
+  );
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.state.packets[0].status, "submitted");
 });
