@@ -1,8 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { CAPS } from "./allowlist.ts";
-import { inflightCount } from "./engine.ts";
 import { seedState } from "./seed.ts";
-import type { FactoryState } from "./types.ts";
+import { inflightCount, type FactoryState } from "./types.ts";
 
 const PACKET_STATUSES = new Set([
   "scouted",

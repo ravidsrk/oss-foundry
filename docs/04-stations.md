@@ -77,7 +77,9 @@ A draft PR is not done. The packet stays on this station until merged, closed, o
 Does:
 
 - Sync the live PR (draft/open/merged, head SHA, review comment count). User-initiated. Never on load.
-- Record bot-reconcile and review-reply notes against the current head.
+- Record bot-reconcile and review-reply notes against the current head. `review-reply` is a reply
+  that was **made**; a reply still **owed** — maintainer activity arriving while another packet
+  holds the in-flight slot — is a `note` prefixed `reply-owed:`, like `stale-intent`.
 - Mark quiet when threads are answered. **Never merge.**
 - When GitHub reports `merged`, write the scorecard `merged` row. When closed unmerged, write `closedUnmerged`.
 

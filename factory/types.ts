@@ -38,6 +38,28 @@ export type PacketStatus =
   | "parked"
   | "rejected";
 
+/**
+ * The statuses that occupy the one in-flight slot (docs/PRODUCT.md). `followed-up` is deliberately
+ * absent: the slot releases once threads are answered and the PR goes quiet.
+ *
+ * This lives on the shared leaf, not in `engine.ts`: `state.ts` enforces the same invariant when it
+ * loads a ledger, and a primitive module must not reach up into the orchestration layer
+ * (docs/01-architecture.md). `hasInflight` stays in `engine.ts` — it reads the allowlist cap.
+ */
+export const INFLIGHT_STATUSES: PacketStatus[] = [
+  "gated",
+  "frozen",
+  "approved",
+  "implementing",
+  "reviewing",
+  "draft-ready",
+  "submitted",
+];
+
+export function inflightCount(packets: TaskPacket[]): number {
+  return packets.filter((p) => INFLIGHT_STATUSES.includes(p.status)).length;
+}
+
 /** Every Foundry packet is independently reviewed. The historical `dark-eligible` value is not representable. */
 export type Lighting = "lit";
 

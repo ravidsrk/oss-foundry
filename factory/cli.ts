@@ -14,7 +14,6 @@ import {
   isBoundSha,
   findCompetingPull,
   hasInflight,
-  INFLIGHT_STATUSES,
   QUIET_RELEASE_DAYS,
   quietDaysOf,
 } from "./engine.ts";
@@ -36,7 +35,7 @@ import { renderEvidencePage, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
-import type { EvidenceManifest } from "./types.ts";
+import { INFLIGHT_STATUSES, type EvidenceManifest } from "./types.ts";
 import { witnessEvidence, type WitnessRunner } from "./witness.ts";
 
 const hostRunner: WitnessRunner = (step, args, opts) =>
@@ -272,6 +271,9 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
+    // Reject still succeeds (it is the documented halt-everything path) but it does not go quiet:
+    // an abandoned live PR is named on the terminal, not only in parkReason and the event log.
+    if (result.warning) console.error(result.warning);
     saveFactoryState(STATE_FILE, result.state);
     console.log(`rejected ${id}`);
     return;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +22,6 @@ import {
   evidenceIsReady,
   findCompetingPull,
   hasInflight,
-  inflightCount,
   isBoundSha,
   isPlaceholderSha,
   mentionsIssue,
@@ -39,7 +39,7 @@ import { emptyScorecard, health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
-import type { FactoryState } from "./types.ts";
+import { inflightCount, type FactoryState } from "./types.ts";
 
 function blank(): FactoryState {
   return {
@@ -892,7 +892,12 @@ test("wake does not reclaim submitted when another packet already holds the in-f
   assert.equal(afterB.status, "gated");
   assert.equal(inflightCount(woken.state.packets), 1);
   // The maintainer activity is not silently dropped: it is recorded as a reply owed on A.
-  assert.equal(afterA.followUps?.some((f) => f.kind === "review-reply"), true);
+  // `review-reply` means a reply that was made; a reply still owed is a prefixed note.
+  assert.equal(
+    afterA.followUps?.some((f) => f.kind === "note" && f.body.startsWith("reply-owed:")),
+    true,
+  );
+  assert.equal(afterA.followUps?.some((f) => f.kind === "review-reply"), false);
   assert.ok(
     woken.state.events.some((e) => e.packetId === a.id && /reply|maintainer activity/i.test(e.message)),
   );
@@ -1131,6 +1136,72 @@ test("a rejected packet with a still-open PR never rots invisibly in the ledger 
     headSha: submitted.prMeta?.headSha ?? "",
   });
   assert.deepEqual(nowClosed, []);
+});
+
+test("a parked packet with a still-open PR never rots invisibly in the ledger check", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  assert.ok(submitted.prUrl);
+  // applyHalt parks whatever is in flight — including a submitted packet still holding a live
+  // draft. `parked` is the other half of the abandoned-PR surface; `rejected` alone is not enough.
+  const halted = applyHalt(state, submitted.repoId, "maintainer asked the factory to stop");
+  const parked = halted.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(parked.status, "parked");
+  assert.equal(parked.prUrl, submitted.prUrl);
+
+  const stillLive = packetDivergences(parked, {
+    state: "open",
+    merged: false,
+    draft: submitted.prMeta?.draft ?? true,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.equal(
+    stillLive.some(
+      (d) => d.includes(parked.id) && d.includes(parked.prUrl!) && d.includes("parked"),
+    ),
+    true,
+  );
+
+  // Once the abandoned PR is actually closed on GitHub, there is nothing left to flag.
+  const nowClosed = packetDivergences(parked, {
+    state: "closed",
+    merged: false,
+    draft: submitted.prMeta?.draft ?? true,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.deepEqual(nowClosed, []);
+});
+
+test("the reject warning reaches the operator's terminal, not only the ledger", () => {
+  // The reducer-level assertions above all passed while the CLI printed nothing but `rejected <id>`
+  // — the exact silence issue #34 opens with. This drives the real binary and reads its streams.
+  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-"));
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  assert.ok(submitted.prUrl);
+  writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+
+  const cli = join(import.meta.dirname, "cli.ts");
+  const reject = (id: string) =>
+    spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", cli, "reject", id, "--reason", "typo, meant a different id"],
+      { cwd: dir, encoding: "utf8" },
+    );
+
+  const loud = reject(submitted.id);
+  // Reject is the documented halt-everything path: it still succeeds and still exits 0.
+  assert.equal(loud.status, 0, `${loud.stdout}${loud.stderr}`);
+  assert.match(loud.stdout, new RegExp(`rejected ${submitted.id}`));
+  const seen = `${loud.stdout}${loud.stderr}`;
+  assert.ok(seen.includes(submitted.prUrl!), seen);
+  assert.match(seen, /still open on GitHub/);
+  assert.match(seen, /close it by hand/);
+
+  // ...and it is a warning, not boilerplate: a packet with no live PR rejects quietly.
+  const quiet = reject(state.packets.find((p) => !p.prUrl)!.id);
+  assert.equal(quiet.status, 0, `${quiet.stdout}${quiet.stderr}`);
+  assert.doesNotMatch(`${quiet.stdout}${quiet.stderr}`, /still open on GitHub/);
 });
 
 function fakeRunner(script: Record<string, { exit: number; output: string }>) {

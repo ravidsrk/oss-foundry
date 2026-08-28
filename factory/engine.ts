@@ -6,30 +6,17 @@ import { buildPacket, renderPrBody } from "./packet.ts";
 import { planSandbox, runSandboxDry } from "./sandbox.ts";
 import { applyPacketToScorecard, health } from "./scorecard.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
-import type {
-  EvidenceManifest,
-  FactoryEvent,
-  FactoryState,
-  FollowUpEntry,
-  PacketStatus,
-  PrMeta,
-  ScorecardRow,
-  TaskPacket,
+import {
+  INFLIGHT_STATUSES,
+  inflightCount,
+  type EvidenceManifest,
+  type FactoryEvent,
+  type FactoryState,
+  type FollowUpEntry,
+  type PrMeta,
+  type ScorecardRow,
+  type TaskPacket,
 } from "./types.ts";
-
-export const INFLIGHT_STATUSES: PacketStatus[] = [
-  "gated",
-  "frozen",
-  "approved",
-  "implementing",
-  "reviewing",
-  "draft-ready",
-  "submitted",
-];
-
-export function inflightCount(packets: TaskPacket[]): number {
-  return packets.filter((p) => INFLIGHT_STATUSES.includes(p.status)).length;
-}
 
 export function hasInflight(packets: TaskPacket[]): boolean {
   return inflightCount(packets) >= CAPS.in_flight;
@@ -192,7 +179,7 @@ export function applyReject(
   state: FactoryState,
   id: string,
   reason: string,
-): { state: FactoryState; error?: string } {
+): { state: FactoryState; error?: string; warning?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
   // A merged packet is terminal and already counted toward mergedTotal / attested Wave 0 merges;
@@ -200,16 +187,20 @@ export function applyReject(
   if (packet.status === "merged") {
     return {
       state,
-      error: `cannot reject ${id} from status merged — rejecting a merged packet would desync the promotion-gate counters (mergedTotal vs. attested Wave 0 merges)`,
+      error: `cannot reject ${id} from status ${packet.status} — rejecting a merged packet would desync the promotion-gate counters (mergedTotal vs. attested Wave 0 merges)`,
     };
   }
   // docs/08-operations.md: "to halt everything, reject in-flight packets" — submitted (with a live,
   // still-open PR) must stay rejectable as the halt path. It must not be silent about it: an
   // operator who mistypes `reject` on the one in-flight packet is about to abandon a real draft.
+  // `warning` is separate from `error` on purpose: `error` is the refusal path the CLI exits 1 on,
+  // while this one proceeds and prints — the same "proceed but say so out loud" shape the freeze
+  // taste gate uses for an adjacent PR. A warning that only reaches parkReason is not loud.
   const abandonsOpenPr = packet.status === "submitted" && Boolean(packet.prUrl);
-  const message = abandonsOpenPr
-    ? `${reason} — WARNING: ${packet.prUrl} is still open on GitHub. Rejecting this packet does not close the PR; close it by hand or it stays live and unattended.`
-    : reason;
+  const warning = abandonsOpenPr
+    ? `WARNING: ${packet.prUrl} is still open on GitHub. Rejecting this packet does not close the PR; close it by hand or it stays live and unattended.`
+    : undefined;
+  const message = warning ? `${reason} — ${warning}` : reason;
   const packets = state.packets.map((p) =>
     p.id === id
       ? bump(p, {
@@ -226,6 +217,7 @@ export function applyReject(
       packets,
       events: [ev("reject", message, id), ...state.events].slice(0, 80),
     },
+    warning,
   };
 }
 
@@ -788,10 +780,13 @@ export function applyPrSync(
         next = bump(next, {
           followUps: [
             ...(next.followUps ?? []),
+            // `kind: "note"` with a `reply-owed:` prefix, following `stale-intent` below.
+            // `review-reply` is reserved for a reply that was MADE (docs/04-stations.md,
+            // docs/10-schemas.md); this entry records one that is still owed.
             followUpEntry(
               at,
-              "review-reply",
-              `Maintainer activity on ${meta.url} while another packet holds the in-flight slot — reply owed; not reclaiming submitted.`,
+              "note",
+              `reply-owed: Maintainer activity on ${meta.url} while another packet holds the in-flight slot — reply owed; not reclaiming submitted.`,
               meta.url,
             ),
           ],
