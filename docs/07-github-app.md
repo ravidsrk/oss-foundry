@@ -28,7 +28,27 @@ PATs inherit the operator’s social graph. A leaked PAT is a reputation inciden
 
 `factory/github-pr.ts` `draftPullPayload` sets `draft: true` unconditionally. There is no merge / `--admin` helper in that module. Marking ready-for-review is not in the method set; a human uses the browser.
 
-The App is installed on `ravidsrk` only. `POST /repos/ColeMurray/background-agents/pulls` is **403**. ColeMurray#1652 was opened in a browser session, ready rather than draft — a doctrine miss to follow up, not a reason to add a merge helper.
+The App is installed on `ravidsrk` only. `POST /repos/ColeMurray/background-agents/pulls` is **403**. ColeMurray#1652 was opened in a browser session, ready rather than draft — the doctrine miss that motivated the machine account below.
+
+## Machine account — the moment of contact (issue #5)
+
+The App's 403 on non-installed repos is GitHub's security model (user tokens act on the
+intersection of app installations and user access), and the roadmap item that would fix
+fine-grained PATs is paused. The one documented credential for fork→upstream PRs on unaffiliated
+public repos is a **classic PAT**. So the moment of contact is machine-enforced with a hybrid:
+
+- the App keeps doing everything it can (clone, push the branch to the operator fork);
+- a dedicated, ToS-compliant **machine account** holds a classic PAT scoped to `public_repo`
+  only (`FOUNDRY_PAT`, operator host env — never git, never the E2B box), used for exactly one
+  call: `createDraftPull` → `POST /pulls` with `draft: true` hard-coded;
+- `open-draft <packetId> --head <fork:branch>` re-runs the competing-work check, refuses a body
+  without the verbatim disclosure, opens the draft, and records it via the normal attach flow;
+- one create per CLI run; a secondary-rate-limit response is a **factory halt signal**, never a
+  retry (AUP: excessive automated bulk activity);
+- setup is human-only: `scripts/machine-account-wizard.sh` walks account, 2FA, token, and
+  verification. No agent creates accounts.
+
+Browser sessions are demoted to emergency-only. No contribution PR opens by hand again.
 
 ## Secrets
 
