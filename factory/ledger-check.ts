@@ -20,6 +20,16 @@ export function packetDivergences(packet: TaskPacket, live: LivePrLite): string[
       `${packet.id}: ledger says merged but the PR is ${live.state} and unmerged — resolve by hand; the ledger never un-merges itself`,
     );
   }
+  // A rejected or parked packet is terminal in the ledger, but if it still names a PR that is
+  // open on GitHub the draft was abandoned, not closed — without this branch it never surfaces
+  // again (issue #34). Once the PR is actually closed, there is nothing left to flag.
+  if ((packet.status === "rejected" || packet.status === "parked") && packet.prUrl) {
+    if (!live.merged && live.state === "open") {
+      out.push(
+        `${packet.id}: packet is ${packet.status} but ${packet.prUrl} is still open on GitHub — an abandoned live PR; close it by hand or it stays invisible`,
+      );
+    }
+  }
   if (packet.status === "submitted" || packet.status === "followed-up") {
     if (live.merged) {
       out.push(`${packet.id}: PR merged upstream — mechanical: run \`sync ${packet.id}\` to record it`);

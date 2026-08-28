@@ -1,4 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { CAPS } from "./allowlist.ts";
+import { inflightCount } from "./engine.ts";
 import { seedState } from "./seed.ts";
 import type { FactoryState } from "./types.ts";
 
@@ -361,6 +363,16 @@ export function loadFactoryState(
       return {
         ok: false,
         error: `refusing to load ${path}: not a Foundry v6 state file. Fix or remove it; will not overwrite with seed.`,
+      };
+    }
+    // Shape validation above says nothing about doctrine: a hand-edited or drifted file can still
+    // describe more packets in flight than CAPS.in_flight allows. The one-packet-in-flight
+    // invariant is the doctrine's central throttle (issue #34) — fail closed rather than load it.
+    const inflight = inflightCount(migrated.packets);
+    if (inflight > CAPS.in_flight) {
+      return {
+        ok: false,
+        error: `refusing to load ${path}: ${inflight} packets are in flight but CAPS.in_flight is ${CAPS.in_flight} — the one-packet-in-flight invariant is violated. Fix or remove it; will not overwrite with seed.`,
       };
     }
     return { ok: true, state: migrated, source: "file" };

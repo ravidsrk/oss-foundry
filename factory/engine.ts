@@ -195,13 +195,28 @@ export function applyReject(
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
+  // A merged packet is terminal and already counted toward mergedTotal / attested Wave 0 merges;
+  // rejecting it now would desync those promotion-gate counters from the ledger (issue #34).
+  if (packet.status === "merged") {
+    return {
+      state,
+      error: `cannot reject ${id} from status merged — rejecting a merged packet would desync the promotion-gate counters (mergedTotal vs. attested Wave 0 merges)`,
+    };
+  }
+  // docs/08-operations.md: "to halt everything, reject in-flight packets" — submitted (with a live,
+  // still-open PR) must stay rejectable as the halt path. It must not be silent about it: an
+  // operator who mistypes `reject` on the one in-flight packet is about to abandon a real draft.
+  const abandonsOpenPr = packet.status === "submitted" && Boolean(packet.prUrl);
+  const message = abandonsOpenPr
+    ? `${reason} — WARNING: ${packet.prUrl} is still open on GitHub. Rejecting this packet does not close the PR; close it by hand or it stays live and unattended.`
+    : reason;
   const packets = state.packets.map((p) =>
     p.id === id
       ? bump(p, {
           status: "rejected",
           station: "terminal",
           class: p.class === "buildable" ? "out-of-scope" : p.class,
-          parkReason: reason,
+          parkReason: message,
         })
       : p,
   );
@@ -209,7 +224,7 @@ export function applyReject(
     state: {
       ...state,
       packets,
-      events: [ev("reject", reason, id), ...state.events].slice(0, 80),
+      events: [ev("reject", message, id), ...state.events].slice(0, 80),
     },
   };
 }
@@ -765,8 +780,33 @@ export function applyPrSync(
       packet.prMeta !== undefined &&
       packet.prMeta.updatedAt !== meta.updatedAt;
     if (woke) {
-      next = bump(next, { status: "submitted" });
-      events.push(ev("follow-up", `Maintainer activity on ${meta.url} — answer threads before any new tick`, id));
+      // The slot this packet released may already be occupied by a newer in-flight packet (issue
+      // #34 vector b). Reclaiming `submitted` here would put two packets in flight at once — the
+      // one-packet-in-flight invariant is central doctrine, so the newer packet keeps priority and
+      // this one records the reply owed instead of silently doubling the count.
+      if (hasInflight(state.packets)) {
+        next = bump(next, {
+          followUps: [
+            ...(next.followUps ?? []),
+            followUpEntry(
+              at,
+              "review-reply",
+              `Maintainer activity on ${meta.url} while another packet holds the in-flight slot — reply owed; not reclaiming submitted.`,
+              meta.url,
+            ),
+          ],
+        });
+        events.push(
+          ev(
+            "follow-up",
+            `Maintainer activity on ${meta.url} — reply owed, but the in-flight slot is held by another packet; ${id} stays followed-up`,
+            id,
+          ),
+        );
+      } else {
+        next = bump(next, { status: "submitted" });
+        events.push(ev("follow-up", `Maintainer activity on ${meta.url} — answer threads before any new tick`, id));
+      }
     } else if (packet.status === "submitted" && opts.threadsAnswered && quiet >= QUIET_RELEASE_DAYS) {
       next = bump(next, {
         status: "followed-up",
