@@ -245,6 +245,19 @@ export interface FactoryEvent {
   message: string;
 }
 
+/**
+ * A durable stop on the whole factory. SPEC.md §6: a platform secondary rate limit MUST halt the
+ * factory, never retry — so the stop lives in the ledger, not in a console line that dies with the
+ * process. It carries no expiry on purpose: only a human clears it (`clear-halt`).
+ */
+export interface FactoryHalt {
+  at: string;
+  reason: string;
+  /** Where the halt came from, so the ledger can tell a throttle apart from a maintainer ask. */
+  source: "secondary-rate-limit";
+  repoId?: string;
+}
+
 export interface FactoryState {
   version: 6;
   packets: TaskPacket[];
@@ -255,4 +268,5 @@ export interface FactoryState {
   mergedTotal: number;
   bans: number;
   humanApprovalsRemaining: number;
+  halt?: FactoryHalt;
 }

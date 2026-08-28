@@ -1,4 +1,5 @@
 import { repoById } from "./allowlist.ts";
+import { witnessedSha } from "./ledger-check.ts";
 import { ABORT_DEFAULT, commitTrailerLine, DISCLOSURE, NON_GOALS_DEFAULT } from "./neighbor.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { scoreIssue } from "./scout.ts";
@@ -110,6 +111,14 @@ export function renderEvidencePage(packet: TaskPacket): string {
   const ev = packet.evidence;
   const w = ev?.witness;
   const record = packet.policy.record;
+  // The witnessed commit is immutable; the PR head is not. When they differ, the maintainer is
+  // reading proof that is older than the branch in front of them, and must be told so here.
+  const witnessed = witnessedSha(packet);
+  const liveHead = packet.prMeta?.headSha;
+  const stale =
+    witnessed && liveHead && witnessed !== liveHead
+      ? `\n- **The pull request has moved past the witnessed commit.** Proof above is bound to \`${witnessed.slice(0, 12)}\`; the branch is at \`${liveHead.slice(0, 12)}\`. Commits after the witness are not covered by it.`
+      : "";
   const lines = [
     `# Evidence — ${packet.repoId}#${packet.issueNumber}`,
     "",
@@ -134,7 +143,7 @@ export function renderEvidencePage(packet: TaskPacket): string {
           w
             ? `- Witnessed by the ${w.provider} sandbox at ${w.ranAt}: tests exit ${w.testExit} at head; **exit ${w.revertExit} with the change reverted** (the proof binds). Log hashes sha256 ${w.testLogSha.slice(0, 12)}… / ${w.revertLogSha.slice(0, 12)}…`
             : `- Negative control: ${ev.negativeControl} (recorded before machine witnessing shipped — attested, not witnessed)`,
-        ].join("\n")
+        ].join("\n") + stale
       : "No evidence manifest — this packet must not reach a maintainer.",
     "",
     "## Standing commitments",

@@ -1,6 +1,7 @@
 import { ALLOWLIST, CAPS, isDenied, repoById } from "./allowlist.ts";
 import { parsePrUrl } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
+import { factoryHalt } from "./halt.ts";
 import { AGENT_NAME_RE, commitTrailerLine, type DisclosureTrailer } from "./neighbor.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { planSandbox, runSandboxDry } from "./sandbox.ts";
@@ -32,6 +33,11 @@ export function maySelectRepo(
   state: FactoryState,
   repoId: string,
 ): { ok: true } | { ok: false; reason: string } {
+  // A platform halt outranks every per-repo question: SPEC.md §6 stops the factory, not one repo.
+  const halted = factoryHalt(state);
+  if (halted) {
+    return { ok: false, reason: `Factory halted ${halted.at}: ${halted.reason}` };
+  }
   const denied = isDenied(repoId);
   if (denied) return { ok: false, reason: denied.reason };
   const repo = repoById(repoId);

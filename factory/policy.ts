@@ -39,8 +39,61 @@ const HUMAN_STATEMENTS: RegExp[] = [
   /contributor\s+license\s+agreement/i,
 ];
 
+/**
+ * A CLA/DCO keyword says the topic appears; it does not say the repo requires one. "No CLA. No
+ * DCO." is a repo *waiving* the requirement, and reading it as "this is required" parks a
+ * legitimate packet. Negation is read inside the matched sentence only — and a sentence that
+ * still asserts the requirement ("without a signed CLA will be closed") keeps its hold.
+ */
+const NEG_DETERMINER =
+  /\b(?:no|without)\s+(?:(?:a|an|any|the|signed|separate|explicit|formal)\s+)*$/i;
+const NEG_VERB =
+  /\b(?:don['’]t|do(?:es)?\s+not|never)\s+(?:require|need|ask\s+for)\w*\s+(?:(?:a|an|any|the|signed|separate|explicit|formal)\s+)*$/i;
+// One filler word only ("DCO sign-off is not required"), so the waiver cannot jump into the next
+// clause of a sentence that is still asserting the requirement.
+const NOT_REQUIRED_AFTER =
+  /^\W*(?:[\w-]+\s+)?(?:is|are|was|were)?\s*(?:not|isn['’]t|aren['’]t)\s+(?:required|needed|necessary|mandatory)\b/i;
+const REQUIREMENT_WORD = /\b(?:required|needed|necessary|mandatory)\b/i;
+/** Anything in the sentence that still asserts the requirement, so a bare "without" is not a waiver. */
+const ASSERTS_REQUIREMENT =
+  /\b(?:require\w*|mandator\w*|must|need\w*|sign\w*|closed|reject\w*|cannot|can['’]t|won['’]t)\b/i;
+
+/** The sentence-sized slice holding `index`, and where the match starts inside it. */
+function sentenceAround(text: string, index: number, length: number) {
+  let start = index;
+  while (start > 0 && !/[.;\n]/.test(text[start - 1]!)) start--;
+  let end = index + length;
+  while (end < text.length && !/[.;\n]/.test(text[end]!)) end++;
+  return { sentence: text.slice(start, end), at: index - start };
+}
+
+function isWaived(text: string, index: number, length: number): boolean {
+  const { sentence, at } = sentenceAround(text, index, length);
+  const before = sentence.slice(0, at);
+  const fromMatch = sentence.slice(at);
+  const after = sentence.slice(at + length);
+  // "we don't require a DCO" / "a CLA is not required"
+  if (NEG_VERB.test(before) || NOT_REQUIRED_AFTER.test(after)) return true;
+  if (!NEG_DETERMINER.test(before)) return false;
+  // "no CLA required" — the negation and the requirement word are one idiom.
+  if (REQUIREMENT_WORD.test(fromMatch)) return true;
+  // "No CLA." — a bare absence, only when the sentence asserts nothing to the contrary.
+  return !ASSERTS_REQUIREMENT.test(sentence);
+}
+
 function quoteOf(match: RegExpExecArray): string {
   return match[0].replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+/** First hit of `re` in `text` that the surrounding sentence does not waive. */
+function firstUnwaived(re: RegExp, text: string): RegExpExecArray | undefined {
+  const scan = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+  let m: RegExpExecArray | null;
+  while ((m = scan.exec(text)) !== null) {
+    if (m[0].length === 0) break;
+    if (!isWaived(text, m.index, m[0].length)) return m;
+  }
+  return undefined;
 }
 
 export function scanPolicyText(text: string): {
@@ -54,7 +107,7 @@ export function scanPolicyText(text: string): {
     if (m) forbidden.push(quoteOf(m));
   }
   for (const re of HUMAN_STATEMENTS) {
-    const m = re.exec(text);
+    const m = firstUnwaived(re, text);
     if (m) human.push(quoteOf(m));
   }
   return { forbidden: [...new Set(forbidden)], human: [...new Set(human)] };

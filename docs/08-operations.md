@@ -8,6 +8,34 @@
 - Approvals record who attested: `approve <id> --note … --by <name>` (or set `FOUNDRY_OPERATOR`).
 - If a maintainer replies “please stop,” remove the repo the same hour.
 
+## What the clock actually verifies
+
+`factory/verify-ledger.ts` (the 6h job) checks the **committed seed** — `factory/seed.ts`, the
+published ledger — against live GitHub, and fails the run on divergence. It does **not** read
+`.foundry-state.json`: that file is gitignored and absent in CI, so it does not exist to be checked.
+
+The guarantee is therefore: *what this repository publishes about its PRs is true.* It is not:
+*what the operator has in flight locally is true.* Two consequences:
+
+1. **Promoting live state into the seed is an explicit human step.** Nothing does it automatically.
+   After a status change lands (a sync, a merge, a park), hand-edit `factory/seed.ts` and regenerate
+   the block in `docs/12-ledger.md`. Until you do, the clock is verifying the older story.
+2. **The local pre-flight is `status`.** It compares the live state file against the committed seed
+   and prints `SEED DRIFT …` per packet that differs. Drift is not an error — it is the list of
+   promotions you owe the seed.
+
+`reconcile` is the other half: it absorbs live GitHub into local state and prints `DIVERGENCE …`
+for anything a human must resolve. Neither command rewrites doctrine on its own.
+
+## Factory halt
+
+A GitHub **secondary rate limit** during `open-draft` writes a halt into the ledger (`halt` on the
+state record) and prints the halt banner. SPEC.md §6 is "halt the factory, never retry", so the
+halt is factory-wide, not per repo, and it persists across runs: `maySelectRepo` refuses every
+repository — tick, approve, and open-draft included — until a human runs
+`clear-halt --by <name> --note <text>`. It is not a scorecard `banned` tone: `bans` counts
+maintainer asks, and a platform throttle is not a maintainer saying stop.
+
 ## Tick cadence
 
 Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in flight, including `submitted`.

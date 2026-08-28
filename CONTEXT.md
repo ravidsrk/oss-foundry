@@ -44,4 +44,12 @@ SHA-bound proof that tests ran and a revert goes red. A packet without `negative
 _Avoid_: logs, transcript (those are notes, not evidence)
 
 **Clock**:
-The 6h GitHub Action that validates the allowlist. It does not open contribution PRs.
+The 6h GitHub Action that validates the allowlist and verifies the **committed seed** against live
+GitHub. It never reads `.foundry-state.json` (gitignored, absent in CI), so it guarantees the
+published ledger, not the operator's in-flight work; promoting live state into the seed is a human
+step, and `status` names the gap. It does not open contribution PRs.
+
+**Factory halt**:
+A durable, factory-wide stop written into the state record when a platform secondary rate limit
+answers a draft creation (SPEC.md §6: halt, never retry). Every repo becomes unselectable until a
+human runs `clear-halt`. Unrelated to a **scorecard halt**, which is per-repo and maintainer-driven.

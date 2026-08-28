@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evaluatePolicy } from "./policy.ts";
+import { seedState } from "./seed.ts";
 
 test("denylist always forbids matplotlib", () => {
   const v = evaluatePolicy({
@@ -188,4 +189,89 @@ test("an affirmative record satisfies parse-policy-first for an unknown repo; a 
   );
   assert.equal(silent.code, "DENY_UNKNOWN_POLICY");
   assert.equal(silent.record?.stance, "silent");
+});
+
+// A CLA/DCO keyword says the topic appears; it does not say the repo requires one. These fixtures
+// run both directions off the same vocabulary — the waiver must clear, the requirement must hold.
+
+const WAIVER_LIVE_WAVE1 = `No CLA. No DCO. Conventional commits.`;
+
+const WAIVER_NO_CLA_REQUIRED = `No CLA required. Just open a PR.`;
+
+const WAIVER_NOT_REQUIRED = `A Contributor License Agreement is not required for this project.`;
+
+const WAIVER_DONT_REQUIRE = `We don't require a DCO sign-off on contributions.`;
+
+const WAIVER_SIGNOFF_NOT_REQUIRED = `DCO sign-off is not required here.`;
+
+// The waiver must not reach across a clause that is still asserting the requirement.
+const REQUIRES_CLA_MIXED_CLAUSE = `The CLA is required, though a separate review sign-off is not required.`;
+
+const REQUIRES_DCO = `We require a DCO sign-off on every commit.`;
+
+// "without" is a negation word that is not a waiver: the sentence still asserts the requirement.
+const REQUIRES_CLA_BY_REFUSAL = `Pull requests without a signed Contributor License Agreement will be closed.`;
+
+test("the live Wave-1 CONTRIBUTING text waives CLA/DCO and must not hold the packet", () => {
+  const v = evaluatePolicy({
+    repoId: "ColeMurray/background-agents",
+    agentsMd:
+      "Well-formed agent PRs are welcome if they include tests, a failing-first reproduction, and a short disclosure. Keep diffs small.",
+    contributing: WAIVER_LIVE_WAVE1,
+    issueTitle: "Differentiate the right sidebar toggle icon by state",
+  });
+  assert.equal(v.code, "ALLOW");
+  assert.deepEqual(v.matchedPhrases, []);
+});
+
+test("waiver phrasings read as waivers, not as requirements", () => {
+  for (const contributing of [
+    WAIVER_NO_CLA_REQUIRED,
+    WAIVER_NOT_REQUIRED,
+    WAIVER_DONT_REQUIRE,
+    WAIVER_SIGNOFF_NOT_REQUIRED,
+  ]) {
+    const v = evaluatePolicy({
+      repoId: "ColeMurray/background-agents",
+      agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+      contributing,
+      issueTitle: "icon tweak",
+    });
+    assert.equal(v.code, "ALLOW", `expected ALLOW for: ${contributing}`);
+  }
+});
+
+test("negation handling does not weaken a real CLA/DCO requirement", () => {
+  for (const contributing of [
+    REQUIRES_DCO,
+    "Please sign the CLA before your first pull request.",
+    KERNEL_STYLE_CONDITIONAL,
+    REQUIRES_CLA_MIXED_CLAUSE,
+  ]) {
+    const v = evaluatePolicy({
+      repoId: "ColeMurray/background-agents",
+      agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+      contributing,
+      issueTitle: "icon tweak",
+    });
+    assert.equal(v.code, "HOLD_CLA", `expected HOLD_CLA for: ${contributing}`);
+  }
+  // A negation word inside a sentence that still asserts the requirement is not a waiver.
+  // (This phrasing parks as HOLD_HUMAN rather than HOLD_CLA today — a separate classification
+  // gap tracked in issue #37; what matters here is that the hold survives.)
+  const refusal = evaluatePolicy({
+    repoId: "ColeMurray/background-agents",
+    agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+    contributing: REQUIRES_CLA_BY_REFUSAL,
+    issueTitle: "icon tweak",
+  });
+  assert.equal(refusal.allow, false);
+  assert.match(refusal.code, /^HOLD_/);
+});
+
+test("the seeded Wave-1 packet is buildable, not parked needs-human", () => {
+  const sidebar = seedState().packets.find((p) => p.issueNumber === 1476)!;
+  assert.equal(sidebar.policy.code, "ALLOW");
+  assert.equal(sidebar.class, "buildable");
+  assert.equal(sidebar.parkReason, undefined);
 });

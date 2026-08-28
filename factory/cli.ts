@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ALLOWLIST, repoById } from "./allowlist.ts";
 import {
   applyAdvance,
@@ -14,6 +15,7 @@ import {
   isBoundSha,
   findCompetingPull,
   hasInflight,
+  maySelectRepo,
   QUIET_RELEASE_DAYS,
   quietDaysOf,
   repliesOwed,
@@ -30,13 +32,20 @@ import {
 } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import { execFile } from "node:child_process";
-import { packetDivergences } from "./ledger-check.ts";
+import {
+  applySecondaryLimitHalt,
+  clearFactoryHalt,
+  factoryHalt,
+  SECONDARY_LIMIT_BANNER,
+} from "./halt.ts";
+import { packetDivergences, seedDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderEvidencePage, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
+import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
-import { INFLIGHT_STATUSES, type EvidenceManifest } from "./types.ts";
+import { INFLIGHT_STATUSES, type EvidenceManifest, type FactoryState } from "./types.ts";
 import { witnessEvidence, type WitnessRunner } from "./witness.ts";
 
 const hostRunner: WitnessRunner = (step, args, opts) =>
@@ -53,13 +62,18 @@ const hostRunner: WitnessRunner = (step, args, opts) =>
     });
   });
 
-const STATE_FILE = resolve(".foundry-state.json");
-
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   if (i === -1) return undefined;
   return args[i + 1];
 }
+
+const ARGV = process.argv.slice(2);
+// The ledger belongs to the repository, not to whatever directory the operator happened to be in.
+// A cwd-relative path silently served the committed seed as live truth from anywhere else, and a
+// mutating command forked a second state file next to it.
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const STATE_FILE = resolve(flag(ARGV, "--state") ?? resolve(REPO_ROOT, ".foundry-state.json"));
 
 function mustLoad() {
   const loaded = loadFactoryState(STATE_FILE);
@@ -67,10 +81,25 @@ function mustLoad() {
     console.error(loaded.error);
     process.exit(1);
   }
-  return loaded.state;
+  if (loaded.source === "seed") {
+    console.error(
+      `no state file at ${STATE_FILE} — showing the committed seed ledger, not live state. Mutating commands will create it.`,
+    );
+  }
+  const halted = factoryHalt(loaded.state);
+  if (halted) {
+    console.error(`FACTORY HALTED ${halted.at}: ${halted.reason}`);
+  }
+  return { state: loaded.state, source: loaded.source };
 }
 
-function printStatus(state: ReturnType<typeof mustLoad>) {
+function printStatus(state: FactoryState, source: "file" | "seed") {
+  console.log(`state: ${STATE_FILE}${source === "seed" ? " (absent — committed seed)" : ""}`);
+  // The clock verifies the committed seed, never this file (docs/08-operations.md). This is the
+  // only place the operator is told the two have parted company.
+  if (source === "file") {
+    for (const d of seedDivergences(state, seedState())) console.log(`SEED DRIFT ${d}`);
+  }
   const inflight = state.packets.filter((p) => INFLIGHT_STATUSES.includes(p.status));
   console.log(`Foundry  packets=${state.packets.length} ticks=${state.ticksRun} attestedWave0=${foundryAttestedWave0Merges(state.packets)} inflight=${hasInflight(state.packets)}`);
   console.log(`humanApprovalsRemaining=${state.humanApprovalsRemaining} mergedTotal=${state.mergedTotal} bans=${state.bans}`);
@@ -110,7 +139,7 @@ function printStatus(state: ReturnType<typeof mustLoad>) {
   }
 }
 
-async function tickWithGithub(state: ReturnType<typeof mustLoad>) {
+async function tickWithGithub(state: FactoryState) {
   if (hasInflight(state.packets)) return applyTick(state);
   const competingKeys: string[] = [];
   const adjacentKeys: string[] = [];
@@ -170,7 +199,7 @@ async function tickWithGithub(state: ReturnType<typeof mustLoad>) {
   return applyTick(state, live, competingKeys, adjacentKeys);
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
+const [cmd, ...rest] = ARGV;
 
 if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   console.log(`Foundry operator loop
@@ -189,7 +218,9 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   reconcile
   ledger
   evidence-page <packetId>   (maintainer-facing audit page, markdown to stdout)
+  clear-halt --by <name> --note <text>   (a human lifts a persisted factory halt)
 
+Any command takes --state <path> to point at a different ledger.
 State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry never merges.
 Disclosure:
 ${DISCLOSURE}
@@ -198,10 +229,22 @@ ${DISCLOSURE}
 }
 
 async function main() {
-  const state = mustLoad();
+  const { state, source } = mustLoad();
 
   if (cmd === "status") {
-    printStatus(state);
+    printStatus(state, source);
+    return;
+  }
+
+  if (cmd === "clear-halt") {
+    const halted = factoryHalt(state);
+    if (!halted) {
+      console.error("the factory is not halted");
+      process.exit(1);
+    }
+    const by = flag(rest, "--by") ?? process.env.FOUNDRY_OPERATOR ?? "operator";
+    saveFactoryState(STATE_FILE, clearFactoryHalt(state, by, flag(rest, "--note") ?? ""));
+    console.log(`halt from ${halted.at} cleared by ${by}`);
     return;
   }
 
@@ -210,7 +253,7 @@ async function main() {
     saveFactoryState(STATE_FILE, result.state);
     if (!result.packet) {
       console.log(result.reason);
-      printStatus(result.state);
+      printStatus(result.state, source);
       process.exit(result.reason === "idle" || result.reason === "in-flight" ? 0 : 1);
     }
     console.log(`${result.packet.id}  ${result.packet.status}  ${result.packet.repoId}#${result.packet.issueNumber}  ${result.packet.policy.code}`);
@@ -428,6 +471,13 @@ async function main() {
       console.error(`unknown packet ${id}`);
       process.exit(1);
     }
+    // Refuse before any GitHub call: a persisted halt (SPEC.md §6) must stop the retry, not
+    // discover it after another request has already gone out.
+    const gate = maySelectRepo(state, packet.repoId);
+    if (!gate.ok) {
+      console.error(`refusing to open a draft on ${packet.repoId}: ${gate.reason}`);
+      process.exit(1);
+    }
     if (packet.status !== "draft-ready" || packet.prUrl) {
       console.error(`open-draft needs a draft-ready packet with no PR; ${id} is ${packet.status}${packet.prUrl ? ` with ${packet.prUrl}` : ""}`);
       process.exit(1);
@@ -466,7 +516,15 @@ async function main() {
       body,
     });
     if (!created.ok) {
-      if (created.halt) console.error("=== FACTORY HALT SIGNAL — secondary rate limit ===");
+      if (created.halt) {
+        // The banner is for the human at the keyboard; the ledger write is what stops the next run.
+        console.error(SECONDARY_LIMIT_BANNER);
+        saveFactoryState(
+          STATE_FILE,
+          applySecondaryLimitHalt(state, { repoId: packet.repoId, detail: created.error }),
+        );
+        console.error(`halt recorded in ${STATE_FILE} — clear it with \`clear-halt\` once a human has checked.`);
+      }
       console.error(created.error);
       process.exit(1);
     }

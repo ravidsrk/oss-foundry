@@ -1,4 +1,4 @@
-import type { TaskPacket } from "./types.ts";
+import type { FactoryState, TaskPacket } from "./types.ts";
 
 export interface LivePrLite {
   state: "open" | "closed";
@@ -45,10 +45,70 @@ export function packetDivergences(packet: TaskPacket, live: LivePrLite): string[
       `${packet.id}: recorded draft=${packet.prMeta.draft} but live draft=${live.draft} — doctrine event, resolve by hand`,
     );
   }
-  if (packet.prMeta && live.headSha && packet.prMeta.headSha !== live.headSha) {
-    out.push(
-      `${packet.id}: recorded head ${packet.prMeta.headSha.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — new commits since the last sync; review evidence may be stale`,
-    );
+  // Staleness is measured from the WITNESSED commit, not from `prMeta.headSha` — `sync` overwrites
+  // prMeta on every run, so anchoring there erases the warning exactly when new commits arrive.
+  // `evidence.reviewedSha` is immutable, so the flag persists until the packet is re-witnessed.
+  // Only live packets are checked: a terminal packet is at rest, and re-reporting it every tick
+  // would train the operator (and the clock) to ignore real divergence.
+  const witnessed = witnessedSha(packet);
+  if (live.headSha && (packet.status === "submitted" || packet.status === "followed-up")) {
+    if (witnessed && witnessed !== live.headSha) {
+      out.push(
+        `${packet.id}: evidence witnessed at ${witnessed.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — commits landed after the review; re-witness before the evidence is read as current`,
+      );
+    } else if (!witnessed && packet.prMeta && packet.prMeta.headSha !== live.headSha) {
+      out.push(
+        `${packet.id}: recorded head ${packet.prMeta.headSha.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — new commits since the last sync`,
+      );
+    }
+  }
+  return out;
+}
+
+/** The commit the evidence actually describes: the reviewed SHA when there is one, else the witnessed head. */
+export function witnessedSha(packet: TaskPacket): string | undefined {
+  return packet.evidence?.reviewedSha ?? packet.evidence?.headSha;
+}
+
+/**
+ * The clock (`verify-ledger.ts`) checks the COMMITTED SEED against GitHub — the seed is the
+ * published ledger, and `.foundry-state.json` is gitignored and absent in CI. That leaves the
+ * operator's live file unchecked between hand-promotions, so `status` runs this locally: whatever
+ * the live file says that the committed seed does not, a human has to promote or discard.
+ */
+export function seedDivergences(live: FactoryState, seed: FactoryState): string[] {
+  const out: string[] = [];
+  const seeded = new Map(seed.packets.map((p) => [p.id, p]));
+  for (const packet of live.packets) {
+    const committed = seeded.get(packet.id);
+    if (!committed) {
+      out.push(`${packet.id}: in live state only (${packet.status}) — not in the committed seed`);
+      continue;
+    }
+    seeded.delete(packet.id);
+    if (committed.status !== packet.status) {
+      out.push(`${packet.id}: live status ${packet.status}, committed seed says ${committed.status}`);
+    }
+    if ((packet.prUrl ?? "") !== (committed.prUrl ?? "")) {
+      out.push(
+        `${packet.id}: live PR ${packet.prUrl ?? "none"}, committed seed says ${committed.prUrl ?? "none"}`,
+      );
+    }
+    // The two doctrine-bearing fields of prMeta. syncedAt/updatedAt move on every sync and say
+    // nothing a human owes the seed.
+    if ((packet.prMeta?.headSha ?? "") !== (committed.prMeta?.headSha ?? "")) {
+      out.push(
+        `${packet.id}: live head ${(packet.prMeta?.headSha ?? "none").slice(0, 7)}, committed seed says ${(committed.prMeta?.headSha ?? "none").slice(0, 7)}`,
+      );
+    }
+    if (packet.prMeta?.draft !== committed.prMeta?.draft) {
+      out.push(
+        `${packet.id}: live draft=${packet.prMeta?.draft}, committed seed says draft=${committed.prMeta?.draft}`,
+      );
+    }
+  }
+  for (const packet of seeded.values()) {
+    out.push(`${packet.id}: only in the committed seed (${packet.status}) — missing from live state`);
   }
   return out;
 }
