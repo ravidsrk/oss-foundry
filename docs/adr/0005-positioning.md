@@ -24,8 +24,9 @@ before saying yes to agents again. Consequences of that claim, in order:
 2. The artifact a maintainer consumes is the evidence page (policy quote, attest identity,
    witnessed runs, disclosure) — `cli.ts evidence-page` renders it; docs/evidence/ carries a
    real example.
-3. Success metrics stay process-shaped (bans 0, reverts 0, quotes that survive adversarial
-   reads), never volume-shaped.
+3. Success metrics stay process-conditioned: bans 0, reverts 0, definitions and quotes that
+   survive adversarial reads. Merge-rate targets remain (vision doc), but PR volume stays a
+   vanity metric, never a KPI (docs/08-operations.md).
 
 ## Consequences
 

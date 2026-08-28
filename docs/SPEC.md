@@ -2,8 +2,9 @@
 
 An implementation-neutral protocol for **re-admissible** AI-agent contributions to open-source
 repositories: the process a maintainer could require before saying yes to agents again. Extracted
-from the reference implementation in this repository (ravidsrk/oss-foundry). Naming is
-provisional per ADR 0004. MUST/SHOULD/MAY are RFC-2119-style.
+from the reference implementation in this repository (ravidsrk/oss-foundry). **In-repo draft;
+not yet published externally** — the name gates on ADR 0004 before any external publication.
+MUST/SHOULD/MAY are RFC-2119-style.
 
 ## 1. Scope
 
