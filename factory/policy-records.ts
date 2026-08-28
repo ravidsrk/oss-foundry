@@ -25,13 +25,20 @@ export function parsePolicyRecords(text: string): Map<string, PolicyRecord> {
     if (!source || !fetchedAt || !quote) {
       throw new Error(`policy-records.json: ${repoId} needs source, fetchedAt, and quote`);
     }
+    const conditions = Array.isArray(r.conditions) ? r.conditions.map((c) => String(c)) : [];
+    if (stance === "conditional" && conditions.length === 0) {
+      throw new Error(`policy-records.json: ${repoId} is conditional but names no conditions`);
+    }
+    if (stance !== "conditional" && conditions.length > 0) {
+      throw new Error(`policy-records.json: ${repoId} has conditions but stance ${stance} never consults them`);
+    }
     out.set(repoId, {
       repoId,
       source,
       url: String(r.url ?? ""),
       fetchedAt,
       stance: stance as PolicyRecord["stance"],
-      conditions: Array.isArray(r.conditions) ? r.conditions.map((c) => String(c)) : [],
+      conditions,
       quote,
     });
   }

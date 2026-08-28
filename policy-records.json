@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Parsed-policy records: what each allowlisted repo's own docs say about AI contributions, quoted verbatim, with provenance. The gate consults these; a record is evidence, aiPolicy in allowlist.yaml stays the operator override. Refresh a record when the source file changes upstream.",
+  "note": "Parsed-policy records: what each allowlisted repo's own docs say about AI contributions, one statement quoted verbatim, with provenance. The gate consults these; a record is evidence, aiPolicy in allowlist.yaml stays the operator override. Refresh a record when the source file changes upstream.",
   "records": {
     "ravidsrk/orca-fleet": {
       "source": "AGENTS.md",
@@ -60,19 +60,24 @@
     },
     "mastra-ai/mastra": {
       "source": "CONTRIBUTING.md",
-      "url": "https://github.com/mastra-ai/mastra/blob/HEAD/CONTRIBUTING.md",
+      "url": "https://github.com/mastra-ai/mastra/blob/main/CONTRIBUTING.md",
       "fetchedAt": "2026-08-28",
       "stance": "conditional",
-      "conditions": ["assignment-first"],
-      "quote": "Any pull request fixing an existing issue without being assigned first will be automatically closed."
+      "conditions": [
+        "labeled-issue"
+      ],
+      "quote": "A Pull Request can only be opened for feature requests when there is no \"status: needs triage\" or \"status: needs approval\" label. If an Issue still has those labels, the PR will automatically be closed."
     },
     "OpenHands/OpenHands": {
       "source": ".github/pull_request_template.md",
-      "url": "https://github.com/OpenHands/OpenHands/blob/HEAD/.github/pull_request_template.md",
+      "url": "https://github.com/OpenHands/OpenHands/blob/main/.github/pull_request_template.md",
       "fetchedAt": "2026-08-28",
       "stance": "conditional",
-      "conditions": ["human-template", "labeled-issue"],
-      "quote": "AI/LLM agents: Do not edit the HUMAN section. Provide evidence that the code runs properly end-to-end. Just running unit tests is NOT sufficient. Issues must be labeled ready-for-dev before opening a PR."
+      "conditions": [
+        "human-template",
+        "labeled-issue"
+      ],
+      "quote": "AI/LLM agents: Do not edit the HUMAN section."
     }
   }
 }

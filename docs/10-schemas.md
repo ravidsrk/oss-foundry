@@ -58,9 +58,9 @@ url          canonical link to the source
 fetchedAt    date the source was read (staleness is visible, not hidden)
 stance       forbidden | conditional | welcome | silent
 conditions   e.g. assignment-first, human-template, labeled-issue, cla, dco
-quote        the verbatim policy statement (or an explicit absence note for silent)
+quote        ONE verbatim statement from the source (never spliced from separate lines; an explicit absence note for silent)
 ```
 
-A record is evidence, not an override: `aiPolicy` in the YAML remains the operator's call, and the
+`conditions` must be non-empty exactly when `stance` is `conditional` — the loader refuses records that would silently drop conditions. A record is evidence, not an override: `aiPolicy` in the YAML remains the operator's call, and the
 verdict carries the record (`PolicyVerdict.record`) so every gate decision is auditable back to a
 quoted, dated source.

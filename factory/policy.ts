@@ -7,10 +7,12 @@ import type { PolicyRecord, PolicyVerdict } from "./types.ts";
  * discuss autonomous agents is not banning them; a ban pairs an AI subject with a
  * contribution object and a refusal verdict inside one sentence-sized window.
  */
-const SUBJECT = String.raw`(?:ai|a\.i\.|llm|autonomous|machine[- ]generated|bot|agent|copilot|generative)`;
-const OBJECT = String.raw`(?:contribut\w*|pull[- ]requests?|\bprs?\b|patch\w*|submission\w*|code|content|issues?|comment\w*)`;
+// Word-boundaried subjects: bare "ai"/"bot" must never match inside maintain/explain/robot.
+const SUBJECT = String.raw`(?:\bai\b|\ba\.i\.|\bllms?\b|\bautonomous\b|\bmachine[- ]generated\b|\bbots?\b|\bagents?\b|\bcopilot\b|\bgenerative\b)`;
+const OBJECT = String.raw`(?:\bcontribut\w*|\bpull[- ]requests?\b|\bprs?\b|\bpatch\w*|\bsubmission\w*|\bcode\b|\bcontent\b|\bissues?\b|\bcomment\w*)`;
 const VERDICT = String.raw`(?:not\s+(?:allowed|welcome|accepted|permitted)|unacceptable|prohibited|banned|forbidden|declin\w*|reject\w*|will\s+be\s+closed|are\s+closed)`;
-const W = String.raw`[^.\n]{0,90}`;
+// Sentence-sized window that a real period ends — but abbreviation dots (e.g., i.e., etc.) do not.
+const W = String.raw`(?:e\.g\.|i\.e\.|etc\.|[^.\n]){0,90}`;
 
 const FORBIDDEN_STATEMENTS: RegExp[] = [
   new RegExp(`${SUBJECT}${W}${OBJECT}${W}${VERDICT}`, "i"),
@@ -18,7 +20,10 @@ const FORBIDDEN_STATEMENTS: RegExp[] = [
   new RegExp(`${VERDICT}${W}${OBJECT}${W}${SUBJECT}`, "i"),
   new RegExp(`${VERDICT}${W}${SUBJECT}${W}${OBJECT}`, "i"),
   /no\s+ai[- ]generated\s+(?:code|prs?|pull[- ]requests?|contributions?|content)/i,
-  /do\s+not\s+(?:submit|open|send)\s+(?:ai|llm|bot|agent|machine[- ]generated)/i,
+  /do\s+not\s+(?:submit|open|send)\s+(?:ai|llms?|bots?|agents?|machine[- ]generated)\b/i,
+  // Active-voice refusals: "we do not accept contributions written by LLMs",
+  // "does not accept machine-generated patches".
+  new RegExp(String.raw`\b(?:do(?:es)?\s+not|don['’]t|never)\s+accept[^.\n]{0,60}${SUBJECT}`, "i"),
   /autonomous\s+agents?\s+(?:are\s+)?not\s+(?:allowed|welcome|permitted)/i,
 ];
 
@@ -82,14 +87,17 @@ function holdFromConditions(record: PolicyRecord): PolicyVerdict | undefined {
   return undefined;
 }
 
-export function evaluatePolicy(input: {
-  repoId: string;
-  agentsMd?: string;
-  contributing?: string;
-  issueTitle?: string;
-  filesHint?: number;
-  diffHint?: number;
-}): PolicyVerdict {
+export function evaluatePolicy(
+  input: {
+    repoId: string;
+    agentsMd?: string;
+    contributing?: string;
+    issueTitle?: string;
+    filesHint?: number;
+    diffHint?: number;
+  },
+  record: PolicyRecord | undefined = policyRecordFor(input.repoId),
+): PolicyVerdict {
   const denied = isDenied(input.repoId);
   if (denied) {
     return {
@@ -110,7 +118,6 @@ export function evaluatePolicy(input: {
     };
   }
 
-  const record = policyRecordFor(input.repoId);
   if (record?.stance === "forbidden") {
     return {
       allow: false,
@@ -163,9 +170,10 @@ export function evaluatePolicy(input: {
       allow: false,
       code: "DENY_UNKNOWN_POLICY",
       reasons: [
-        "AI policy is unknown. Fetch AGENTS.md / CONTRIBUTING (or commit a policy record) and re-run the gate before freeze.",
+        "AI policy is unknown. Fetch AGENTS.md / CONTRIBUTING (or commit an affirmative policy record) and re-run the gate before freeze.",
       ],
       matchedPhrases: [],
+      record,
     };
   }
 
