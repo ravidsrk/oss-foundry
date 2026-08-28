@@ -149,6 +149,16 @@ export interface TaskPacket {
   sandboxSession?: SandboxSession;
 }
 
+/** Machine-executed proof: the sandbox ran the tests and the revert control itself. Attested exits are history; witnessed exits are the bar. */
+export interface EvidenceWitness {
+  provider: "host" | "e2b";
+  testExit: number;
+  revertExit: number;
+  testLogSha: string;
+  revertLogSha: string;
+  ranAt: string;
+}
+
 export interface EvidenceManifest {
   baseSha: string;
   headSha: string;
@@ -161,6 +171,7 @@ export interface EvidenceManifest {
   notes: string[];
   /** True only after a repo commit lookup succeeded for base and head. */
   shaVerified?: boolean;
+  witness?: EvidenceWitness;
 }
 
 export interface SandboxSession {

@@ -118,7 +118,23 @@ function isEvidence(value: unknown): boolean {
     typeof o.diffLines === "number" &&
     isStringArray(o.notes) &&
     optional(o.reviewedSha, (v) => typeof v === "string") &&
-    optional(o.shaVerified, (v) => typeof v === "boolean")
+    optional(o.shaVerified, (v) => typeof v === "boolean") &&
+    optional(o.witness, isWitness)
+  );
+}
+
+function isWitness(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    (o.provider === "host" || o.provider === "e2b") &&
+    typeof o.testExit === "number" &&
+    typeof o.revertExit === "number" &&
+    typeof o.testLogSha === "string" &&
+    /^[0-9a-f]{64}$/.test(o.testLogSha) &&
+    typeof o.revertLogSha === "string" &&
+    /^[0-9a-f]{64}$/.test(o.revertLogSha) &&
+    typeof o.ranAt === "string"
   );
 }
 
