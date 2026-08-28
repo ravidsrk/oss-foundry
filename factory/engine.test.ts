@@ -1187,6 +1187,7 @@ test("test-path classifier knows suffix conventions and setup runs before tests"
   assert.equal(isTestPath("handler_test.go"), true);
   assert.equal(isTestPath("pkg/server/server_test.go"), true);
   assert.equal(isTestPath("foo_test.py"), true);
+  assert.equal(isTestPath("foo_spec.rb"), true);
   assert.equal(isTestPath("src/contest.ts"), false);
   assert.equal(isTestPath("src/protest/handler.ts"), false);
   assert.equal(isTestPath("attestation.ts"), false);
@@ -1212,12 +1213,13 @@ test("test-path classifier knows suffix conventions and setup runs before tests"
     {},
   );
   assert.equal(outcome.ok, true);
-  const setupIdx = calls.findIndex((c) => c.startsWith("run-setup npm ci"));
+  const setupIdxs = calls.flatMap((c, i) => (c.startsWith("run-setup npm ci") ? [i] : []));
   const headIdx = calls.findIndex((c) => c.startsWith("run-tests@head"));
   const cleanIdx = calls.findIndex((c) => c.includes("clean -fdx"));
   const revertIdx = calls.findIndex((c) => c.startsWith("run-tests@revert"));
-  assert.ok(setupIdx !== -1 && headIdx !== -1 && cleanIdx !== -1 && revertIdx !== -1);
-  assert.ok(setupIdx < headIdx && headIdx < cleanIdx && cleanIdx < revertIdx);
+  assert.equal(setupIdxs.length, 2);
+  assert.ok(headIdx !== -1 && cleanIdx !== -1 && revertIdx !== -1);
+  assert.ok(setupIdxs[0] < headIdx && headIdx < cleanIdx && cleanIdx < setupIdxs[1] && setupIdxs[1] < revertIdx);
 
   const noSetup = await witnessEvidence(
     { repoId: "ravidsrk/orca-fleet", baseSha: BASE, headSha: HEAD, testCommand: "true", sandbox: "host", wave: 0 },
@@ -1275,11 +1277,27 @@ test("daytona witnesses validate and daytona refusals name the right provider", 
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true);
 
-  const refusal = await witnessEvidence(
+  const noKey = await witnessEvidence(
     { repoId: "mcp-use/mcp-use", baseSha: BASE, headSha: HEAD, testCommand: "pnpm test", sandbox: "daytona", wave: 1 },
     (async () => ({ exit: 0, output: "" })) as never,
     {},
   );
-  assert.equal(refusal.ok, false);
-  if (!refusal.ok) assert.match(refusal.error, /dry-run/i);
+  assert.equal(noKey.ok, false);
+  if (!noKey.ok) assert.match(noKey.error, /dry-run/i);
+
+  const daytonaNamed = await witnessEvidence(
+    { repoId: "mcp-use/mcp-use", baseSha: BASE, headSha: HEAD, testCommand: "pnpm test", sandbox: "daytona", wave: 1 },
+    (async () => ({ exit: 0, output: "" })) as never,
+    { E2B_API_KEY: "present" },
+  );
+  assert.equal(daytonaNamed.ok, false);
+  if (!daytonaNamed.ok) assert.match(daytonaNamed.error, /Daytona execution/);
+
+  const e2bNamed = await witnessEvidence(
+    { repoId: "mcp-use/mcp-use", baseSha: BASE, headSha: HEAD, testCommand: "pnpm test", sandbox: "e2b", wave: 1 },
+    (async () => ({ exit: 0, output: "" })) as never,
+    { E2B_API_KEY: "present" },
+  );
+  assert.equal(e2bNamed.ok, false);
+  if (!e2bNamed.ok) assert.match(e2bNamed.error, /E2B execution/);
 });

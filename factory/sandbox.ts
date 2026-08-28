@@ -44,7 +44,7 @@ export function runSandboxDry(packet: TaskPacket): SandboxSession {
 export const SANDBOX_RULES = [
   "Wave 0 (own repos) may use a host worktree. Everything else is E2B or Daytona.",
   "No GitHub App private key, no npm tokens, no SSH keys inside the box.",
-  "Clone is shallow. Network is allowlisted to git + package registries.",
+  "Clone is full (historical SHAs must be reachable). Network is allowlisted to git + package registries.",
   "Harvest is git-only: format-patch or push to the operator fork. Then destroy.",
   "If tests cannot run in the box, park the packet. Do not skip the oracle.",
 ];
