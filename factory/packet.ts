@@ -1,6 +1,6 @@
 import { repoById } from "./allowlist.ts";
 import { ABORT_DEFAULT, NON_GOALS_DEFAULT } from "./neighbor.ts";
-import { evaluatePolicy, demoPolicyCorpus } from "./policy.ts";
+import { evaluatePolicy } from "./policy.ts";
 import { scoreIssue } from "./scout.ts";
 import type { PacketClass, TaskPacket } from "./types.ts";
 
@@ -18,10 +18,9 @@ export function buildPacket(input: {
   contributing?: string;
 }): TaskPacket {
   const repo = repoById(input.repoId);
-  const policyText = input.agentsMd ?? (repo ? demoPolicyCorpus(repo) : "");
   const policy = evaluatePolicy({
     repoId: input.repoId,
-    agentsMd: policyText,
+    agentsMd: input.agentsMd,
     contributing: input.contributing,
     issueTitle: input.issueTitle,
   });

@@ -1,5 +1,5 @@
 import { isDenied, repoById } from "./allowlist.ts";
-import type { AllowlistedRepo, PolicyVerdict } from "./types.ts";
+import type { PolicyVerdict } from "./types.ts";
 
 const FORBIDDEN_PHRASES = [
   "autonomous agents not allowed",
@@ -155,15 +155,4 @@ export function policyLabel(code: PolicyVerdict["code"]): string {
   }
 }
 
-export function demoPolicyCorpus(repo: AllowlistedRepo): string {
-  if (repo.aiPolicy === "owner") {
-    return "# AGENTS.md\n\nThis is our repository. Agents may open draft PRs. Human freeze still applies to Wave 0 for the first 20 packets.\n";
-  }
-  if (repo.aiPolicy === "welcome") {
-    return "# CONTRIBUTING\n\nWell-formed agent PRs are welcome if they include tests, a failing-first reproduction, and a short disclosure. Keep diffs small.\n";
-  }
-  if (repo.aiPolicy === "human-required") {
-    return "# CONTRIBUTING\n\nHUMAN: required on every PR. Sign the DCO. Autonomous merges are not permitted.\n";
-  }
-  return "";
-}
+

@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { ALLOWLIST, repoById } from "./allowlist.ts";
+import { repoById } from "./allowlist.ts";
+import { applyApprove, applyQueueLive, applyReject, applyTick } from "./engine.ts";
 import type { LiveIssue } from "./github-scout.ts";
-import { buildPacket, renderPrBody } from "./packet.ts";
+import { renderPrBody } from "./packet.ts";
 import { runSandboxDry } from "./sandbox.ts";
 import { applyPacketToScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
@@ -28,10 +29,18 @@ function bump(p: TaskPacket, patch: Partial<TaskPacket>): TaskPacket {
   return { ...p, ...patch, updatedAt: new Date().toISOString() };
 }
 
-function hasInflight(packets: TaskPacket[]) {
-  return packets.some((p) =>
-    ["gated", "frozen", "approved", "implementing", "reviewing", "draft-ready"].includes(p.status),
-  );
+function core(s: FactoryState): FactoryState {
+  return {
+    version: s.version,
+    packets: s.packets,
+    events: s.events,
+    scorecard: s.scorecard,
+    ticksRun: s.ticksRun,
+    lastTickAt: s.lastTickAt,
+    mergedTotal: s.mergedTotal,
+    bans: s.bans,
+    humanApprovalsRemaining: s.humanApprovalsRemaining,
+  };
 }
 
 interface FoundryStore extends FactoryState {
@@ -70,138 +79,23 @@ export const useFoundry = create<FoundryStore>()(
           ].slice(0, 80),
         }),
       queueLive: (issue) => {
-        const { packets, events } = get();
-        if (hasInflight(packets)) {
-          set({
-            events: [
-              ev("tick", "Queue blocked — a packet is already in flight."),
-              ...events,
-            ].slice(0, 80),
-          });
-          return null;
-        }
-        if (packets.some((p) => p.repoId === issue.repoId && p.issueNumber === issue.number)) {
-          return packets.find((p) => p.repoId === issue.repoId && p.issueNumber === issue.number) ?? null;
-        }
-        const next = buildPacket({
-          repoId: issue.repoId,
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          issueUrl: issue.url,
-          labels: issue.labels,
-        });
-        set({
-          packets: [next, ...packets],
-          events: [
-            ev("scout", `Queued live ${issue.repoId}#${issue.number}`, next.id),
-            ...events,
-          ].slice(0, 80),
-        });
-        return next;
+        const result = applyQueueLive(core(get()), issue);
+        set(result.state);
+        return result.packet;
       },
       runTick: () => {
-        const { packets, events, ticksRun, live } = get();
-        if (hasInflight(packets)) {
-          set({
-            events: [
-              ev("tick", "Tick aborted — a packet is already in flight. One at a time."),
-              ...events,
-            ].slice(0, 80),
-          });
-          return null;
-        }
-
-        const used = new Set(packets.map((p) => `${p.repoId}#${p.issueNumber}`));
-        let next: TaskPacket | null = null;
-
-        const liveHit = live.find((issue) => !used.has(`${issue.repoId}#${issue.number}`));
-        if (liveHit) {
-          next = buildPacket({
-            repoId: liveHit.repoId,
-            issueNumber: liveHit.number,
-            issueTitle: liveHit.title,
-            issueUrl: liveHit.url,
-            labels: liveHit.labels,
-          });
-        }
-
-        if (!next) {
-          for (const repo of ALLOWLIST) {
-            for (const issue of repo.firstIssues) {
-              const key = `${repo.id}#${issue.number}`;
-              if (used.has(key)) continue;
-              next = buildPacket({
-                repoId: repo.id,
-                issueNumber: issue.number,
-                issueTitle: issue.title,
-                issueUrl: issue.url,
-                labels: repo.preferredLabels,
-              });
-              break;
-            }
-            if (next) break;
-          }
-        }
-
-        if (!next) {
-          const fallback = ALLOWLIST.find((r) => r.wave <= 1);
-          if (!fallback) return null;
-          const n = 9000 + ticksRun;
-          next = buildPacket({
-            repoId: fallback.id,
-            issueNumber: n,
-            issueTitle: `Docs: clarify agent disclosure for ${fallback.name}`,
-            issueUrl: `https://github.com/${fallback.id}/issues/${n}`,
-            labels: fallback.preferredLabels,
-          });
-        }
-
-        set({
-          packets: [next, ...packets],
-          events: [
-            ev("tick", `Tick scouted ${next.repoId}#${next.issueNumber}`, next.id),
-            ...events,
-          ].slice(0, 80),
-          ticksRun: ticksRun + 1,
-          lastTickAt: new Date().toISOString(),
-        });
-        return next;
+        const s = get();
+        const result = applyTick(core(s), s.live);
+        set(result.state);
+        return result.packet;
       },
       approve: (id, note) => {
-        const { packets, events, humanApprovalsRemaining } = get();
-        set({
-          packets: packets.map((p) =>
-            p.id === id
-              ? bump(p, {
-                  status: "approved",
-                  station: "implement",
-                  humanAttest: {
-                    by: "operator",
-                    at: new Date().toISOString(),
-                    note: note || "Human freeze passed.",
-                  },
-                })
-              : p,
-          ),
-          events: [ev("approve", `Approved ${id}`, id), ...events].slice(0, 80),
-          humanApprovalsRemaining: Math.max(0, humanApprovalsRemaining - 1),
-        });
+        const result = applyApprove(core(get()), id, note);
+        set(result.state);
       },
       reject: (id, reason) => {
-        const { packets, events } = get();
-        set({
-          packets: packets.map((p) =>
-            p.id === id
-              ? bump(p, {
-                  status: "rejected",
-                  station: "terminal",
-                  class: p.class === "buildable" ? "out-of-scope" : p.class,
-                  parkReason: reason,
-                })
-              : p,
-          ),
-          events: [ev("reject", reason, id), ...events].slice(0, 80),
-        });
+        const result = applyReject(core(get()), id, reason);
+        set(result.state);
       },
       advance: (id) => {
         const { packets, events, scorecard } = get();
