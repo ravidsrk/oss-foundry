@@ -92,7 +92,14 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
   const wave = r.wave as Wave;
   if (wave !== 0 && wave !== 1 && wave !== 2) throw new Error(`allowlist.yaml: ${id} bad wave`);
   const aiPolicy = String(r.aiPolicy) as AiPolicy;
-  const allowedPolicy: AiPolicy[] = ["owner", "welcome", "human-required", "unknown", "forbidden"];
+  const allowedPolicy: AiPolicy[] = [
+    "owner",
+    "welcome",
+    "undocumented-open",
+    "human-required",
+    "unknown",
+    "forbidden",
+  ];
   if (!allowedPolicy.includes(aiPolicy)) throw new Error(`allowlist.yaml: ${id} bad aiPolicy`);
   const sandbox = String(r.sandbox) as SandboxKind;
   if (sandbox !== "host" && sandbox !== "e2b" && sandbox !== "daytona") {

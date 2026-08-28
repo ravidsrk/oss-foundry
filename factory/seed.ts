@@ -195,12 +195,11 @@ export function seedState(): FactoryState {
     issueTitle: "Differentiate the right sidebar toggle icon by state",
     issueUrl: "https://github.com/ColeMurray/background-agents/issues/1476",
     labels: ["good first issue", "help wanted", "enhancement"],
-    agentsMd:
-      "Well-formed agent PRs are welcome if they include tests, a failing-first reproduction, and a short disclosure. Keep diffs small.",
-    contributing: "No CLA. No DCO. Conventional commits.",
+    agentsMd: "Conventional commits. Keep diffs small. No written external-AI-contribution policy.",
+    contributing: "Patch-size notes. Conventional commits.",
   });
   sidebar = {
-    ...touch(sidebar, "submitted", "follow-up"),
+    ...touch(sidebar, "followed-up", "follow-up"),
     humanAttest: {
       by: "operator",
       at: "2026-08-27T12:00:00.000Z",
@@ -211,23 +210,30 @@ export function seedState(): FactoryState {
     prMeta: {
       url: "https://github.com/ColeMurray/background-agents/pull/1652",
       title: "feat: differentiate the right sidebar toggle icon by state",
-      draft: false,
+      draft: true,
       state: "open",
       merged: false,
-      mergeable: "blocked",
+      mergeable: "MERGEABLE",
       commits: 6,
       reviewComments: 0,
       issueComments: 1,
       headSha: "48c2242683705b00503d3436575bf3c28b1b0c9b",
-      updatedAt: "2026-08-28T10:19:46.000Z",
-      syncedAt: "2026-08-28T10:30:00.000Z",
+      updatedAt: "2026-08-28T13:47:44.000Z",
+      syncedAt: "2026-08-28T13:47:44.000Z",
     },
     followUps: [
+      {
+        id: "fu_pr1652_followed_up",
+        at: "2026-08-28T13:47:44.000Z",
+        kind: "note",
+        body: "Converted #1652 to draft; pasted verbatim DISCLOSURE from factory/neighbor.ts. No maintainer response (CodeRabbit only — not a human review). Marked followed-up; in-flight slot released. Do not merge.",
+        url: "https://github.com/ColeMurray/background-agents/pull/1652",
+      },
       {
         id: "fu_pr1652_opened",
         at: "2026-08-28T10:14:03.000Z",
         kind: "note",
-        body: "Upstream PR opened ready-for-review (doctrine miss: should have been draft). Fork rehearsal ravidsrk/background-agents#1 closed. Follow up; do not merge; do not tick.",
+        body: "Upstream PR opened ready-for-review (doctrine miss: should have been draft). Fork rehearsal ravidsrk/background-agents#1 closed.",
         url: "https://github.com/ColeMurray/background-agents/pull/1652",
       },
     ],
@@ -241,7 +247,8 @@ export function seedState(): FactoryState {
       filesChanged: 3,
       diffLines: 89,
       notes: [
-        "Opened ready, not draft. Shortened disclosure on GitHub vs renderPrBody.",
+        "Converted to draft 2026-08-28. Verbatim DISCLOSURE restored on the GitHub body.",
+        "Packet left submitted via followed-up (oss-foundry#2). In-flight slot released.",
         "Fork PR #1 closed unmerged.",
       ],
     },
@@ -256,10 +263,10 @@ export function seedState(): FactoryState {
   });
 
   const openhands = buildPacket({
-    repoId: "All-Hands-AI/OpenHands",
+    repoId: "OpenHands/OpenHands",
     issueNumber: 16907,
     issueTitle: "Document HUMAN: requirement in contributor FAQ",
-    issueUrl: "https://github.com/All-Hands-AI/OpenHands/issues/16907",
+    issueUrl: "https://github.com/OpenHands/OpenHands/issues/16907",
     labels: ["documentation"],
     agentsMd: "Please sign the CLA. HUMAN: required.",
     contributing: "Developer Certificate of Origin. Sign-off required.",
@@ -271,7 +278,13 @@ export function seedState(): FactoryState {
         ...row,
         opened: 2,
         merged: 2,
-        reviewCommentsAvg: 0.5,
+        closedUnmerged: 0,
+        staleClosed: 0,
+        reviewCommentsAvg: 0,
+        humanReviewed: 0,
+        noReview: 2,
+        reverts: 0,
+        rework: 0,
         maintainerTone: "warm" as const,
         lastTouch: "2026-08-27",
       };
@@ -281,7 +294,13 @@ export function seedState(): FactoryState {
         ...row,
         opened: 1,
         merged: 1,
+        closedUnmerged: 0,
+        staleClosed: 0,
         reviewCommentsAvg: 0,
+        humanReviewed: 0,
+        noReview: 1,
+        reverts: 0,
+        rework: 0,
         maintainerTone: "warm" as const,
         lastTouch: "2026-08-28",
       };
@@ -291,7 +310,13 @@ export function seedState(): FactoryState {
         ...row,
         opened: 1,
         merged: 0,
+        closedUnmerged: 0,
+        staleClosed: 0,
         reviewCommentsAvg: 0,
+        humanReviewed: 0,
+        noReview: 1,
+        reverts: 0,
+        rework: 0,
         maintainerTone: "neutral" as const,
         lastTouch: "2026-08-28",
       };
@@ -304,12 +329,20 @@ export function seedState(): FactoryState {
     packets: [sidebar, unreadable, architecture, changelog, matplotlib, openhands],
     events: [
       {
+        id: "evt_pr1652_followup",
+        at: "2026-08-28T13:47:44.000Z",
+        kind: "follow-up",
+        packetId: sidebar.id,
+        message:
+          "ColeMurray/background-agents#1652 converted to draft; verbatim disclosure restored; packet followed-up. In-flight slot released. Do not merge.",
+      },
+      {
         id: "evt_pr1652",
         at: "2026-08-28T10:14:03.000Z",
         kind: "draft",
         packetId: sidebar.id,
         message:
-          "Wave 1 upstream PR ColeMurray/background-agents#1652 opened (ready, not draft). Follow up. Do not merge. Do not tick.",
+          "Wave 1 upstream PR ColeMurray/background-agents#1652 opened (ready, not draft). Later converted to draft and followed-up.",
       },
       {
         id: "evt_pr196_merged",

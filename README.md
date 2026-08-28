@@ -15,7 +15,7 @@ Foundry is the control plane in front of [orca-fleet `oss-contribute`](https://g
 
 ## Status (2026-08-28)
 
-Wave 0 attested merges: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72). frontguard [PR #196](https://github.com/ravidsrk/frontguard/pull/196) also merged. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, not draft). Follow up. **Do not merge. Do not tick.**
+Wave 0 attested merges: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72). frontguard [PR #196](https://github.com/ravidsrk/frontguard/pull/196) also merged. Wave 1 [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) is **draft**, verbatim disclosure restored, packet **`followed-up`**. In-flight slot released. **Do not merge.**
 
 ## v1
 
@@ -30,7 +30,7 @@ Live GitHub scout (user-initiated), E2B dry-run labeled as dry-run, follow-up PR
 Node 22+:
 
 ```
-node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts factory/github-pr.test.ts
+node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts factory/github-pr.test.ts factory/scorecard.test.ts
 ```
 
 ## Do not

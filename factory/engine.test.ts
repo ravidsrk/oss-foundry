@@ -96,16 +96,26 @@ test("unknown policy without fetched docs is deny, not a canned welcome", () => 
   assert.equal(packet.policy.code, "DENY_UNKNOWN_POLICY");
 });
 
-test("submitted packet is in-flight and blocks a new tick", () => {
+test("followed-up #1652 is not in-flight; submitted still blocks a tick", () => {
   const seed = seedState();
-  assert.equal(hasInflight(seed.packets), true);
-  const submitted = seed.packets.find((p) => p.status === "submitted");
-  assert.ok(submitted);
-  assert.equal(submitted.prUrl, "https://github.com/ColeMurray/background-agents/pull/1652");
-  const ticked = applyTick(seed);
+  const packet = seed.packets.find(
+    (p) => p.prUrl === "https://github.com/ColeMurray/background-agents/pull/1652",
+  );
+  assert.ok(packet);
+  assert.equal(packet.status, "followed-up");
+  assert.equal(packet.prMeta?.draft, true);
+  assert.equal(hasInflight(seed.packets), false);
+  const submitted = {
+    ...seed,
+    packets: seed.packets.map((p) =>
+      p.id === packet.id ? { ...p, status: "submitted" as const } : p,
+    ),
+  };
+  assert.equal(hasInflight(submitted.packets), true);
+  const ticked = applyTick(submitted);
   assert.equal(ticked.packet, null);
   assert.equal(ticked.reason, "in-flight");
-  const queued = applyQueueLive(seed, live("ravidsrk/frontguard", 999));
+  const queued = applyQueueLive(submitted, live("ravidsrk/frontguard", 999));
   assert.equal(queued.packet, null);
   assert.equal(queued.reason, "in-flight");
 });
@@ -124,7 +134,13 @@ test("scorecard halt stop blocks queue and approve", () => {
   const state = blank();
   state.scorecard = state.scorecard.map((row) =>
     row.repoId === "ravidsrk/orca-fleet"
-      ? { ...row, opened: CAPS.halt_after_opens, merged: 0, maintainerTone: "neutral" as const }
+      ? {
+          ...row,
+          opened: CAPS.halt_after_opens,
+          merged: 0,
+          closedUnmerged: CAPS.halt_after_opens,
+          maintainerTone: "neutral" as const,
+        }
       : row,
   );
   assert.equal(health(state.scorecard.find((r) => r.repoId === "ravidsrk/orca-fleet")!), "stop");
@@ -135,20 +151,14 @@ test("scorecard halt stop blocks queue and approve", () => {
 
 test("tick idles instead of inventing #9000+ issues", () => {
   const seed = seedState();
-  const quiet = {
-    ...seed,
-    packets: seed.packets.map((p) =>
-      p.status === "submitted" ? { ...p, status: "followed-up" as const } : p,
-    ),
-  };
-  assert.equal(hasInflight(quiet.packets), false);
-  const ticked = applyTick(quiet);
+  assert.equal(hasInflight(seed.packets), false);
+  const ticked = applyTick(seed);
   assert.equal(ticked.packet, null);
   assert.equal(ticked.reason, "idle");
-  assert.equal(ticked.state.packets.length, quiet.packets.length);
+  assert.equal(ticked.state.packets.length, seed.packets.length);
   assert.equal(
     ticked.state.packets.map((p) => `${p.repoId}#${p.issueNumber}`).join(","),
-    quiet.packets.map((p) => `${p.repoId}#${p.issueNumber}`).join(","),
+    seed.packets.map((p) => `${p.repoId}#${p.issueNumber}`).join(","),
   );
 });
 

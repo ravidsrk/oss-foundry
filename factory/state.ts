@@ -236,8 +236,12 @@ function isScorecardRow(value: unknown): boolean {
     typeof o.opened === "number" &&
     typeof o.merged === "number" &&
     typeof o.closedUnmerged === "number" &&
+    typeof o.staleClosed === "number" &&
     typeof o.reviewCommentsAvg === "number" &&
+    typeof o.humanReviewed === "number" &&
+    typeof o.noReview === "number" &&
     typeof o.reverts === "number" &&
+    typeof o.rework === "number" &&
     typeof o.maintainerTone === "string" &&
     TONES.has(o.maintainerTone) &&
     typeof o.lastTouch === "string"
@@ -303,8 +307,12 @@ function migrateScorecard(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const o = { ...(value as Record<string, unknown>) };
   if (o.closedUnmerged === undefined) o.closedUnmerged = 0;
+  if (o.staleClosed === undefined) o.staleClosed = 0;
   if (o.reviewCommentsAvg === undefined) o.reviewCommentsAvg = 0;
+  if (o.humanReviewed === undefined) o.humanReviewed = 0;
+  if (o.noReview === undefined) o.noReview = 0;
   if (o.reverts === undefined) o.reverts = 0;
+  if (o.rework === undefined) o.rework = 0;
   if (o.lastTouch === undefined) o.lastTouch = "—";
   return o;
 }

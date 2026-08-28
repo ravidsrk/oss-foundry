@@ -15,9 +15,9 @@ denylist:
   - id: curl/curl
     reason: Maintainer asked agents to stop after HackerOne flood.
   - id: pydantic/pydantic
-    reason: High slop-PR close rate in 2026.
+    reason: "They welcome AI, but reserve the right to close PRs from authors mass-submitting across multiple repositories (spam) — the factory pattern — plus assignment-first auto-close."
   - id: stablyai/orca
-    reason: Contribute via orca-fleet, not drive-by PRs.
+    reason: "Conflict of interest: this is the runtime Foundry runs on. Contribute via orca-fleet, not drive-by PRs. CONTRIBUTING requires an AI review summary; the deny is not an AI-policy restriction."
 
 repos:
   - id: ravidsrk/orca-fleet
@@ -51,7 +51,8 @@ repos:
   - id: ColeMurray/background-agents
     wave: 1
     language: TypeScript
-    aiPolicy: welcome
+    aiPolicy: undocumented-open
+    policyNotes: "CONTRIBUTING.md, AGENTS.md, and CLAUDE.md have no external-AI-contribution policy. Behavior is open (maintainer merges own-bot PRs) but undocumented — higher risk than documented welcome."
     testCommand: npm test
     maxFiles: 6
     maxDiffLines: 280
@@ -64,7 +65,7 @@ repos:
 
   - id: github/awesome-copilot
     wave: 1
-    language: Markdown
+    language: JavaScript / Markdown
     aiPolicy: welcome
     testCommand: "true"
     maxFiles: 3
@@ -73,10 +74,11 @@ repos:
     preferredLabels: [documentation]
     firstIssues: []
 
-  - id: e2b-dev/E2B
+  - id: e2b-dev/e2b-cookbook
     wave: 1
     language: TypeScript / Python
-    aiPolicy: welcome
+    aiPolicy: unknown
+    policyNotes: "Docs/examples cookbook. SDK examples were removed from e2b-dev/E2B in PR 1769 (2026-08-25); this is the realistic surface. No CONTRIBUTING/AGENTS.md; fetch before freeze."
     testCommand: npm test
     maxFiles: 5
     maxDiffLines: 220
@@ -117,11 +119,12 @@ repos:
     preferredLabels: ["good first issue", documentation]
     firstIssues: []
 
-  - id: All-Hands-AI/OpenHands
+  - id: OpenHands/OpenHands
     wave: 2
-    language: Python
+    language: TypeScript
     aiPolicy: human-required
-    testCommand: poetry run pytest
+    policyNotes: "Org renamed from All-Hands-AI/OpenHands. No CONTRIBUTING.md. Policy lives in the PR template (HUMAN:/AGENT: sections; evidence that the code runs end-to-end — unit tests not sufficient) and the ready-for-dev issue-label prerequisite."
+    testCommand: npm test
     maxFiles: 3
     maxDiffLines: 140
     sandbox: e2b

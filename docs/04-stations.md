@@ -64,10 +64,10 @@ Does:
 - Sync the live PR (draft/open/merged, head SHA, review comment count). User-initiated. Never on load.
 - Record bot-reconcile and review-reply notes against the current head.
 - Mark quiet when threads are answered. **Never merge.**
-- When GitHub reports `merged`, write the scorecard `merged` row. When closed unmerged, write `closedUnmerged`.
+- When GitHub reports `merged`, write the scorecard `merged` row. When closed unmerged, write `closedUnmerged`. After 14 quiet days, write `stale-closed` (still counts against merge rate). Record human vs bot review into `humanReviewed` / `noReview`; `reviewCommentsAvg` is over human-reviewed PRs only.
 
 Halt rules fire here. See `docs/06-v2.md`. `submitted` remains in-flight so a quiet-but-unmerged draft still blocks a new tick until `followed-up`.
 
 Live follow-up: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70) — Greptile future-dated the 0.5.0 heading; Foundry folded it to `2026-08-26` (`d91fe2f`) and resolved the thread. **Merged** by the maintainer 2026-08-27.
 
-In-flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652).
+Followed-up: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) (draft, verbatim disclosure). In-flight slot released.

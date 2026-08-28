@@ -8,6 +8,25 @@ test("committed allowlist.yaml parses and keeps denylist disjoint", () => {
   assertAllowlist(parsed);
   assert.equal(parsed.denylist.some((d) => d.id === "stablyai/orca"), true);
   assert.equal(parsed.repos.some((r) => r.id === "stablyai/orca"), false);
+
+  const pydantic = parsed.denylist.find((d) => d.id === "pydantic/pydantic");
+  assert.ok(pydantic);
+  assert.match(pydantic.reason, /mass-submitting/);
+  assert.equal(/slop-PR close rate/i.test(pydantic.reason), false);
+
+  const orca = parsed.denylist.find((d) => d.id === "stablyai/orca");
+  assert.ok(orca);
+  assert.match(orca.reason, /Conflict of interest/i);
+
+  assert.equal(parsed.repos.some((r) => r.id === "OpenHands/OpenHands"), true);
+  assert.equal(parsed.repos.some((r) => r.id === "All-Hands-AI/OpenHands"), false);
+  assert.equal(parsed.repos.some((r) => r.id === "e2b-dev/e2b-cookbook"), true);
+  assert.equal(parsed.repos.some((r) => r.id === "e2b-dev/E2B"), false);
+
+  const ba = parsed.repos.find((r) => r.id === "ColeMurray/background-agents");
+  assert.equal(ba?.aiPolicy, "undocumented-open");
+  const copilot = parsed.repos.find((r) => r.id === "github/awesome-copilot");
+  assert.match(copilot?.language ?? "", /JavaScript/);
 });
 
 test("omitted wave is not coerced to Wave 0 host-trusted", () => {
@@ -22,11 +41,11 @@ test("omitted wave is not coerced to Wave 0 host-trusted", () => {
 test("Wave 2 host sandbox is rejected at load", () => {
   const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
   const host = yaml.replace(
-    "  - id: All-Hands-AI/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: e2b",
-    "  - id: All-Hands-AI/OpenHands\n    wave: 2\n    language: Python\n    aiPolicy: human-required\n    testCommand: poetry run pytest\n    maxFiles: 3\n    maxDiffLines: 140\n    sandbox: host",
+    /(\n  - id: OpenHands\/OpenHands[\s\S]*?sandbox: )e2b/,
+    "$1host",
   );
   const parsed = parseAllowlistYaml(host);
-  assert.throws(() => assertAllowlist(parsed), /Wave 1\+ repo All-Hands-AI\/OpenHands must not use host sandbox/);
+  assert.throws(() => assertAllowlist(parsed), /Wave 1\+ repo OpenHands\/OpenHands must not use host sandbox/);
 });
 
 test("a denylist id among repos fails assertion", () => {

@@ -59,8 +59,10 @@ function printStatus(state: ReturnType<typeof mustLoad>) {
   }
   console.log("scorecard:");
   for (const row of state.scorecard) {
-    if (row.opened === 0 && row.merged === 0 && row.reverts === 0) continue;
-    console.log(`  ${row.repoId}  opened=${row.opened} merged=${row.merged} tone=${row.maintainerTone} health=${health(row)}`);
+    if (row.opened === 0 && row.merged === 0 && row.reverts === 0 && row.noReview === 0) continue;
+    console.log(
+      `  ${row.repoId}  opened=${row.opened} merged=${row.merged} closed=${row.closedUnmerged} noReview=${row.noReview} tone=${row.maintainerTone} health=${health(row)}`,
+    );
   }
 }
 

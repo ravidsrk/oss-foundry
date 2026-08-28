@@ -6,7 +6,7 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 ## Why this exists
 
-2026 made unattended OSS agents radioactive. curl’s HackerOne queue, matplotlib’s autonomous-agent ban, Pydantic’s slop-PR close rate, and OpenClaw-style maintainer attacks all taught the same lesson: volume without governance is vandalism.
+2026 made unattended OSS agents radioactive. curl’s HackerOne queue, matplotlib’s autonomous-agent ban, pydantic’s spam/factory-pattern close right (they otherwise welcome AI), and OpenClaw-style maintainer attacks all taught the same lesson: volume without governance is vandalism.
 
 Foundry is the opposite posture:
 
@@ -39,10 +39,11 @@ Foundry adds what `oss-contribute` does not have: an **always-on clock**, a **ha
 
 ## Success
 
-After 90 days:
+After 90 days (definitions in `docs/08-operations.md`):
 
 - ≥ 1 merged PR on a Wave 1 repo that is not ours.
-- Merge rate ≥ 60% on opened drafts.
-- Review-comment average ≤ 4.
-- **Bans = 0. Reverts = 0.**
+- Merge rate ≥ 60% on opened drafts that reached a terminal state (merged / closed / stale-closed after 14 quiet days). Stale-closed counts against the rate.
+- Review-comment average ≤ 4, measured only over PRs with ≥1 human, non-bot review comment. Report the no-review rate alongside it.
+- **Bans = 0.**
+- **Reverts = 0** — explicit `git revert` of our merge commit, or a maintainer-stated rollback that names the PR, within 30 days of merge. Post-merge edits are rework, not reverts.
 - The first 20 packets each have a human attest in the ledger.

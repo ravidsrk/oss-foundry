@@ -88,6 +88,10 @@ test("v6 ledger missing later-required fields is migrated, not stranded", () => 
   packet.scout = scout;
   const row = { ...(seed.scorecard[0] as Record<string, unknown>) };
   delete row.closedUnmerged;
+  delete row.staleClosed;
+  delete row.humanReviewed;
+  delete row.noReview;
+  delete row.rework;
   delete row.lastTouch;
   const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "old-v6.json");
   writeFileSync(
@@ -106,6 +110,10 @@ test("v6 ledger missing later-required fields is migrated, not stranded", () => 
   assert.equal(loaded.state.packets[0].policy.reasons.length, 0);
   assert.equal(loaded.state.packets[0].scout.parts.wave, 0);
   assert.equal(loaded.state.scorecard[0].closedUnmerged, 0);
+  assert.equal(loaded.state.scorecard[0].staleClosed, 0);
+  assert.equal(loaded.state.scorecard[0].noReview, 0);
+  assert.equal(loaded.state.scorecard[0].humanReviewed, 0);
+  assert.equal(loaded.state.scorecard[0].rework, 0);
   assert.equal(loaded.state.scorecard[0].lastTouch, "—");
 });
 

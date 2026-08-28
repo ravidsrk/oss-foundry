@@ -45,4 +45,27 @@ A packet without `negativeControl=red-on-revert` and real (non-placeholder) `bas
 
 ## Allowlist repo
 
-See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.
+See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Optional: `language`, `policyNotes`, `firstIssues`. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.
+
+### `aiPolicy`
+
+| Value | Meaning |
+|---|---|
+| `owner` | Repo we own. |
+| `welcome` | **Documented** external-AI welcome (CONTRIBUTING/AGENTS says so). |
+| `undocumented-open` | Behaviorally open, but no written external-AI-contribution policy. Higher risk than `welcome`. Fetch docs before freeze (same gate as `unknown`). |
+| `human-required` | HUMAN:/CLA/DCO holds. |
+| `unknown` | Not yet parsed. Deny until AGENTS.md / CONTRIBUTING is fetched. |
+| `forbidden` | Treat as denylist. |
+
+### Scorecard row
+
+| Field | Meaning |
+|---|---|
+| `opened` | Drafts we opened. Volume only. |
+| `merged` / `closedUnmerged` | Terminal outcomes. `staleClosed` is a subset of `closedUnmerged` (14 quiet days). |
+| `reviewCommentsAvg` | Mean **human, non-bot** review comments over `humanReviewed` only. |
+| `humanReviewed` | PRs with ≥1 human, non-bot review comment. |
+| `noReview` | PRs with 0 human, non-bot review comments. Companion to the average. |
+| `reverts` | `git revert` of our merge, or maintainer-stated rollback naming the PR, within 30 days. |
+| `rework` | Post-merge edits. Informational; does not halt. |

@@ -12,7 +12,7 @@ test("denylist always forbids matplotlib", () => {
   assert.equal(v.allow, false);
 });
 
-test("forbidden phrase beats a welcome repo", () => {
+test("forbidden phrase beats an undocumented-open repo", () => {
   const v = evaluatePolicy({
     repoId: "ColeMurray/background-agents",
     agentsMd: "Autonomous agents not allowed on this tracker.",
@@ -21,9 +21,28 @@ test("forbidden phrase beats a welcome repo", () => {
   assert.equal(v.code, "DENY_FORBIDDEN");
 });
 
+test("undocumented-open without fetched docs is deny, with docs is ALLOW", () => {
+  const missing = evaluatePolicy({
+    repoId: "ColeMurray/background-agents",
+    issueTitle: "icon tweak",
+  });
+  assert.equal(missing.code, "DENY_UNKNOWN_POLICY");
+  assert.equal(missing.allow, false);
+
+  const parsed = evaluatePolicy({
+    repoId: "ColeMurray/background-agents",
+    agentsMd: "Conventional commits. Keep diffs small.",
+    contributing: "Patch-size notes. No extra legal paperwork.",
+    issueTitle: "icon tweak",
+  });
+  assert.equal(parsed.code, "ALLOW");
+  assert.equal(parsed.allow, true);
+  assert.match(parsed.reasons.join(" "), /undocumented/);
+});
+
 test("CLA parks needs-human", () => {
   const v = evaluatePolicy({
-    repoId: "All-Hands-AI/OpenHands",
+    repoId: "OpenHands/OpenHands",
     agentsMd: "Please sign the CLA. HUMAN: required.",
     issueTitle: "docs FAQ",
   });

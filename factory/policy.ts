@@ -77,12 +77,18 @@ export function evaluatePolicy(input: {
     };
   }
 
-  if (repo.aiPolicy === "unknown" && !input.agentsMd && !input.contributing) {
+  if (
+    (repo.aiPolicy === "unknown" || repo.aiPolicy === "undocumented-open") &&
+    !input.agentsMd &&
+    !input.contributing
+  ) {
     return {
       allow: false,
       code: "DENY_UNKNOWN_POLICY",
       reasons: [
-        "AI policy is unknown. Fetch AGENTS.md / CONTRIBUTING and re-run the gate before freeze.",
+        repo.aiPolicy === "undocumented-open"
+          ? "AI policy is behaviorally open but undocumented. Fetch AGENTS.md / CONTRIBUTING and re-run the gate before freeze."
+          : "AI policy is unknown. Fetch AGENTS.md / CONTRIBUTING and re-run the gate before freeze.",
       ],
       matchedPhrases: [],
     };
@@ -134,7 +140,11 @@ export function evaluatePolicy(input: {
     };
   }
 
-  reasons.push("Allowlisted, policy parsed, scope inside caps.");
+  reasons.push(
+    repo.aiPolicy === "undocumented-open"
+      ? "Allowlisted; AI policy is behaviorally open but undocumented. Scope inside caps."
+      : "Allowlisted, policy parsed, scope inside caps.",
+  );
   return { allow: true, code: "ALLOW", reasons, matchedPhrases: matched };
 }
 

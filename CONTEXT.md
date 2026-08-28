@@ -17,7 +17,7 @@ Repos the factory must refuse. Absolute; no operator override.
 _Avoid_: blocklist, ban list (the scorecard tone `banned` is a halt reason, not this list)
 
 **Wave**:
-A trust tier on an allowlisted repo: `0` own, `1` AI-welcome external, `2` adjacent/human-required.
+A trust tier on an allowlisted repo: `0` own, `1` AI-welcome or behaviorally open external, `2` adjacent/human-required.
 
 **Policy verdict**:
 The deterministic gate result for a packet (`ALLOW`, `DENY_*`, `HOLD_*`). Grok does not vote.
@@ -35,7 +35,7 @@ A GitHub pull request opened with `draft: true`. Ready-for-review is a human bro
 The human freeze record `{ by, at, note }` required before implement on Wave 1+, and counted toward the first-20 freeze budget.
 
 **Scorecard halt**:
-A per-repo stop when tone is `banned`, any revert of our patch, or opened ≥ 3 and merge rate < 40%. A halted repo is treated as unselectable until a human edits `allowlist.yaml`.
+A per-repo stop when tone is `banned`, any revert of our patch (narrow: `git revert` of the merge commit or a maintainer-stated rollback naming the PR, within 30 days), or ≥ 3 **terminal** drafts and merge rate < 40%. Stale-closed after 14 quiet days counts against the rate. Rework does not halt. A halted repo is treated as unselectable until a human edits `allowlist.yaml`.
 
 **Evidence**:
 SHA-bound proof that tests ran and a revert goes red. A packet without `negativeControl=red-on-revert` and real SHAs cannot become `draft-ready`.

@@ -2,6 +2,7 @@ export type Wave = 0 | 1 | 2;
 export type AiPolicy =
   | "owner"
   | "welcome"
+  | "undocumented-open"
   | "human-required"
   | "unknown"
   | "forbidden";
@@ -160,11 +161,29 @@ export interface SandboxSession {
 
 export interface ScorecardRow {
   repoId: string;
+  /** Drafts we opened. Volume only; not the merge-rate denominator. */
   opened: number;
   merged: number;
+  /** Terminal unmerged drafts, including stale-closed after 14 quiet days. */
   closedUnmerged: number;
+  /** Subset of closedUnmerged: auto-closed after STALE_QUIET_DAYS with no human activity. */
+  staleClosed: number;
+  /**
+   * Mean human (non-bot) review comments over `humanReviewed` PRs only.
+   * Do not average in silent/no-review PRs.
+   */
   reviewCommentsAvg: number;
+  /** Opened drafts with ≥1 human, non-bot review comment. Denominator for reviewCommentsAvg. */
+  humanReviewed: number;
+  /** Opened drafts with 0 human, non-bot review comments (bot-only counts as no-review). */
+  noReview: number;
+  /**
+   * Explicit `git revert` of our merge commit, or a maintainer-stated rollback
+   * that names the PR, within REVERT_WINDOW_DAYS of merge. Rework is not a revert.
+   */
   reverts: number;
+  /** Post-merge edits/refactors of our code. Informational; does not halt. */
+  rework: number;
   maintainerTone: "warm" | "neutral" | "cold" | "banned";
   lastTouch: string;
 }

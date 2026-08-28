@@ -8,7 +8,7 @@ Operator takeover document. This is the whole product: why it exists, how it run
 | Control plane | `factory/` TypeScript + `allowlist.yaml`. Operator loop: `node --experimental-strip-types factory/cli.ts` |
 | Data plane | [ravidsrk/orca-fleet](https://github.com/ravidsrk/orca-fleet) `oss-contribute` |
 | License | MIT |
-| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **not draft**). |
+| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) is **draft**, verbatim disclosure restored, packet **`followed-up`**. In-flight slot released. |
 
 ---
 
@@ -26,7 +26,7 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 - matplotlib banned autonomous-agent PRs after a slop incident
 - curl maintainers asked agents to stop after a HackerOne flood
-- pydantic closed slop PRs at a high rate
+- pydantic welcomes AI but reserves the right to close mass-submitted / factory-pattern PRs (and auto-closes unassigned PRs)
 - drive-by volume without governance is vandalism
 
 Foundry’s posture is the inverse: **contribute less, merge more, never surprise a maintainer.**
@@ -138,10 +138,10 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 Stop a repo when:
 
 - maintainer tone is `banned`, or
-- any revert of our patch, or
-- opened ≥ 3 **and** merge rate < 40%
+- any **revert** of our patch (explicit `git revert` of the merge commit, or a maintainer-stated rollback naming the PR, within 30 days), or
+- **terminal** drafts ≥ 3 **and** merge rate < 40% (stale-closed after 14 quiet days counts against the rate; in-flight drafts are not in the denominator)
 
-Watch when tone is `cold`, or opened ≥ 2 and merge rate < 60%.
+Watch when tone is `cold`, or terminal drafts ≥ 2 and merge rate < 60%. Post-merge edits are **rework**, informational only.
 
 A `stop` repo is unselectable until a human edits `allowlist.yaml`.
 
@@ -154,7 +154,7 @@ PR volume is a vanity metric. Not shown as a success KPI.
 | Wave | Who | Sandbox | Human freeze |
 |---|---|---|---|
 | 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | First 20 factory-wide, then mechanical if `aiPolicy: owner` |
-| 1 | AI-welcome, small blast radius | E2B (dry-run in this repo) | **Always** |
+| 1 | AI-welcome or behaviorally open, small blast radius | E2B (dry-run in this repo) | **Always** |
 | 2 | Adjacent (Mastra, OpenHands) | E2B | Always + HUMAN/DCO holds |
 
 Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_rate: 0.4`, `halt_after_opens: 3`.
@@ -166,23 +166,23 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ### Wave 1
 
-- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: welcome`. First issue **#1476** (in flight as #1652)
-- `github/awesome-copilot` — Markdown docs. No named first issue yet; clock idles rather than inventing one
-- `e2b-dev/E2B` — docs/examples only
+- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: undocumented-open`. First issue **#1476** → #1652 **draft**, packet **`followed-up`**
+- `github/awesome-copilot` — JavaScript tooling / Markdown catalog. Documented agent welcome. No named first issue yet; clock idles rather than inventing one
+- `e2b-dev/e2b-cookbook` — docs/examples cookbook (retargeted from `e2b-dev/E2B` after SDK examples were removed). Policy **unknown** until parsed
 - `mcp-use/mcp-use` — policy **unknown** until CONTRIBUTING parsed
 - `kortix-ai/suna` — policy **unknown** until parsed
 
 ### Wave 2
 
 - `mastra-ai/mastra` — human-required
-- `All-Hands-AI/OpenHands` — HUMAN: markers, docs only
+- `OpenHands/OpenHands` — org renamed from `All-Hands-AI/OpenHands`. Policy in the PR template (`HUMAN:`/`AGENT:`, end-to-end evidence) and `ready-for-dev` issue label
 
 ### Denylist (hard)
 
 - `matplotlib/matplotlib` — autonomous-agent ban
 - `curl/curl` — maintainer asked agents to stop
-- `pydantic/pydantic` — high slop-PR close rate
-- `stablyai/orca` — contribute via orca-fleet, not drive-by
+- `pydantic/pydantic` — welcome AI, but close mass-submitted / factory-pattern PRs and auto-close unassigned PRs
+- `stablyai/orca` — conflict of interest: Foundry's runtime; contribute via orca-fleet, not drive-by
 
 ---
 
@@ -204,7 +204,7 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 | [`docs/`](.) | Protocol. This file is the takeover bible |
 | [`CONTEXT.md`](../CONTEXT.md) | Glossary |
 
-Tests: `node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts factory/github-pr.test.ts` (Node 22+).
+Tests: `node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts factory/github-pr.test.ts factory/scorecard.test.ts` (Node 22+).
 
 ---
 
@@ -222,32 +222,33 @@ Tests: `node --experimental-strip-types --test factory/engine.test.ts factory/po
 
 Promotion rule: Wave 1 may tick only after **two Foundry-attested Wave 0 merges**. That is true (#70 and #72). Historical oss-contribute (5 PRs) counts as mission evidence, not as this control plane’s counter.
 
-### Wave 1 — in flight
+### Wave 1 — followed-up (slot released)
 
 | Packet | Issue | PRs | Status |
 |---|---|---|---|
-| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open, ready-for-review** (not draft), `mergeable_state=blocked`, +88/−1 across 3 files, head `48c2242` | **`submitted`** — in-flight. Do not tick another packet |
+| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open draft**, verbatim `DISCLOSURE` restored, head `48c2242` | **`followed-up`** — not in-flight. Do not merge |
 
 Policy parsed for #1476 (operator, before open):
 
-- `AGENTS.md`: no AI ban, conventional commits, welcome
+- `AGENTS.md` / `CONTRIBUTING.md` / `CLAUDE.md`: no written external-AI-contribution policy (`aiPolicy: undocumented-open`)
 - `CONTRIBUTING.md`: no CLA/DCO
 - Labels: `good first issue`, `help wanted`, `enhancement`
 - No open competing PR on #1476 at open time
 
-#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure. That is a doctrine miss. Operator next action is follow-up (mark draft if still ready; paste verbatim disclosure if editing the body; do not merge).
+#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure. That doctrine miss is corrected: converted to **draft**, verbatim three-line `DISCLOSURE` restored, packet left `submitted` via `followed-up` (oss-foundry#2).
 
 ### Scorecard (Foundry packets in this control plane)
 
-| Repo | opened | merged | tone | halt |
-|---|---|---|---|---|
-| ravidsrk/orca-fleet | 2 | 2 | warm | no |
-| ravidsrk/frontguard | 1 | 1 | warm | no |
-| ColeMurray/background-agents | 1 | 0 | neutral | no |
-| bans | 0 | | | |
-| reverts | 0 | | | |
+| Repo | opened | merged | terminal | noReview | humanReviewed | reviewCommentsAvg | tone | halt |
+|---|---|---|---|---|---|---|---|---|
+| ravidsrk/orca-fleet | 2 | 2 | 2 | 2 | 0 | — (no human review; Greptile is a bot) | warm | no |
+| ravidsrk/frontguard | 1 | 1 | 1 | 1 | 0 | — | warm | no |
+| ColeMurray/background-agents | 1 | 0 | 0 (still open) | 1 | 0 | — (CodeRabbit only) | neutral | no |
+| bans | 0 | | | | | | | |
+| reverts | 0 | | | | | | | |
+| rework | 0 | | | | | | | |
 
-Merge-rate halt is **not** tripped (`opened ≥ 3` required).
+Merge-rate halt is **not** tripped (needs ≥ 3 **terminal** drafts). Merge rate on terminal Wave 0 packets is 3/3. #1652 is in-flight-for-GitHub but not terminal, so it is not in the merge-rate denominator.
 
 ---
 
@@ -289,10 +290,9 @@ Daily:
 
 Now:
 
-- [ ] Follow ColeMurray#1652 until quiet / merged / closed. **Do not merge.**
-- [ ] Prefer marking #1652 **draft** until CI/tests on that head are green
-- [ ] Do not tick. #1652 is `submitted` (in-flight)
-- [ ] Do not open awesome-copilot or any other Wave 1 packet
+- [ ] #1652 is draft + followed-up. Answer any human review thread if one appears. **Do not merge.**
+- [ ] Tick is allowed; named `firstIssues` are consumed, so the clock **idles** rather than inventing work
+- [ ] Do not open awesome-copilot or any other Wave 1 packet until a first issue is named
 
 Never:
 
@@ -314,10 +314,13 @@ Never:
 
 ## 11. 90-day success
 
+Operational definitions live in [`docs/08-operations.md`](08-operations.md) and `factory/scorecard.ts`.
+
 - ≥ 1 merged PR on a Wave 1 repo that is not ours
-- Merge rate ≥ 60% on opened drafts
-- Review-comment average ≤ 4
-- **Bans = 0. Reverts = 0**
+- **Merge rate ≥ 60%** — denominator is opened drafts that reached a terminal state (merged / closed / stale-closed after 14 quiet days). Stale-closed counts against the rate. In-flight drafts are not in the denominator.
+- **Review-comment average ≤ 4** — mean over human-reviewed PRs only (≥ 1 human, non-bot review comment). Report the **no-review rate** alongside it. A low average with a high no-review rate is silence, not cleanliness.
+- **Bans = 0**
+- **Reverts = 0** — explicit `git revert` of our merge commit, or a maintainer-stated rollback that names the PR, within 30 days of merge. Post-merge edits/refactors are **rework** (informational; they do not trip this KPI or halt).
 - First 20 packets each have a human attest
 
 ---
@@ -355,6 +358,6 @@ Never:
 
 ## 14. Handoff note
 
-You own: follow-up on #1652, all future freezes, allowlist edits, and the halt switch.
+You own: remaining quiet-watch on #1652 (do not merge), all future freezes, allowlist edits, and the halt switch.
 
 Foundry still does not merge. Even on repos you own.
