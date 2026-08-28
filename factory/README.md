@@ -17,7 +17,7 @@ TypeScript modules for the Foundry control plane. No operator web UI lives in th
 
 ```
 node --experimental-strip-types factory/cli.ts status
-node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts
+node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts factory/github-pr.test.ts
 node --experimental-strip-types factory/validate-allowlist.ts
 ```
 

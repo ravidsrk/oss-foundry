@@ -10,6 +10,15 @@ test("committed allowlist.yaml parses and keeps denylist disjoint", () => {
   assert.equal(parsed.repos.some((r) => r.id === "stablyai/orca"), false);
 });
 
+test("omitted wave is not coerced to Wave 0 host-trusted", () => {
+  const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
+  const missing = yaml.replace(
+    "  - id: ravidsrk/frontguard\n    wave: 0\n    language: TypeScript",
+    "  - id: ravidsrk/frontguard\n    wave:\n    language: TypeScript",
+  );
+  assert.throws(() => parseAllowlistYaml(missing), /missing wave/);
+});
+
 test("Wave 2 host sandbox is rejected at load", () => {
   const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
   const host = yaml.replace(

@@ -89,6 +89,49 @@ export async function commitExists(
   }
 }
 
+/** Base must be an ancestor of head with at least one commit in between (GitHub compare `ahead`). */
+export async function compareCommits(
+  repoId: string,
+  baseSha: string,
+  headSha: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; aheadBy: number } | { ok: false; error: string }> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "oss-foundry",
+  };
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/compare/${baseSha}...${headSha}`,
+      { headers },
+    );
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `GitHub ${res.status} comparing ${baseSha.slice(0, 7)}...${headSha.slice(0, 7)} on ${repoId}`,
+      };
+    }
+    const body = (await res.json()) as {
+      status: string;
+      ahead_by: number;
+      behind_by: number;
+    };
+    if (body.status !== "ahead" || body.behind_by !== 0 || body.ahead_by < 1) {
+      return {
+        ok: false,
+        error: `base is not an ancestor of head (${body.status}, ahead=${body.ahead_by}, behind=${body.behind_by})`,
+      };
+    }
+    return { ok: true, aheadBy: body.ahead_by };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
 export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetch = fetch) {
     const parsed = parsePrUrl(data.url);
     if (!parsed) return { ok: false as const, error: "Not a GitHub pull request URL." };

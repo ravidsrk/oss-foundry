@@ -271,7 +271,7 @@ export function applyAttachEvidence(
   state: FactoryState,
   id: string,
   evidence: EvidenceManifest,
-  verify: (repoId: string, sha: string) => boolean,
+  verifyRange: (repoId: string, baseSha: string, headSha: string) => boolean,
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
@@ -281,8 +281,11 @@ export function applyAttachEvidence(
   if (evidence.baseSha.toLowerCase() === evidence.headSha.toLowerCase()) {
     return { state, error: "evidence baseSha and headSha must differ" };
   }
-  if (!verify(packet.repoId, evidence.baseSha) || !verify(packet.repoId, evidence.headSha)) {
-    return { state, error: `SHA not found on ${packet.repoId}` };
+  if (!verifyRange(packet.repoId, evidence.baseSha, evidence.headSha)) {
+    return {
+      state,
+      error: `evidence range is not a fast-forward from base to head on ${packet.repoId}`,
+    };
   }
   const bound: EvidenceManifest = { ...evidence, shaVerified: true };
   const packets = state.packets.map((p) => (p.id === id ? bump(p, { evidence: bound }) : p));
@@ -377,8 +380,8 @@ export function applyAttachDraft(
   }
   const parsed = parsePrUrl(url);
   if (!parsed) return { state, error: "Not a GitHub pull request URL." };
-  const name = packet.repoId.split("/")[1];
-  if (parsed.repo !== name) {
+  const [owner, name] = packet.repoId.split("/");
+  if (parsed.owner !== owner || parsed.repo !== name) {
     return {
       state,
       error: `PR ${parsed.owner}/${parsed.repo}#${parsed.number} does not match packet repo ${packet.repoId}`,

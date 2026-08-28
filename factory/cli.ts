@@ -8,7 +8,7 @@ import {
   applyTick,
   hasInflight,
 } from "./engine.ts";
-import { commitExists, draftPullPayload, parsePrUrl, syncGithubPr } from "./github-pr.ts";
+import { compareCommits, draftPullPayload, parsePrUrl, syncGithubPr } from "./github-pr.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
@@ -167,16 +167,18 @@ async function main() {
       diffLines: Number(flag(rest, "--diff") ?? 1),
       notes: ["attached via CLI"],
     };
-    const seen = new Map<string, boolean>();
-    for (const sha of [base, head]) {
-      const exists = await commitExists(packet.repoId, sha);
-      if (!exists.ok) {
-        console.error(exists.error);
-        process.exit(1);
-      }
-      seen.set(sha, true);
+    const compared = await compareCommits(packet.repoId, base, head);
+    if (!compared.ok) {
+      console.error(compared.error);
+      process.exit(1);
     }
-    const result = applyAttachEvidence(state, id, evidence, (_repoId, sha) => seen.get(sha) === true);
+    const result = applyAttachEvidence(
+      state,
+      id,
+      evidence,
+      (repoId, baseSha, headSha) =>
+        repoId === packet.repoId && baseSha === base && headSha === head,
+    );
     if (result.error) {
       console.error(result.error);
       process.exit(1);

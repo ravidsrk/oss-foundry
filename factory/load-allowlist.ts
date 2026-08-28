@@ -83,7 +83,13 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
     throw new Error(`allowlist.yaml: invalid repo id ${id}`);
   }
-  const wave = Number(r.wave) as Wave;
+  if (r.wave === null || r.wave === undefined || r.wave === "") {
+    throw new Error(`allowlist.yaml: ${id} missing wave`);
+  }
+  if (typeof r.wave !== "number" || !Number.isInteger(r.wave)) {
+    throw new Error(`allowlist.yaml: ${id} bad wave`);
+  }
+  const wave = r.wave as Wave;
   if (wave !== 0 && wave !== 1 && wave !== 2) throw new Error(`allowlist.yaml: ${id} bad wave`);
   const aiPolicy = String(r.aiPolicy) as AiPolicy;
   const allowedPolicy: AiPolicy[] = ["owner", "welcome", "human-required", "unknown", "forbidden"];

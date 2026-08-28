@@ -38,9 +38,9 @@ function blank(): FactoryState {
 
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
-const KNOWN = new Set([BASE, HEAD]);
-function verifyKnown(_repo: string, sha: string) {
-  return KNOWN.has(sha.toLowerCase());
+const OTHER = "36d0f23708adbdf911e4df050ed516821278a9fc";
+function verifyRange(_repo: string, baseSha: string, headSha: string) {
+  return baseSha.toLowerCase() === BASE && headSha.toLowerCase() === HEAD;
 }
 
 function live(
@@ -185,7 +185,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyKnown);
+  }, verifyRange);
   assert.ok(fake.error);
   assert.equal(isPlaceholderSha("deadbeefab"), true);
   assert.equal(isBoundSha(HEAD), true);
@@ -200,7 +200,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyKnown);
+  }, verifyRange);
   assert.ok(fabricated.error);
   assert.match(fabricated.error, /placeholder|not found/i);
 
@@ -213,9 +213,22 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyKnown);
+  }, verifyRange);
   assert.ok(unknownHex.error);
-  assert.match(unknownHex.error, /not found/);
+  assert.match(unknownHex.error, /fast-forward/);
+
+  const unrelatedExisting = applyAttachEvidence(state, id, {
+    baseSha: BASE,
+    headSha: OTHER,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "red-on-revert",
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+  }, verifyRange);
+  assert.ok(unrelatedExisting.error);
+  assert.match(unrelatedExisting.error, /fast-forward/);
 
   state = applyAttachEvidence(state, id, {
     baseSha: BASE,
@@ -226,7 +239,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: ["operator-harvested"],
-  }, verifyKnown).state;
+  }, verifyRange).state;
   assert.equal(evidenceIsReady(state.packets[0].evidence), true);
   state = applyAdvance(state, id).state;
   assert.equal(state.packets[0].status, "draft-ready");
@@ -263,7 +276,7 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-  }, verifyKnown).state;
+  }, verifyRange).state;
   state = applyAdvance(state, id).state;
   assert.equal(state.packets[0].status, "draft-ready");
   const openedBefore = state.scorecard.find((r) => r.repoId === state.packets[0].repoId)?.opened ?? 0;
@@ -280,6 +293,20 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
   );
   assert.ok(otherRepo.error);
   assert.match(otherRepo.error, /does not match packet repo/);
+
+  const foreignOwner = applyAttachDraft(
+    state,
+    id,
+    `https://github.com/stranger/${state.packets[0].repoId.split("/")[1]}/pull/1`,
+    { draft: true },
+  );
+  assert.ok(foreignOwner.error);
+  assert.match(foreignOwner.error, /does not match packet repo/);
+  assert.equal(foreignOwner.state.packets[0].status, "draft-ready");
+  assert.equal(
+    foreignOwner.state.scorecard.find((r) => r.repoId === state.packets[0].repoId)?.opened ?? 0,
+    openedBefore,
+  );
 
   const ready = applyAttachDraft(
     state,
