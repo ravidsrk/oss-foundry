@@ -176,7 +176,8 @@ export function revertWindow(
     // Both bounds, because both callers need both. `classifyRevert` filters pre-merge commits in
     // its own loop and so never asked this predicate for the lower one; the operator path reaches
     // here directly with `--at` and did. An impossible pre-merge rollback that passes increments
-    // `reverts`, and `health()` turns that into a permanent `stop`.
+    // `reverts`, and `health()` turns that into a permanent `stop`. Closed at the deadline too:
+    // "within 30 days" includes that instant (issue #76).
     within: atMs >= mergedMs && atMs <= deadlineMs,
     deadline: new Date(deadlineMs).toISOString(),
     days: Math.floor((atMs - mergedMs) / 86_400_000),
