@@ -140,10 +140,37 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
     String.raw`\bno\s+${T}\b`,
   ];
   for (const w of waivers) {
-    if (!new RegExp(w, "i").test(clause)) continue;
+    const hit = new RegExp(w, "i").exec(clause);
+    if (!hit) continue;
     // A scoped waiver is a requirement wearing a waiver's clothes: "not required EXCEPT for new
     // dependencies" means a packet touching one needs it. Read from the sentence, not the clause.
-    return SCOPE_LIMITER.test(sentence) ? "required" : "waived";
+    if (SCOPE_LIMITER.test(sentence)) return "required";
+    /**
+     * A WAIVER GOVERNS ONLY THE OCCURRENCE IT NAMES. Raised as P1 by review: polarity was decided
+     * once for the whole clause from the FIRST match, so
+     *
+     *   "No CLA is required for documentation and a CLA is required for code contributions."
+     *
+     * matched the waiver, never looked at the second occurrence, and reached ALLOW for a repository
+     * that requires a signature. "and" is not a clause delimiter and should not have to be: taking
+     * the waived text out and asking whether the instrument is still mentioned answers it without
+     * guessing at English conjunctions. Any surviving mention is an occurrence no waiver spoke for,
+     * and under this repo's asymmetry that reads as required.
+     */
+    /**
+     * One instrument can be NAMED TWICE in a row — "a DCO sign-off" is a single thing, and both
+     * "DCO" and "sign-off" are DCO-family tokens. So a mention abutting the waiver's own span is
+     * absorbed into it before the leftovers are inspected; without that,
+     * "We don't require a DCO sign-off on contributions." saw "sign-off" as an ungoverned second
+     * occurrence and flipped a plain waiver into a hold.
+     */
+    let tail = clause.slice(hit.index + hit[0].length);
+    for (let abut = new RegExp(String.raw`^[\s\-]{0,3}${T}`, "i").exec(tail); abut; ) {
+      tail = tail.slice(abut[0].length);
+      abut = new RegExp(String.raw`^[\s\-]{0,3}${T}`, "i").exec(tail);
+    }
+    if (new RegExp(T, "i").test(`${clause.slice(0, hit.index)} ${tail}`)) return "required";
+    return "waived";
   }
   /**
    * Undecided reads as REQUIRED, which is the repo's stated asymmetry rather than a shrug: a false

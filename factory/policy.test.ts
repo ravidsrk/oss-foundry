@@ -496,6 +496,17 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // because the optional s still needs a word boundary after it.
   { doc: "Add a class for the parser and document the class hierarchy.", want: "silent", why: "'class' is not a plural CLA" },
 
+  // MIXED POLARITY IN ONE CLAUSE. A second P1 from review: polarity was decided once per clause from
+  // the FIRST match, so a waiver joined to a same-family requirement by "and" — not a delimiter, and
+  // it should not have to be — hid the requirement and reached ALLOW. A waiver now governs only the
+  // occurrence it names; any surviving mention is ungoverned and reads as required.
+  { doc: "No CLA is required for documentation and a CLA is required for code contributions.", want: "required", why: "same family, both polarities, joined by 'and'" },
+  { doc: "No DCO is needed for docs and a DCO is needed for code.", want: "required", why: "same shape, DCO family" },
+  { doc: "No CLA is required, and a CLA is required for vendored code.", want: "required", why: "comma and 'and' together" },
+  // ...and the governance rule must not turn one instrument named twice into a requirement:
+  // "a DCO sign-off" is a single thing and both words are DCO-family tokens.
+  { doc: "No CLA and no DCO.", want: "waived", why: "two instruments, both waived, joined by 'and'" },
+
   // --- No signature instrument at all. These must be SILENT: matching them is the over-block. ---
   { doc: "you signal your agreement with the Code of Conduct", want: "silent", why: "#52 mutation 2: a bare /agreement/i would hold this" },
   { doc: "By contributing you agree to the terms of the licence.", want: "silent", why: "agree + licence, no instrument" },
@@ -582,4 +593,31 @@ test("a waived signature does not park the packet", () => {
   const scanned = scanPolicyText("No CLA. No DCO. Conventional commits.");
   assert.equal(scanned.signatureWaived.length, 2, JSON.stringify(scanned));
   assert.equal(scanned.signatureRequired.length, 0);
+});
+
+/**
+ * The quote an operator reads is the CLAUSE, not the whole sentence.
+ *
+ * This is what `clausesOf` is for, and it needs saying because the clause split no longer changes
+ * any VERDICT: the per-occurrence governance rule handles mixed polarity on its own, so removing the
+ * comma from the splitter leaves every row of the corpus above passing. What it does change is what
+ * the freeze shows. "No DCO, contributor agreement required." must point the operator at the six
+ * words that assert the CLA, not hand back the whole sentence with the waiver still in it — a quote
+ * that contains its own contradiction is the thing a human then has to re-read the document to
+ * resolve.
+ *
+ * Pinned rather than deleted, and pinned rather than left as a survivor: an unpinned redundancy is
+ * the shape this repo keeps filing issues about (#75), and the answer is either a reason or a
+ * removal. This is the reason.
+ */
+test("a mixed-polarity sentence quotes each instrument's own clause, not the whole sentence", () => {
+  const s = scanPolicyText("No DCO, contributor agreement required.");
+  assert.deepEqual(s.signatureRequired, ["CLA: contributor agreement required."]);
+  assert.deepEqual(s.signatureWaived, ["DCO: No DCO"]);
+  // Specifically: the CLA's quote does NOT drag the DCO waiver along with it.
+  assert.equal(
+    s.signatureRequired[0].includes("No DCO"),
+    false,
+    "the required-CLA quote carries the waived DCO too, so the operator reads a self-contradicting phrase",
+  );
 });
