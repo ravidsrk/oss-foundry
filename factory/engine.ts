@@ -551,7 +551,13 @@ export function referencesIssue(
 ): boolean {
   const n = String(issueNumber);
   const bare = new RegExp(String.raw`(?<![\w/])#${n}(?!\d)`);
-  const prefixed = new RegExp(`(?<![\\w/])${escapeRe(repoId)}#${n}(?!\\d)`, "i");
+  // `.` and `-` joined the PREFIXED lookbehind because they were missing and a GitHub owner may
+  // contain both: `fork-ravidsrk` and `evil.ravidsrk` are valid, DIFFERENT owners whose names end
+  // with ours, and both bound `ravidsrk/orca-fleet#71` by suffix (issue #60). `\w` already excluded
+  // `notravidsrk`. The BARE pattern is left alone: the character before `#` there is the last letter
+  // of the repo name, so `\w` already blocks this class, and widening it would be a change no test
+  // can distinguish.
+  const prefixed = new RegExp(`(?<![\\w/.-])${escapeRe(repoId)}#${n}(?!\\d)`, "i");
   if (bare.test(text) || prefixed.test(text)) return true;
   return Boolean(issueUrl) && new RegExp(`${escapeRe(issueUrl)}(?!\\d)`).test(text);
 }
