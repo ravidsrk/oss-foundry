@@ -8,7 +8,7 @@ Operator takeover document. This is the whole product: why it exists, how it run
 | Control plane | `factory/` TypeScript + `allowlist.yaml`. Operator loop: `node --experimental-strip-types factory/cli.ts` |
 | Data plane | [ravidsrk/orca-fleet](https://github.com/ravidsrk/orca-fleet) `oss-contribute` |
 | License | MIT |
-| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — open and **ready for review, not draft**, as of the 2026-08-29 sync; disclosure verbatim as verified 2026-08-28. A draft-only deviation, disclosed in §8. |
+| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — open and **ready for review, not draft**, as of the 2026-08-29 sync; disclosure **verbatim as recorded at open** — ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` afterwards and the live body predates it, so it no longer matches the current block (§8). Two deviations, both disclosed in §8. |
 
 ---
 
@@ -244,7 +244,11 @@ Policy parsed for #1476 (operator, before open):
 - Labels: `good first issue`, `help wanted`, `enhancement`
 - No open competing PR on #1476 at open time
 
-#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure — a doctrine miss. It was converted to draft at 2026-08-28T16:16:39Z and the verbatim disclosure confirmed in the body.
+#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure — a doctrine miss. It was converted to draft at 2026-08-28T16:16:39Z and the disclosure confirmed verbatim in the body **as the block then read**.
+
+**The body no longer matches the current block.** ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` (`factory/neighbor.ts`) while #1652 was already open, and a constant change cannot reach a pull request that is open on a repository this project does not own. The live body still reads `This patch was prepared by Foundry, an operator-gated contribution factory.` — verbatim as recorded at open, not verbatim against the constant today. Nothing flagged that the earlier record had gone stale, because `packetChecks` diffed status, draft and head and never inspected body text; `verify-ledger` printed `ledger ok` over it. Issue #38 closed that hole: the clock now reports the drift as an **advisory** on every tick, and will until an operator with an explicit go edits the upstream body. It is advisory rather than fatal for the reason the re-witness debt is (§ below, issue #49) — no commit to this repository can clear it, and a permanently red default branch is the pressure that gets records re-stamped instead of re-derived. The policy is written next to the constant: **a change to `DISCLOSURE` grandfathers already-open PRs and flags them; it never silently re-states them as matching.**
+
+The other half of #38 was that nothing stopped this recurring. `open-draft` refused a body without the verbatim block before its `POST`; `attach-draft` — the verb that binds a manually or browser-opened PR, the very path that opened #1652 — had no such check, in the CLI or in the reducer. It does now, in `applyAttachDraft`, so both create paths run the same refusal. The sentence below — "Issue #5 machine-enforces the moment of *contact*" — was true only of `open-draft` until this landed; the browser path it names as the historical miss was the one path with no gate on it.
 
 **It is not a draft now.** `ravidsrk` marked #1652 ready for review at 2026-08-28T18:09:24Z, and `6b6ff04` — a merge of upstream `main` — landed eight seconds later. Draft-only is the hardest rule this factory has, and the operator made this call deliberately: asked to choose between re-drafting upstream and recording the deviation, the operator chose to record it (issue #49). So the ledger says ready-for-review as of the 2026-08-29 sync, which is the state the PR is in, not the state doctrine prefers.
 
@@ -266,6 +270,8 @@ Merge-rate halt is **not** tripped (`opened ≥ 3` required).
 
 **Corrections 2026-08-28 (issue #3):** six allowlist facts fixed after live verification — pydantic and stablyai/orca deny reasons rewritten (both were mischaracterized as AI-restrictions), OpenHands org rename, background-agents `welcome` → `unknown` (no written policy), E2B surface re-scoped toward e2b-cookbook, awesome-copilot language. Details in [12-ledger.md](12-ledger.md).
 
+**Corrections 2026-08-29 (issue #38):** three surfaces asserted that #1652's live body carries the *current* verbatim disclosure — this §8 paragraph, `docs/06-v2.md` Live packets, and `docs/12-ledger.md` Next. It carries the block **as recorded at open**; ADR 0004's qualifier landed later and an open PR's body does not follow a constant. All three re-worded, the drift made visible to the clock (advisory, doctrine), the grandfathering policy written next to `DISCLOSURE`, and `attach-draft` given the disclosure refusal `open-draft` already had. The upstream body itself is **untouched** — editing a PR on a repository this project does not own needs an explicit operator go, and it has not been given.
+
 **Corrections 2026-08-29 (issue #49):** the ledger said #1652 was a draft at `48c2242`; it is ready for review at `6b6ff04`, and had been since 2026-08-28T18:09:24Z. Seed synced to live, seven doc surfaces corrected and date-qualified, the draft-only deviation disclosed above rather than healed. Evidence deliberately left at `48c2242` — nobody re-ran it at the new head. Details in [12-ledger.md](12-ledger.md).
 
 ---
@@ -284,7 +290,7 @@ It **cannot**:
 
 - `POST /repos/ColeMurray/background-agents/pulls` → **403 Resource not accessible by integration**
 
-A human browser session opened #1652 — the last one. Future Wave 1 drafts on stranger repos go through `open-draft` with the machine account's classic `public_repo` PAT (`FOUNDRY_PAT`; see docs/07): draft hard-coded, disclosure enforced, competing-work re-checked, secondary-rate-limit = halt.
+A human browser session opened #1652 — the last one. Future Wave 1 drafts on stranger repos go through `open-draft` with the machine account's classic `public_repo` PAT (`FOUNDRY_PAT`; see docs/07): draft hard-coded, disclosure enforced, competing-work re-checked, secondary-rate-limit = halt. Should a browser session ever be needed again, `attach-draft` now refuses a body without the verbatim block as well (issue #38) — the refusal lives in `applyAttachDraft`, so every path that binds a PR runs it.
 
 The in-repo create path hard-codes `draft: true` end to end: `createDraftPull` is the one `POST /pulls` surface, it exists only for drafts, and there is no merge path anywhere. `cli.ts body` remains for inspection; browser opens are emergency-only.
 

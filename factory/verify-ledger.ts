@@ -27,6 +27,10 @@ for (const packet of withPr) {
     merged: synced.meta.merged,
     draft: synced.meta.draft,
     headSha: synced.meta.headSha,
+    // The live body, for the SPEC.md §6 disclosure MUST (issue #38). Dropping this field does not
+    // break the call — it makes the check report that it could not run, which is the loudest thing
+    // a skipped doctrine check can do.
+    body: synced.body,
   });
   fatal.push(...checks.fatal);
   advisory.push(...checks.advisory);

@@ -7,6 +7,7 @@ import {
   packetDivergences,
   seedDivergences,
 } from "./ledger-check.ts";
+import { DISCLOSURE, DISCLOSURE_TAIL } from "./neighbor.ts";
 import { seedState } from "./seed.ts";
 import type { TaskPacket } from "./types.ts";
 
@@ -35,6 +36,24 @@ const WITNESSED_1652 = "48c2242683705b00503d3436575bf3c28b1b0c9b";
  */
 const LIVE_COMMITS_1652 = 7;
 
+/**
+ * The disclosure block ColeMurray/background-agents#1652 actually carries, read-only from
+ * `GET /repos/ColeMurray/background-agents/pulls/1652` (fetched 2026-08-29) — three lines,
+ * transcribed, not derived. ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE`
+ * while this PR was already open, and an open PR's body is not retroactively patched by a constant
+ * change: the live block is the one below, and it is what a maintainer reads today.
+ *
+ * Transcribed rather than computed from `DISCLOSURE` on purpose. A derivation would follow the
+ * constant the day someone edits it, and the whole point of the check under test is that the live
+ * body does NOT follow. `assert.notEqual` below keeps it from silently becoming a copy.
+ */
+const LIVE_DISCLOSURE_1652 = `This patch was prepared by Foundry, an operator-gated contribution factory.
+A human reviewed the packet, the diff, and the tests before this draft was opened.
+The factory does not merge. Maintainers own the merge.`;
+
+/** A PR body that satisfies SPEC.md §6 — the current block, verbatim and unabridged. */
+const VERBATIM_BODY = `## Summary\n\nFixes the thing.\n\n## Disclosure\n\n${DISCLOSURE}\n`;
+
 function submittedPacket(): TaskPacket {
   return seedState().packets.find((p) => p.status === "submitted")!;
 }
@@ -47,7 +66,13 @@ test("#49: promoting the live facts into the seed reconciles the clock without e
   // back — that is the signal #43 anchored to the immutable `evidence.reviewedSha` precisely so
   // this sync could not silently erase it.
   const packet = submittedPacket();
-  const live = { state: "open" as const, merged: false, draft: false, headSha: LIVE_HEAD_1652 };
+  const live = {
+    state: "open" as const,
+    merged: false,
+    draft: false,
+    headSha: LIVE_HEAD_1652,
+    body: VERBATIM_BODY,
+  };
 
   // The committed seed must name exactly the live facts; that is what makes the clock green.
   assert.equal(packet.prMeta!.draft, live.draft, "the seed still records a draft the PR is not");
@@ -102,6 +127,7 @@ test("#49: only the re-witness debt is advisory — a ledger contradiction stays
       merged: false,
       draft: packet.prMeta!.draft,
       headSha: packet.prMeta!.headSha!,
+      body: VERBATIM_BODY,
       ...over,
     });
 
@@ -124,6 +150,7 @@ test("#49: only the re-witness debt is advisory — a ledger contradiction stays
       merged: false,
       draft: !packet.prMeta!.draft,
       headSha: STALE_HEAD,
+      body: VERBATIM_BODY,
     }).length,
     at({ draft: !packet.prMeta!.draft, headSha: STALE_HEAD }).fatal.length +
       at({ draft: !packet.prMeta!.draft, headSha: STALE_HEAD }).advisory.length,
@@ -133,7 +160,13 @@ test("#49: only the re-witness debt is advisory — a ledger contradiction stays
 test("evidence staleness is bound to the witnessed SHA and survives the sync that moves prMeta", () => {
   const packet = submittedPacket();
   const witnessed = packet.evidence!.reviewedSha!;
-  const live = { state: "open" as const, merged: false, draft: true, headSha: LIVE_HEAD };
+  const live = {
+    state: "open" as const,
+    merged: false,
+    draft: true,
+    headSha: LIVE_HEAD,
+    body: VERBATIM_BODY,
+  };
 
   const beforeSync = packetDivergences(packet, live);
   assert.equal(
@@ -168,6 +201,7 @@ test("recorded-head-vs-live is reported even when the packet carries evidence", 
     merged: false,
     draft: behind.prMeta!.draft,
     headSha: witnessed,
+    body: VERBATIM_BODY,
   });
   assert.equal(
     out.some(
@@ -194,6 +228,7 @@ test("evidence staleness and ledger-behind-live are independent signals", () => 
     merged: false,
     draft: drifted.prMeta!.draft,
     headSha: LIVE_HEAD,
+    body: VERBATIM_BODY,
   });
   assert.equal(
     out.some((d) => d.includes("evidence witnessed at") && d.includes(witnessed.slice(0, 7))),
@@ -223,6 +258,7 @@ test("re-witnessing at the live head clears the staleness", () => {
       // state (#49) for a reason that has nothing to do with re-witnessing.
       draft: rewitnessed.prMeta!.draft,
       headSha: LIVE_HEAD,
+      body: VERBATIM_BODY,
     }),
     [],
   );
@@ -246,6 +282,7 @@ test("a followed-up packet owes the re-witness exactly as a submitted one does",
     merged: false,
     draft: followedUp.prMeta!.draft,
     headSha: LIVE_HEAD_1652,
+    body: VERBATIM_BODY,
   });
   assert.deepEqual(fatal, [], `nothing here contradicts GitHub; got ${JSON.stringify(fatal)}`);
   assert.equal(
@@ -262,6 +299,123 @@ test("a followed-up packet owes the re-witness exactly as a submitted one does",
   );
 });
 
+/**
+ * SPEC.md §6 — "The PR body MUST disclose ... verbatim and unabridged" — measured against the copy
+ * that matters once a PR is open: GitHub's.
+ *
+ * `packetChecks` diffed `{status/merged, draft, headSha}` and never looked at body text, so ADR
+ * 0004 could add the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` while #1652 was open and
+ * `verify-ledger` would still print `ledger ok` over a violated MUST. The drift below is the real
+ * one, not a fixture. Issue #38.
+ */
+test("a live PR body that no longer matches the current disclosure is an advisory, not silence", () => {
+  const packet = submittedPacket();
+  assert.notEqual(
+    LIVE_DISCLOSURE_1652,
+    DISCLOSURE,
+    "the transcribed live block has become a copy of the constant — re-fetch #1652 or this test is vacuous",
+  );
+  const live = {
+    state: "open" as const,
+    merged: false,
+    draft: packet.prMeta!.draft,
+    headSha: packet.prMeta!.headSha,
+    body: `## Summary\n\nFixes #1476\n\n## Disclosure\n\n${LIVE_DISCLOSURE_1652}\n`,
+  };
+
+  const { fatal, advisory } = packetChecks(packet, live);
+  // Advisory, not fatal, and the bucket is the argument: nothing here contradicts GitHub — the
+  // ledger's own record of this PR is accurate — and no commit to THIS repository can move a body
+  // that lives on someone else's repo. Reddening `main` over a debt no merge can pay is the exact
+  // pressure #49 removed. The cure is an authorised edit to the upstream PR; until then the clock
+  // says it every tick.
+  assert.deepEqual(
+    fatal,
+    [],
+    `a grandfathered body is not the ledger lying about GitHub; got ${JSON.stringify(fatal)}`,
+  );
+  assert.equal(
+    advisory.some((a) => a.includes("disclosure")),
+    true,
+    `the drift must be reported; got ${JSON.stringify(advisory)}`,
+  );
+  // Doctrine, never mechanical: no `sync` verb may appear next to it, or an operator will run one
+  // and the divergence will look absorbed while the upstream body is untouched.
+  const line = advisory.find((a) => a.includes("disclosure"))!;
+  assert.doesNotMatch(line, /run `sync/, `a doctrine event must not name a mechanical fix: ${line}`);
+  assert.match(line, /doctrine/, line);
+
+  // The same packet against a body carrying the current block is clean — the check reads the body,
+  // not the packet's status.
+  assert.equal(
+    packetChecks(packet, { ...live, body: VERBATIM_BODY }).advisory.some((a) => a.includes("disclosure")),
+    false,
+    "a verbatim body must not be flagged",
+  );
+});
+
+test("no disclosure at all reads differently from a disclosure that drifted", () => {
+  // Two different things for the operator to do — go look at why a PR opened bare, versus
+  // grandfather a body the constant moved past — so they must not print the same line.
+  const packet = submittedPacket();
+  const at = (body: string | undefined) =>
+    packetChecks(packet, {
+      state: "open" as const,
+      merged: false,
+      draft: packet.prMeta!.draft,
+      headSha: packet.prMeta!.headSha,
+      body: body as string,
+    }).advisory.find((a) => a.includes("disclosure"));
+
+  const bare = at("Fixes #1476\n\nSee the issue for context.");
+  assert.ok(bare, "a body with no Foundry disclosure at all must be reported");
+  assert.match(bare, /no Foundry disclosure/);
+
+  const drifted = at(`Fixes #1476\n\n${LIVE_DISCLOSURE_1652}`);
+  assert.ok(drifted, "a drifted disclosure must be reported");
+  assert.match(drifted, /not the current block/);
+  assert.notEqual(bare, drifted, "the two states must not collapse into one message");
+
+  // Fail closed on the caller, not just on the body. `body` is required, and a caller that does not
+  // supply it gets a line saying the MUST could not be checked — never a silently skipped check.
+  // This is the shape that lets a future third consumer of `packetChecks` be found by the clock
+  // instead of by a maintainer reading an undisclosed PR.
+  const unsupplied = at(undefined);
+  assert.ok(unsupplied, "an unsupplied body must be reported, not treated as compliant");
+  assert.match(unsupplied, /not supplied/);
+});
+
+test("DISCLOSURE_TAIL stays a real, non-empty part of the block it is derived from", () => {
+  // The derivation is what keeps the two-message split honest, and it has one silent failure mode:
+  // `"".includes("")` is true, so a one-line `DISCLOSURE` would make the tail empty and every body
+  // — including an empty one — read as "a Foundry disclosure that is not the current block". The
+  // guard in `disclosureDivergence` covers the runtime; this covers the premise.
+  assert.ok(DISCLOSURE_TAIL.length > 0, "an empty tail makes every body look like a drifted one");
+  assert.ok(DISCLOSURE.includes(DISCLOSURE_TAIL), "the tail must come from the block, not beside it");
+  assert.notEqual(DISCLOSURE_TAIL, DISCLOSURE, "a tail equal to the whole block distinguishes nothing");
+});
+
+test("a terminal packet's disclosure is not re-flagged, and a live one still is", () => {
+  // Same at-rest rule the re-witness debt follows: a merged or closed PR's body is history, nobody
+  // can renegotiate it, and re-printing it every tick trains the operator to ignore the line.
+  const packet = submittedPacket();
+  const bare = "Fixes #1476\n\nnothing else";
+  const live = {
+    state: "open" as const,
+    merged: false,
+    draft: packet.prMeta!.draft,
+    headSha: packet.prMeta!.headSha,
+    body: bare,
+  };
+  const flagged = (p: TaskPacket) => packetChecks(p, live).advisory.some((a) => a.includes("disclosure"));
+
+  assert.equal(flagged(packet), true, "a submitted packet's body is still the operator's to fix");
+  assert.equal(flagged({ ...packet, status: "followed-up" }), true, "so is a followed-up one's");
+  assert.equal(flagged({ ...packet, status: "merged" }), false, "a merged packet is at rest");
+  assert.equal(flagged({ ...packet, status: "rejected" }), false, "so is a rejected one");
+  assert.equal(flagged({ ...packet, status: "parked" }), false, "so is a parked one");
+});
+
 test("a terminal packet is never re-flagged for evidence staleness", () => {
   // orca-fleet#70 was reviewed at 3ba13f1 and a follow-up commit landed before the maintainer
   // merged it. The packet is at rest; re-reporting it every clock tick would train the operator
@@ -274,6 +428,7 @@ test("a terminal packet is never re-flagged for evidence staleness", () => {
       merged: true,
       draft: false,
       headSha: merged.prMeta!.headSha,
+      body: VERBATIM_BODY,
     }),
     [],
   );
