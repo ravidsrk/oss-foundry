@@ -2143,7 +2143,13 @@ function writeCompareStub(dir: string, issueNumber: number, filesChanged = 1): s
 function runCli(dir: string, args: string[], stub?: string, env: Record<string, string> = {}) {
   const nodeArgs = ["--experimental-strip-types"];
   if (stub) nodeArgs.push("--import", pathToFileURL(stub).href);
-  nodeArgs.push(join(import.meta.dirname, "cli.ts"), ...args);
+  // `--state` is what isolates this, not `cwd`: the ledger path is anchored to the repo root, so a
+  // spawned CLI left to its default would read and write the developer's real state file no matter
+  // which temp directory it was started in. Every fixture here writes its ledger to
+  // `<dir>/.foundry-state.json`, so point the child at that one unless a caller is deliberately
+  // exercising some other path. `cwd` still matters — the witness log paths are relative to it.
+  const stateArgs = args.includes("--state") ? [] : ["--state", join(dir, ".foundry-state.json")];
+  nodeArgs.push(join(import.meta.dirname, "cli.ts"), ...args, ...stateArgs);
   const run = spawnSync(process.execPath, nodeArgs, {
     cwd: dir,
     encoding: "utf8",
