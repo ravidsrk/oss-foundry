@@ -212,14 +212,23 @@ scorecard read `0` forever, correct or not.
    that mutant.
 
 **The evidence for all of the above is re-runnable, not asserted.**
-`node --experimental-strip-types scripts/mutation-audit.ts` applies 27 single-line mutations to this
-surface, runs the full suite against each, restores the file from the bytes it read, and re-verifies
-the baseline. 26 must die and one — a local rebinding with no behavioural content — must survive, so
-a harness that had broken into always-reporting-killed fails its own control. It exits non-zero if
-any real mutant survives or if a mutant's anchor text has moved. Every line this round added or
-corrected is in that table with a one-sentence statement of what shipping the mutant would cost. A
-mutation score quoted in prose is not evidence; this is the same claim in a form a reviewer can
-re-derive in one command.
+`node --experimental-strip-types scripts/mutation-audit.ts` applies one single-line mutation per row
+of its table, runs the full suite against each, restores the file from the bytes it read, and
+re-verifies the baseline. It exits non-zero if any real mutant survives or if a mutant's anchor text
+has moved. Every line each round added or corrected is in that table with a one-sentence statement of
+what shipping the mutant would cost.
+
+**No count is quoted here, and that is the point.** This paragraph used to say "27 single-line
+mutations … 26 must die and one must survive". By the next round the table held 65 and the sentence
+still said 27 — a mutation score copied into prose, in the paragraph that calls a mutation score
+copied into prose worthless. So the count has one source and one reader:
+`scripts/mutation-audit.ts --list` prints the table and closes with its own tally, and a full run
+prints the same line before it starts. What is stated here instead is the invariant, which does not
+drift: **every mutant must reach the outcome its own row declares** — killed, unless the row carries
+`expect: "survives"`, and exactly one does. That one is a local rebinding with no behavioural
+content, so a harness that had broken into always-reporting-killed fails on it and the run exits
+non-zero. A mutation score quoted in prose is not evidence; this is the same claim in a form a
+reviewer re-derives in one command.
 
 **A correction to this section's own round-2 arithmetic.** The blind window `since`-only reads left
 on orca-fleet#72 was reported as ~39 minutes. That is wrong, and it understates it by a factor of

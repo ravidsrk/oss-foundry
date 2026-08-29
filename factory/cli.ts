@@ -149,6 +149,29 @@ function flag(args: string[], name: string): string | undefined {
   return args[i + 1];
 }
 
+/**
+ * A flag written LAST, with nothing after it, refused instead of read as absent.
+ *
+ * `flag()` cannot tell `--at` at the end of argv from no `--at` at all: both are `undefined`. That
+ * is harmless for a flag whose absence is already an error — `revert requires --reason <text>`
+ * fires either way — and it is a silent wrong answer for a flag whose absence MEANS something.
+ *
+ * NOT GENERALISED into `flag()` itself, deliberately. `--state` and `--logs-root` have the same
+ * "absence means something" shape, but they are read during MODULE EVALUATION, so a refusal inside
+ * `flag()` would `process.exit` or throw inside whatever imported `cli.ts` — `engine.test.ts` does —
+ * rather than in front of the operator who mistyped. Applied at the one call site where a silent
+ * default is a safety verdict, and stated here so the next one is a decision rather than an
+ * oversight.
+ */
+function refuseValuelessFlag(args: string[], name: string, absenceMeans: string): void {
+  if (args.includes(name) && flag(args, name) === undefined) {
+    console.error(
+      `${name} was given no value. Pass one, or omit ${name} entirely — omitting it means ${absenceMeans}, and a trailing ${name} is not the same thing.`,
+    );
+    process.exit(1);
+  }
+}
+
 const ARGV = process.argv.slice(2);
 // The ledger belongs to the repository, not to whatever directory the operator happened to be in.
 // A cwd-relative path silently served the committed seed as live truth from anywhere else, and a
@@ -622,6 +645,12 @@ async function main() {
     // Opposite answers in the safety-relevant direction, with no operator path to the SPEC.md §7
     // MUST at all. The window dates from the EVENT on both paths now; the default is still now,
     // which is the right reading of an operator who does not say otherwise.
+    //
+    // …and a trailing `--at` with no value after it is not "now". `flag` returns `undefined` for
+    // both "no flag" and "flag at the end of argv", so `revert pkt --reason r --at` dated the
+    // window from the moment of typing — the exact failure this flag closes, reached in silence and
+    // by the operator who was trying hardest to avoid it.
+    refuseValuelessFlag(rest, "--at", "the rollback is dated now");
     const at = flag(rest, "--at");
     if (at !== undefined && !Number.isFinite(Date.parse(at))) {
       console.error(

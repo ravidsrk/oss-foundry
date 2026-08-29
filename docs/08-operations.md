@@ -194,6 +194,10 @@ Silence is the modal outcome for external agent PRs, so every KPI names its deno
     rollback as it happens. An operator writing up a day-10 rollback on day 35 passes `--at` with
     day 10; without it the same rollback would be refused as out of window while `reconcile` would
     have recorded it, which is the SPEC.md §7 MUST going unsatisfied with no path to satisfy it.
+    A `--at` typed with nothing after it is **refused**, not read as "now": `undefined` is what the
+    argument parser returns for both "no flag" and "flag at the end of the line", and defaulting the
+    second to the moment of typing would reach this exact failure through the flag that exists to
+    avoid it. Omit `--at` to mean now; say so by omitting it.
   - The mechanical half reads `GET /repos/{o}/{r}/commits?since=<mergedAt>&until=<mergedAt+30d>`
     **through GitHub's own `Link: rel="next"` cursor**, up to a cap of 10 pages (1000 commits).
     GitHub serves commits newest-first, so a single-page read hides the window that opens *at the

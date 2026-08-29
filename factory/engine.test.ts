@@ -3497,6 +3497,77 @@ test("witnessed run logs are written where the schema says, and land verifiable"
   assert.equal(verifyWitnessLogs(outcome.witness, read).ok, true);
 });
 
+/**
+ * "INERT FOR A REAL OPERATOR" — the sentence written at the guard, which nothing held it to.
+ *
+ * `persistWitnessLogs` refuses to write the repo-root run logs when three things are true together:
+ * the root is the default, no `--logs-root` was given, and `NODE_TEST_CONTEXT` is set. The third
+ * conjunct is the entire reason the guard is safe to ship — and dropping it was GREEN. Every test in
+ * this suite passes `--logs-root`, so `LOGS_ROOT_FLAG` is always set and the conjunction short-
+ * circuits before the environment is ever read; the operator half of the condition was reached by
+ * nothing. Under that mutant an operator running the documented
+ * `evidence <id> --base <sha> --head <sha>` — with no `--logs-root`, which is the only way the verb
+ * is documented — is refused with "refusing to write the repo-root run logs … from a test run", and
+ * the witness they just paid for is thrown away.
+ *
+ * Driven as a child process because `NODE_TEST_CONTEXT` is set for THIS process by `node --test` and
+ * inherited by everything it spawns. An operator's shell does not have it, and that difference is
+ * the guard; a child is the only place the absence can be staged. The witness names ABSOLUTE log
+ * paths so the write lands in a temp directory instead of the developer's checkout — what is under
+ * test here is whether the guard fires, and where the default root points is pinned separately, by
+ * `witnessLogRootFor` and by the `--help` drive above.
+ *
+ * Both directions, in one test: the operator half on its own is satisfied by deleting the guard.
+ */
+test("the repo-root log-write refusal is inert for an operator and fires for a test run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "foundry-operator-logs-"));
+  const script = join(dir, "persist.mjs");
+  writeFileSync(
+    script,
+    `import { persistWitnessLogs } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "cli.ts")).href)};\n` +
+      `const [testLog, revertLog] = process.argv.slice(2);\n` +
+      // No third argument, so `root` takes its default: the production `LOGS_ROOT`.
+      `persistWitnessLogs(\n` +
+      `  { testLogPath: testLog, revertLogPath: revertLog },\n` +
+      `  { test: "42 passing", revert: "3 failing" },\n` +
+      `);\n` +
+      `console.log("PERSISTED");\n`,
+  );
+
+  // Deliberately no `--logs-root` on the child's argv: that flag is the OTHER conjunct, and passing
+  // it is exactly what every existing test does — which is why this path was never reached.
+  const persist = (label: string, nodeTestContext: string | undefined) => {
+    const env: Record<string, string> = { ...process.env, NODE_NO_WARNINGS: "1" } as Record<string, string>;
+    if (nodeTestContext === undefined) delete env.NODE_TEST_CONTEXT;
+    else env.NODE_TEST_CONTEXT = nodeTestContext;
+    const testLog = join(dir, `${label}-test.log`);
+    const revertLog = join(dir, `${label}-revert.log`);
+    const run = spawnSync(process.execPath, ["--experimental-strip-types", script, testLog, revertLog], {
+      cwd: dir,
+      encoding: "utf8",
+      env,
+    });
+    return { ...run, seen: `${run.stdout}${run.stderr}`, testLog, revertLog };
+  };
+
+  const operator = persist("operator", undefined);
+  assert.equal(operator.status, 0, operator.seen);
+  assert.doesNotMatch(
+    operator.seen,
+    /refusing to write the repo-root run logs/,
+    "an operator running `evidence` with no --logs-root was refused by a guard whose only subject is this suite",
+  );
+  assert.equal(readFileSync(operator.testLog, "utf8"), "42 passing");
+  assert.equal(readFileSync(operator.revertLog, "utf8"), "3 failing");
+
+  const underTest = persist("under-test", "child");
+  assert.equal(underTest.status, 1, underTest.seen);
+  assert.match(underTest.seen, /refusing to write the repo-root run logs/, underTest.seen);
+  assert.match(underTest.seen, /--logs-root <tmpdir>/, underTest.seen);
+  assert.equal(existsSync(underTest.testLog), false, "the refusal must refuse BEFORE it writes");
+  assert.equal(existsSync(underTest.revertLog), false);
+});
+
 // --- The `evidence` verb, driven end to end (issue #36) ---
 //
 // The persist test above calls `persistWitnessLogs` directly, so it locks the function's body and

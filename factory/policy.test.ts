@@ -314,11 +314,21 @@ test("the derived-figure guard reads case-insensitively and does not mistake a p
   assert.equal(hasDerivedFigure("no CONTRIBUTING.md as of 2026/08"), true, "known limit, not a promise");
   assert.equal(hasDerivedFigure("no CONTRIBUTING.md as of 2026/08/28"), false, "three segments read as a path");
 
-  // …and the loosening must not cost the catch it was loosened around: a bare ratio still dies.
-  assert.throws(
-    () => parsePolicyRecords(record({ quote: "Behaviorally open: 250/408 non-owner PRs merged." })),
-    /is silent but its quote carries a derived figure/,
-  );
+  // …and the loosening must not cost the catch it was loosened around: a bare ratio still dies,
+  // whether or not the writer put spaces around the slash. Every fixture wrote it tight, so the
+  // `\s*` on either side of the `/` was pinned by nothing and deleting it stayed green — and
+  // `141 / 272` is how a human types a ratio into prose at least as often as `141/272`.
+  for (const figure of [
+    "Behaviorally open: 250/408 non-owner PRs merged.",
+    "Behaviorally open: 141 / 272 external PRs merged.",
+    "Behaviorally open: 141/ 272 external PRs merged.",
+  ]) {
+    assert.throws(
+      () => parsePolicyRecords(record({ quote: figure })),
+      /is silent but its quote carries a derived figure/,
+      figure,
+    );
+  }
 });
 
 test("the committed policy records parse under the quote guard", () => {

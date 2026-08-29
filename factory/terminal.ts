@@ -23,9 +23,28 @@
  *
  * So the boundary is the process's own terminal streams, installed once by each entry point. It is
  * not a sink that can be forgotten: a `console.log` added tomorrow, by anyone, in any verb, is
- * already behind it. The only way past is a NEW entry point that never installs it, and
- * `terminal.test.ts` asserts every entry point does — discovering them from `package.json` and the
- * workflow rather than from a list, so a new one fails until it decides.
+ * already behind it. `terminal.test.ts` DRIVES every entry point it discovers from `package.json`
+ * and the workflow — spawning each one with a probe that prints hostile bytes through its own
+ * `console`, rather than grepping its source — so a new entry point fails until it either installs
+ * the boundary or is written into `EXEMPT` with a reason.
+ *
+ * WHAT IT DOES NOT COVER, said out loud rather than implied. This paragraph used to claim that "the
+ * only way past is a NEW entry point that never installs it". That is the claim about SINKS, and it
+ * holds; it is not a claim about every byte the process can emit, and two paths reach the terminal
+ * without going through `stream.write` as this module replaces it:
+ *
+ *   · Node's own fatal-exception printer. An uncaught `Error` is formatted and written by the
+ *     runtime, not by a `console.*` call. Latent rather than live on this tree: every `throw new
+ *     Error` in this repository is in `load-allowlist.ts`, `policy-records.ts` or
+ *     `validate-allowlist.ts` and interpolates OUR OWN committed files, while every GitHub read
+ *     parses its response inside a `try`/`catch` that returns `{ ok: false }` rather than throwing.
+ *     So the hole has nothing in it. It is named so the next `throw new Error(thirdPartyText)` is
+ *     recognised as putting something in it.
+ *   · A non-`Buffer` typed array, which the wrapper passes through untouched on purpose (see the
+ *     comment at the `text === undefined` branch below). Nothing in this repository writes one.
+ *
+ * So: no SINK can bypass the boundary, and that is what the boundary is for. "Nothing can" would be
+ * a larger claim than the mechanism supports.
  *
  * RENDERING, NOT RECORD. Everything persisted keeps the original bytes: the witness run logs on
  * disk, the sha256 computed over them, the ledger. What is sanitised is the copy a human reads.

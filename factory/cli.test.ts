@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { ALLOWLIST } from "./allowlist.ts";
+import { assertDisjointCounts } from "./fixture-counts.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
 import { packetChecks } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
@@ -1386,7 +1387,9 @@ test("approve tells the operator, on the terminal, how much policy text it is no
   const total = long.length;
   const withheld = total - 4000;
   assert.deepEqual([total, withheld], [5234, 1234]);
-  assert.equal(String(total).includes(String(withheld)), false, "the withheld count must be assertable");
+  // The same rule `packet.test.ts` states, from the same place. It used to be written out again
+  // here, which is two copies of one precondition and therefore two things that can drift apart.
+  assertDisjointCounts(total, withheld);
   const path = writeState(state);
   const stub = githubStub("record");
   const run = runCli(
@@ -1858,6 +1861,26 @@ test("revert dates the window from the rollback the operator names, not from whe
   assert.equal(bad.code, 1, bad.out);
   assert.match(bad.out, /not a date this can parse/, bad.out);
   assert.equal(rowOf(badPath).reverts, 0);
+
+  // A TRAILING `--at`, with nothing after it, is not "now". `flag()` answers `undefined` for both
+  // "no flag" and "flag at the end of argv", so this typed the flag, got the default, and dated the
+  // window from the typing — the failure the flag exists to close, reached silently and by the
+  // operator who was trying hardest to avoid it. Refused, and the refusal says what omitting it
+  // would have meant.
+  const trailingPath = writeState(aged());
+  const trailing = runCli(["revert", id, "--reason", reason, "--state", trailingPath, "--at"], tmpdir());
+  assert.equal(trailing.code, 1, trailing.out);
+  assert.match(trailing.out, /--at was given no value/, trailing.out);
+  assert.match(trailing.out, /omitting it means the rollback is dated now/, trailing.out);
+  assert.equal(rowOf(trailingPath).reverts, 0);
+
+  // …and a `--at` whose "value" is the next FLAG is a different mistake with the same cause. It is
+  // caught by the parse check rather than by the guard above, and both must stay: neither one on
+  // its own covers the other.
+  const swallowedPath = writeState(aged());
+  const swallowed = runCli(["revert", id, "--reason", reason, "--at", "--state", swallowedPath], tmpdir());
+  assert.equal(swallowed.code, 1, swallowed.out);
+  assert.match(swallowed.out, /not a date this can parse/, swallowed.out);
 
   // And the flag is in `--help`: a verb whose behaviour depends on a flag nobody is told about is
   // the same defect as a refusal naming a command that does not exist.
