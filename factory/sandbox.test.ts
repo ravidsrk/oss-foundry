@@ -121,6 +121,16 @@ test("the KNOWN DEFECT scan reads one comment at a time, not a 200-character win
     true,
     "a block comment must be caught too",
   );
+  // Consecutive `//` lines are ONE comment, so a note whose marker and pointer sit on different
+  // lines of the same run is still that comment tracking that issue. Without this, a regression
+  // that stopped joining runs would weaken the standing scan while every other case here passed.
+  const spread = "// KNOWN DEFECT: the refusal names the wrong verb.\n// Filed as issue #12.\n";
+  assert.equal(
+    commentsIn(spread).some(tracksAnIssue),
+    true,
+    "a marker and a pointer on consecutive // lines are one comment",
+  );
+  assert.equal(commentsIn(spread).length, 1, "the run must be joined into one comment, not two");
 
   // ...and the direction issue #99 is about: two SEPARATE comments, neither of which tracks
   // anything. The old window matched across the gap and reported a violation that was not one.
