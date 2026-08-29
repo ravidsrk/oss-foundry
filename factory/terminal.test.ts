@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
-import { after, test } from "node:test";
+import { test } from "node:test";
+import { tmp } from "./tmp-dir.ts";
 import {
   installTerminalBoundary,
   sanitizeTerminalText,
@@ -49,18 +50,9 @@ const DEFANGED = "concealedrepaintedgreen";
 const DISCLOSED = /byte\(s\) of terminal control sequence removed/;
 
 /**
- * Every temp tree this file makes, removed when it is done. `mkdtempSync` with no counterpart is how
- * a developer's `$TMPDIR` acquires hundreds of them: the drives below build one per run, forever.
+ * Every temp tree this file makes is removed by `tmp()`'s own registry (factory/tmp-dir.ts), which
+ * replaced this file's hand-rolled copy of it and the identical one in `engine.test.ts`.
  */
-const temps: string[] = [];
-function scratch(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  temps.push(dir);
-  return dir;
-}
-after(() => {
-  for (const dir of temps) rmSync(dir, { recursive: true, force: true });
-});
 
 function spawnNode(script: string, args: string[], opts: { preload?: string } = {}) {
   const nodeArgs = ["--experimental-strip-types"];
@@ -287,7 +279,7 @@ test("an escape split across two writes still loses its introducer", () => {
  * the run.
  */
 test("the default stream list is both halves of the terminal — stdout AND stderr", () => {
-  const dir = scratch("foundry-streams-");
+  const dir = tmp("foundry-streams-");
   const script = join(dir, "default-streams.mjs");
   writeFileSync(
     script,
@@ -345,7 +337,7 @@ test("the default stream list is both halves of the terminal — stdout AND stde
  * 500 is the shortest path from `verify-ledger.ts` to a printed line.
  */
 function boundaryProbe(): string {
-  const dir = scratch("foundry-probe-");
+  const dir = tmp("foundry-probe-");
   const preload = join(dir, "probe.mjs");
   writeFileSync(
     preload,

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, test } from "node:test";
+import { tmp } from "./tmp-dir.ts";
 import { ALLOWLIST, CAPS, repoById } from "./allowlist.ts";
 import {
   applyAdvance,
@@ -1670,7 +1671,7 @@ test("a parked packet with a still-open PR never rots invisibly in the ledger ch
 test("the reject warning reaches the operator's terminal, not only the ledger", () => {
   // The reducer-level assertions above all passed while the CLI printed nothing but `rejected <id>`
   // — the exact silence issue #34 opens with. This drives the real binary and reads its streams.
-  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-"));
+  const dir = tmp("foundry-cli-");
   // `--state` is what isolates this, not `cwd`. The ledger path is anchored to the repo root
   // (factory/cli.ts), so a bare spawn would read and rewrite the developer's real state file.
   const statePath = join(dir, ".foundry-state.json");
@@ -1741,7 +1742,7 @@ test("status does not claim a re-block that the held slot already prevented", ()
   // Driven at the reducer level, the reply-owed note was recorded and nothing surfaced it: `status`
   // printed "(maintainer activity re-blocks the tick)" for a packet whose maintainer activity had
   // just re-blocked nothing, and `reconcile` reported divergences=0. Drive the real binary.
-  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-status-"));
+  const dir = tmp("foundry-cli-status-");
   // See the reject test above: `--state` is the isolation, since the default path is the repo root.
   const statePath = join(dir, ".foundry-state.json");
   const cli = join(import.meta.dirname, "cli.ts");
@@ -2379,7 +2380,7 @@ test("the committed evidence page regenerates byte-identical from this tree", ()
  * state by `cwd` alone, which meant every assertion below was silently made against the seed.
  */
 function runCliWithState(args: string[], state: FactoryState) {
-  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-ledger-"));
+  const dir = tmp("foundry-cli-ledger-");
   writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
   const run = runCli(dir, args);
   return { ...run, out: run.seen, dir };
@@ -2465,7 +2466,7 @@ test("status names the observation its quiet counter was extrapolated from", () 
  */
 test("the halt command, typed in GitHub's casing, actually halts", () => {
   const seed = seedState();
-  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-halt-"));
+  const dir = tmp("foundry-cli-halt-");
   const statePath = join(dir, ".foundry-state.json");
   writeFileSync(statePath, JSON.stringify(seed));
   const cli = join(import.meta.dirname, "cli.ts");
@@ -2598,7 +2599,7 @@ test("a daytona witness loads, is refused at the gate on today's allowlist, and 
       revertLogPath: `docs/evidence/logs/${packet.id}/revert.log`,
     },
   };
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "daytona.json");
+  const path = join(tmp("foundry-"), "daytona.json");
   writeFileSync(path, JSON.stringify({ ...seed, packets: [packet, ...seed.packets.slice(1)] }));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true);
@@ -2867,7 +2868,7 @@ test("a provenanced e2b witness carries a Wave-1 packet to draft-ready", () => {
 
 test("witness log hashes are recomputable from disk", async () => {
   const witnessModule = await import("./witness.ts");
-  const dir = mkdtempSync(join(tmpdir(), "foundry-logs-"));
+  const dir = tmp("foundry-logs-");
   const testLog = "42 passing\n";
   const revertLog = "3 failing\n";
   writeFileSync(join(dir, "test.log"), testLog);
@@ -3261,7 +3262,7 @@ function ingestFixture(
   logOverrides: Partial<{ test: string; revert: string }> = {},
   filesChanged = 1,
 ) {
-  const dir = mkdtempSync(join(tmpdir(), "foundry-ingest-"));
+  const dir = tmp("foundry-ingest-");
   const { state, id } = reviewingWave1();
   const packet = state.packets[0];
   writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
@@ -3368,7 +3369,7 @@ test("attach-witness resolves witness logs against the log root, not the operato
   const { dir, id, manifestPath, stub } = ingestFixture();
   // Run from a directory that is neither the fixture nor the repository: the only thing that can
   // make the logs findable is the anchor.
-  const elsewhere = mkdtempSync(join(tmpdir(), "foundry-elsewhere-"));
+  const elsewhere = tmp("foundry-elsewhere-");
   const run = runCli(elsewhere, ["attach-witness", id, "--manifest", manifestPath, "--logs-root", dir], stub, {}, dir);
   assert.equal(run.status, 0, `a valid witness must ingest from any cwd:\n${run.seen}`);
   assert.ok(ledgerAt(dir).packets[0].evidence, "the witness must have reached the ledger");
@@ -3407,7 +3408,7 @@ test("a relative --manifest is the operator's path, resolved against their shell
   const { dir, id, manifestPath, stub } = ingestFixture();
   // The operator's shell: a third directory, holding the manifest under a name the log root does
   // not have. If the manifest call site ever anchors to the log root, this file is invisible.
-  const shell = mkdtempSync(join(tmpdir(), "foundry-shell-"));
+  const shell = tmp("foundry-shell-");
   writeFileSync(join(shell, "operator-witness.json"), readFileSync(manifestPath, "utf8"));
   assert.equal(existsSync(join(dir, "operator-witness.json")), false, "the log root must NOT hold this name");
 
@@ -3464,7 +3465,7 @@ test("the witness log root defaults to the repository root and the state file's 
   // `--help` is the surface, and it is the one an operator reads to find their run logs. Deliberately
   // no `--logs-root` and no `--state`: the DEFAULT is the half the bug was in and the half an
   // override hides.
-  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "foundry-help-")));
+  const elsewhere = realpathSync(tmp("foundry-help-"));
   const help = spawnSync(
     process.execPath,
     ["--experimental-strip-types", join(import.meta.dirname, "cli.ts"), "--help"],
@@ -3497,7 +3498,7 @@ test("witnessed run logs are written where the schema says, and land verifiable"
   // the call left the suite green, and a digest whose logs were never written is not evidence.
   const { persistWitnessLogs } = await import("./cli.ts");
   const { witnessLogPaths } = await import("./witness.ts");
-  const root = mkdtempSync(join(tmpdir(), "foundry-persist-"));
+  const root = tmp("foundry-persist-");
   const { runner } = fakeRunner({
     "run-tests@head": { exit: 0, output: "42 passing" },
     "run-tests@revert": { exit: 1, output: "3 failing" },
@@ -3557,7 +3558,7 @@ test("witnessed run logs are written where the schema says, and land verifiable"
  * Both directions, in one test: the operator half on its own is satisfied by deleting the guard.
  */
 test("the repo-root log-write refusal is inert for an operator and fires for a test run", () => {
-  const dir = mkdtempSync(join(tmpdir(), "foundry-operator-logs-"));
+  const dir = tmp("foundry-operator-logs-");
   const script = join(dir, "persist.mjs");
   writeFileSync(
     script,
@@ -3619,23 +3620,13 @@ test("the repo-root log-write refusal is inert for an operator and fires for a t
 // is stubbed, exactly as the ingest tests do.
 
 /**
- * The `evidence` fixtures' temp trees, removed when the file's tests are done.
+ * The `evidence` fixtures' temp trees are registered by `tmp()` itself (factory/tmp-dir.ts).
  *
- * Each of these is a git repo or a work tree with a clone in it, not a stray file, and the two
- * tests added below create one apiece on every run. `mkdtempSync` with no counterpart is how a
- * developer's `$TMPDIR` acquires hundreds of them; the same omission in `witness-host.test.ts` had
- * left ~65 shim directories behind by the time this unit was reviewed. Registered rather than
- * removed per-test because `wave0Origin` is built once and shared by every fixture.
+ * This file used to carry its own `evidenceScratch` list plus an `after()` hook, and
+ * `terminal.test.ts` carried the same six lines again, while the other five test files had no
+ * cleanup at all. One home now — the rule `fixture-counts.ts` states about two copies of one rule
+ * applies to cleanup as much as to fixtures, and issue #64 is what the drift cost.
  */
-const evidenceScratch: string[] = [];
-function evidenceScratchDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  evidenceScratch.push(dir);
-  return dir;
-}
-after(() => {
-  for (const dir of evidenceScratch) rmSync(dir, { recursive: true, force: true });
-});
 
 /**
  * The environment variable `LOGIN_SHELL_PROFILE` exports and `scripts/validate.py` refuses on.
@@ -3673,7 +3664,7 @@ function loginShellProfile(home: string): void {
 let originRepo: { path: string; base: string; head: string } | undefined;
 function wave0Origin(): { path: string; base: string; head: string } {
   if (originRepo) return originRepo;
-  const path = evidenceScratchDir("foundry-origin-");
+  const path = tmp("foundry-origin-");
   const git = (...args: string[]) => {
     const run = spawnSync(
       "git",
@@ -3764,7 +3755,7 @@ function recordingGit(dir: string): { binDir: string; record: string; calls: () 
  */
 function evidenceFixture(filesChanged = 2, message = "fix the answer\n\nFixes #71") {
   const origin = wave0Origin();
-  const dir = evidenceScratchDir("foundry-evidence-");
+  const dir = tmp("foundry-evidence-");
   const { state, id } = reviewing();
   assert.equal(state.packets[0].repoId, "ravidsrk/orca-fleet", "the evidence verb is host/Wave 0 only");
   writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
@@ -3873,7 +3864,7 @@ test("the evidence verb writes its run logs under the log root, not beside the o
   // sit in whatever directory the operator was standing in. The recompute offer, which is the whole
   // proof, resolves to nothing.
   const { dir, id, logPaths, runEvidence } = evidenceFixture();
-  const elsewhere = evidenceScratchDir("foundry-evidence-cwd-");
+  const elsewhere = tmp("foundry-evidence-cwd-");
 
   const run = runEvidence(elsewhere);
   assert.equal(run.status, 0, run.seen);

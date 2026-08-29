@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { tmp } from "./tmp-dir.ts";
 import { hostRunner, resolveToolchain, witnessEvidence } from "./witness.ts";
 
 /**
@@ -18,7 +19,7 @@ import { hostRunner, resolveToolchain, witnessEvidence } from "./witness.ts";
 
 /** A directory on PATH holding one executable that shadows a system tool of the same name. */
 function shimDir(name: string): { dir: string; path: string } {
-  const dir = mkdtempSync(join(tmpdir(), "foundry-path-"));
+  const dir = tmp("foundry-path-");
   const path = join(dir, name);
   writeFileSync(path, `#!/bin/sh\necho SHIMMED\n`);
   chmodSync(path, 0o755);
