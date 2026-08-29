@@ -5181,8 +5181,10 @@ test("applyReviewToScorecard finds an off-canonical row, and only that row", () 
  * when the truth is "a repo whose owner name ends with the same characters".
  *
  * Asserted in BOTH directions, because the fix is a widened exclusion and the way to get that wrong
- * is to start refusing legitimate references. The bare `#N` lookbehind is widened too, and the
- * markdown bullet forms below are why that needed checking rather than assuming.
+ * is to start refusing legitimate references. Only the PREFIXED lookbehind changed — the bare `#N`
+ * one is untouched, since the character before `#` there is the last letter of the repo name and
+ * `\w` already blocks this class. The markdown bullet forms below were checked against the widened
+ * bare version before it was reverted, and are kept as the standing guard on the legitimate side.
  */
 test("a foreign owner whose name ends with ours does not bind our issue", () => {
   const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
