@@ -791,11 +791,29 @@ test("every in-repo quotation of the disclosure block is the constant, byte for 
    * #38(b) was about (issue #68). `run-tests.ts:8` states the convention: "Discovered, not listed.
    * A hand-maintained roster is the same silent hole this runner exists to close from the other end."
    *
-   * `DISCLOSURE_TAIL` is the detector, for exactly the reason `neighbor.ts` gives for its existence:
-   * it tells "carries a Foundry disclosure that is no longer the current block" from "carries no
-   * Foundry disclosure at all". Detecting by the full constant would be vacuous — a doc holding a
-   * STALE block does not contain it, so the miss would define itself out of the search.
+   * THE DETECTOR CANNOT BE DERIVED FROM `DISCLOSURE`, and that is the whole difficulty. Matching on
+   * the constant is vacuous — a doc holding a STALE block does not contain it, so the miss defines
+   * itself out of the search. The first attempt used `DISCLOSURE_TAIL`, which review caught: a stale
+   * block whose SECOND or THIRD line drifted is skipped by that too, and the three real quotations
+   * still satisfy the floor, so the suite stays green over it.
+   *
+   * So these are deliberate LITERALS, one per line of the block, and a doc matching ANY of them must
+   * carry the whole current constant. Drift in one line leaves the other two fingerprints matching.
+   * They are asserted against the live constant below, which is what stops them rotting into
+   * something that describes no version at all.
    */
+  const FINGERPRINTS = [
+    "prepared by Foundry",
+    "reviewed the packet, the diff, and the tests",
+    "The factory does not merge",
+  ];
+  for (const print of FINGERPRINTS) {
+    assert.ok(
+      DISCLOSURE.includes(print),
+      `the fingerprint ${JSON.stringify(print)} no longer appears in DISCLOSURE, so it can only find blocks this factory never sent`,
+    );
+  }
+
   const root = fileURLToPath(new URL("..", import.meta.url));
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -806,7 +824,7 @@ test("every in-repo quotation of the disclosure block is the constant, byte for 
   const quoting: string[] = [];
   for (const file of candidates) {
     const doc = readFileSync(file, "utf8");
-    if (!doc.includes(DISCLOSURE_TAIL)) continue;
+    if (!FINGERPRINTS.some((print) => doc.includes(print))) continue;
     quoting.push(file.slice(root.length));
     assert.ok(
       doc.includes(DISCLOSURE),
