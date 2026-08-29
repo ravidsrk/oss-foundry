@@ -72,13 +72,18 @@ const hostRunner: WitnessRunner = (step, args, opts) =>
 /**
  * The sha256 on the evidence page is only proof if the maintainer can recompute it. Write the two
  * run logs at the repo-root-relative paths the witness names, so the digest is checkable on disk.
+ * `root` exists so this is drivable against a scratch tree instead of the operator's checkout.
  */
-function persistWitnessLogs(witness: EvidenceWitness, logs: WitnessLogs): void {
+export function persistWitnessLogs(
+  witness: EvidenceWitness,
+  logs: WitnessLogs,
+  root = ".",
+): void {
   for (const [path, text] of [
     [witness.testLogPath, logs.test],
     [witness.revertLogPath, logs.revert],
   ] as const) {
-    const full = resolve(path);
+    const full = resolve(root, path);
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, text);
   }
@@ -253,7 +258,11 @@ async function tickWithGithub(state: FactoryState) {
 
 const [cmd, ...rest] = ARGV;
 
-if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
+/**
+ * Kept inside `main()` rather than at module scope: this used to `console.log` + `process.exit(0)`
+ * on import, which made the module impossible to import from anywhere — including a test.
+ */
+function usage(): void {
   console.log(`Foundry operator loop
 
   status
@@ -278,10 +287,13 @@ State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry
 Disclosure:
 ${DISCLOSURE}
 `);
-  process.exit(0);
 }
 
 async function main() {
+  if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
+    usage();
+    return;
+  }
   const { state, source } = mustLoad();
 
   if (cmd === "status") {
@@ -471,7 +483,6 @@ async function main() {
       console.error(outcome.error);
       process.exit(1);
     }
-    persistWitnessLogs(outcome.witness, outcome.logs);
     const evidence: EvidenceManifest = {
       baseSha: base,
       headSha: head,
@@ -490,6 +501,9 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
+    // Only now: a refusal above must not leave two orphan logs on disk with no ledger entry
+    // pointing at them, which is exactly what a maintainer would later fail to recompute.
+    persistWitnessLogs(outcome.witness, outcome.logs);
     persist(result.state);
     console.log(`evidence attached ${id}`);
     return;
@@ -517,7 +531,7 @@ async function main() {
       console.error(`cannot read witness manifest ${manifestPath}`);
       process.exit(1);
     }
-    const parsed = parseWitnessManifest(raw);
+    const parsed = parseWitnessManifest(raw, packet.id);
     if (!parsed.ok) {
       console.error(parsed.error);
       process.exit(1);
@@ -844,4 +858,8 @@ async function main() {
   process.exit(1);
 }
 
-await main();
+// Guarded so the module can be imported (by a test, or another verb) without the whole CLI running
+// and calling `process.exit`. Spawning `cli.ts` as the entry point still runs `main()` unchanged.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}

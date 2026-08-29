@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { CAPS } from "./allowlist.ts";
+import { ALLOWLIST, CAPS, repoById } from "./allowlist.ts";
 import {
   applyAdvance,
   applyApprove,
@@ -32,7 +33,7 @@ import {
 import { draftPullPayload } from "./github-pr.ts";
 import { packetDivergences } from "./ledger-check.ts";
 import { isTestPath, witnessEvidence } from "./witness.ts";
-import { DISCLOSURE } from "./neighbor.ts";
+import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { runSandboxDry } from "./sandbox.ts";
@@ -1554,7 +1555,7 @@ test("a shape-valid witness with a green revert cannot pass the engine gate", ()
   assert.match(blocked.error ?? "", /witnessed/);
 });
 
-test("daytona witnesses validate and daytona refusals name the right provider", async () => {
+test("a daytona witness loads, is refused at the gate on today's allowlist, and the executor names the right provider", async () => {
   const seed = seedState();
   const packet = { ...seed.packets[0] };
   packet.evidence = {
@@ -1601,6 +1602,34 @@ test("daytona witnesses validate and daytona refusals name the right provider", 
   );
   assert.equal(e2bNamed.ok, false);
   if (!e2bNamed.ok) assert.match(e2bNamed.error, /E2B execution/);
+
+  // The half the old version of this test never touched: it asserted a daytona witness *loads*,
+  // which says nothing, because loading is shape validation. ADR 0003 permits Daytona at Wave 1+,
+  // but the per-repo choice belongs to `allowlist.yaml`, and every Wave 1–2 entry there reads
+  // `sandbox: e2b` — so on today's allowlist a daytona witness is refused everywhere, and the
+  // refusal must say so without blaming the ADR that permits the provider.
+  const { state: wave1, id } = reviewingWave1();
+  const target = wave1.packets[0];
+  assert.equal(repoById(target.repoId)?.sandbox, "e2b");
+  const refusedAtGate = applyAttachEvidence(
+    wave1,
+    id,
+    manifestWith(boundWitness("daytona", target.repoId, id)),
+    bindingFor(target),
+  );
+  assert.ok(refusedAtGate.error, "a daytona witness must not attach to an e2b-gated repo");
+  assert.match(refusedAtGate.error!, /daytona.*does not match.*sandbox e2b/i);
+  assert.match(refusedAtGate.error!, /allowlist\.yaml/);
+  assert.doesNotMatch(
+    refusedAtGate.error!,
+    /does not match [^—]*\(ADR 0003\)/,
+    "ADR 0003 states no per-repo equality rule — the refusal must not cite it as the source",
+  );
+  assert.equal(refusedAtGate.state.packets[0].evidence, undefined);
+  assert.ok(
+    ALLOWLIST.filter((r) => r.wave >= 1).every((r) => r.sandbox === "e2b"),
+    "docs/06-v2.md says every Wave 1–2 entry reads `sandbox: e2b`; if that changes, so must the doc",
+  );
 });
 
 // --- Witness provenance at the gate, subject binding, and persisted logs (issues #35, #36) ---
@@ -1706,14 +1735,29 @@ test("a witness bound to another repo or another range is refused", () => {
   assert.ok(foreign.error, "a witness produced for another repo must not attach");
   assert.match(foreign.error!, /witness was produced for ravidsrk\/frontguard/);
 
-  const otherRange = applyAttachEvidence(
+  const otherHead = applyAttachEvidence(
     state,
     id,
     manifestWith(boundWitness("host", packet.repoId, id, { headSha: OTHER })),
     bindingFor(packet),
   );
-  assert.ok(otherRange.error, "a witness produced for another commit range must not attach");
-  assert.match(otherRange.error!, /commit range/i);
+  assert.ok(otherHead.error, "a witness produced for another head must not attach");
+  assert.match(otherHead.error!, /commit range/i);
+  assert.match(otherHead.error!, new RegExp(OTHER.slice(0, 7)));
+
+  // #36 says "SHAs", plural, and only the head half of that comparison was exercised: neutering
+  // the baseSha half left the suite green. A witness produced for A..HEAD, re-pointed at a
+  // manifest claiming B..HEAD, is the same forgery with the other end moved.
+  const otherBase = applyAttachEvidence(
+    state,
+    id,
+    manifestWith(boundWitness("host", packet.repoId, id, { baseSha: OTHER })),
+    bindingFor(packet),
+  );
+  assert.ok(otherBase.error, "a witness produced for another base must not attach");
+  assert.match(otherBase.error!, /commit range/i);
+  assert.match(otherBase.error!, new RegExp(`${OTHER.slice(0, 7)}\\.\\.${HEAD.slice(0, 7)}`));
+  assert.equal(otherBase.state.packets[0].evidence, undefined);
 
   const unbound = applyAttachEvidence(
     state,
@@ -1722,6 +1766,9 @@ test("a witness bound to another repo or another range is refused", () => {
     bindingFor(packet),
   );
   assert.ok(unbound.error, "a witness that names no subject must not attach");
+  // ...and it is the subject guard that refused it, not an incidental throw on the way there.
+  assert.match(unbound.error!, /names no subject/i);
+  assert.match(unbound.error!, /repoId, baseSha and headSha/);
 
   const noLogs = applyAttachEvidence(
     state,
@@ -1731,6 +1778,49 @@ test("a witness bound to another repo or another range is refused", () => {
   );
   assert.ok(noLogs.error, "a witness whose logs were never persisted must not attach");
   assert.match(noLogs.error!, /log/i);
+});
+
+test("the gate refuses a witness that points at logs outside its own packet", () => {
+  // Provenance and the SHAs can all bind while the log paths point somewhere else entirely —
+  // and the direct-state-write path of #36 never passes through the parser, so the gate has to
+  // repeat the rule. Before this, `witnessProvenanceViolation` returned nothing for any of these.
+  const { state, id } = reviewing();
+  const packet = state.packets[0];
+  const strays: [string, Record<string, unknown>][] = [
+    ["an absolute path", { testLogPath: "/etc/passwd" }],
+    ["traversal out of the tree", { revertLogPath: "../../../../outside.log" }],
+    ["another packet's log directory", {
+      testLogPath: "docs/evidence/logs/pkt_someone_else_1/test.log",
+      revertLogPath: "docs/evidence/logs/pkt_someone_else_1/revert.log",
+    }],
+  ];
+  for (const [label, paths] of strays) {
+    const stray = applyAttachEvidence(
+      state,
+      id,
+      manifestWith(boundWitness("host", packet.repoId, id, paths)),
+      bindingFor(packet),
+    );
+    assert.ok(stray.error, `${label} must not attach`);
+    assert.match(stray.error!, /log path/i, label);
+    assert.equal(stray.state.packets[0].evidence, undefined, label);
+    // ...and it cannot be promoted around the attach path either.
+    const forged: FactoryState = {
+      ...state,
+      packets: state.packets.map((pk) =>
+        pk.id === id
+          ? {
+              ...pk,
+              evidence: {
+                ...manifestWith(boundWitness("host", packet.repoId, id, paths)),
+                shaVerified: true,
+              },
+            }
+          : pk,
+      ),
+    };
+    assert.equal(evidenceIsReady(forged.packets[0]), false, label);
+  }
 });
 
 test("a provenanced e2b witness carries a Wave-1 packet to draft-ready", () => {
@@ -1833,49 +1923,139 @@ test("the host witness persists both logs and binds them to its subject", async 
   assert.equal(verifyWitnessLogs(outcome.witness, read).ok, true);
 });
 
-test("the worker-host refusal names the verb that ingests the witness", async () => {
-  const refused = await witnessEvidence(
-    {
-      packetId: "pkt_github_awesome-copilot_2684",
-      repoId: "github/awesome-copilot",
-      baseSha: BASE,
-      headSha: HEAD,
-      testCommand: "true",
-      sandbox: "e2b",
-      wave: 1,
-    },
-    (async () => ({ exit: 0, output: "" })) as never,
-    { E2B_API_KEY: "present" },
+test("both worker-host refusals name the ingest verb, in a form the operator can actually type", async () => {
+  // #35 is the defect class "a refusal points at a path the operator cannot take". `foundry` is an
+  // npm script name in a `private: true` package with no `bin`, so a refusal spelling
+  // `foundry attach-witness ...` reintroduces the defect one layer down. Assert the real form.
+  const subject = {
+    packetId: "pkt_github_awesome-copilot_2684",
+    repoId: "github/awesome-copilot",
+    baseSha: BASE,
+    headSha: HEAD,
+    testCommand: "true",
+    sandbox: "e2b" as const,
+    wave: 1 as const,
+  };
+  const noop = (async () => ({ exit: 0, output: "" })) as never;
+  const withKey = await witnessEvidence(subject, noop, { E2B_API_KEY: "present" });
+  // The operator *without* a key hits this one first, and the way forward is the same verb.
+  const withoutKey = await witnessEvidence(subject, noop, {});
+
+  for (const [label, refused] of [["key present", withKey], ["no key", withoutKey]] as const) {
+    assert.equal(refused.ok, false, label);
+    if (refused.ok) continue;
+    assert.match(refused.error, /attach-witness/, label);
+    assert.ok(
+      refused.error.includes(`node --experimental-strip-types factory/cli.ts attach-witness ${subject.packetId} --manifest <path>`),
+      `${label}: ${refused.error}`,
+    );
+    assert.doesNotMatch(refused.error, /`foundry attach-witness/, label);
+  }
+
+  // ...and the invocation the refusals print is one the binary actually answers to.
+  const help = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", join(import.meta.dirname, "cli.ts"), "--help"],
+    { encoding: "utf8" },
   );
-  assert.equal(refused.ok, false);
-  if (!refused.ok) assert.match(refused.error, /attach-witness/);
+  assert.equal(help.status, 0, `${help.stdout}${help.stderr}`);
+  assert.match(help.stdout, /attach-witness <packetId> --manifest <path>/);
+
+  // The reason `foundry` is not one: nothing in this package puts it on a PATH. Asserted against
+  // the manifest rather than the machine, so it holds wherever the suite runs.
+  const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"));
+  assert.equal(pkg.private, true);
+  assert.equal(pkg.bin, undefined, "a `bin` would make `foundry ...` real — then the pointers may use it");
 });
 
 test("an ingested witness manifest is parsed strictly, never trusted by shape alone", async () => {
   const { parseWitnessManifest } = await import("./witness.ts");
+  const PKT = "pkt_github_awesome-copilot_2684";
   const good = JSON.stringify({
-    ...boundWitness("e2b", "github/awesome-copilot", "pkt_github_awesome-copilot_2684"),
+    ...boundWitness("e2b", "github/awesome-copilot", PKT),
     testCommand: "true",
     notes: ["produced on the worker host"],
   });
-  const parsed = parseWitnessManifest(good);
+  const parsed = parseWitnessManifest(good, PKT);
   assert.equal(parsed.ok, true);
   if (parsed.ok) {
     assert.equal(parsed.manifest.witness.provider, "e2b");
     assert.equal(parsed.manifest.testCommand, "true");
     assert.deepEqual(parsed.manifest.notes, ["produced on the worker host"]);
+    assert.equal(parsed.manifest.witness.testLogPath, `docs/evidence/logs/${PKT}/test.log`);
   }
 
-  assert.equal(parseWitnessManifest("{").ok, false);
-  const badSha = JSON.parse(good);
-  badSha.testLogSha = "nope";
-  assert.equal(parseWitnessManifest(JSON.stringify(badSha)).ok, false);
-  const badProvider = JSON.parse(good);
-  badProvider.provider = "laptop";
-  assert.equal(parseWitnessManifest(JSON.stringify(badProvider)).ok, false);
-  const noCommand = JSON.parse(good);
-  delete noCommand.testCommand;
-  assert.equal(parseWitnessManifest(JSON.stringify(noCommand)).ok, false);
+  // Every guard the parser states, not a sample of them: the test's name claims strictness, so
+  // each rule gets a case that dies if the rule is deleted.
+  const mutate = (change: (o: Record<string, unknown>) => void): string => {
+    const o = JSON.parse(good);
+    change(o);
+    return JSON.stringify(o);
+  };
+  const refusals: [string, string, RegExp][] = [
+    ["not JSON at all", "{", /not JSON/i],
+    ["a JSON array", "[]", /must be a JSON object/i],
+    ["a JSON scalar", '"witnessed, honest"', /must be a JSON object/i],
+    ["an unknown provider", mutate((o) => { o.provider = "laptop"; }), /provider must be one of/i],
+    ["a non-numeric testExit", mutate((o) => { o.testExit = "0"; }), /exit codes as numbers/i],
+    ["a missing revertExit", mutate((o) => { delete o.revertExit; }), /exit codes as numbers/i],
+    ["a malformed testLogSha", mutate((o) => { o.testLogSha = "nope"; }), /testLogSha must be a sha256/i],
+    ["a truncated revertLogSha", mutate((o) => { o.revertLogSha = "ab"; }), /revertLogSha must be a sha256/i],
+    ["no ranAt", mutate((o) => { delete o.ranAt; }), /must record ranAt/i],
+    ["a blank repoId", mutate((o) => { o.repoId = "   "; }), /must name the repoId/i],
+    ["a short baseSha", mutate((o) => { o.baseSha = "abc123"; }), /baseSha must be a full 40-hex/i],
+    ["a ref instead of a headSha", mutate((o) => { o.headSha = "HEAD"; }), /headSha must be a full 40-hex/i],
+    ["no revertLogPath", mutate((o) => { delete o.revertLogPath; }), /must reference the persisted run logs/i],
+    ["no testCommand", mutate((o) => { delete o.testCommand; }), /must record the testCommand/i],
+  ];
+  for (const [label, raw, message] of refusals) {
+    const result = parseWitnessManifest(raw, PKT);
+    assert.equal(result.ok, false, `a manifest with ${label} must be refused`);
+    if (!result.ok) assert.match(result.error, message, label);
+  }
+
+  // `notes` is the one tolerant field by design — a non-array, or an array of non-strings, is
+  // dropped rather than refused, and the manifest still parses.
+  for (const junk of [{ notes: "a string" }, { notes: [1, 2] }, { notes: undefined }]) {
+    const loose = parseWitnessManifest(mutate((o) => Object.assign(o, junk)), PKT);
+    assert.equal(loose.ok, true, `notes=${JSON.stringify(junk.notes)} must not refuse the manifest`);
+    if (loose.ok) assert.deepEqual(loose.manifest.notes, []);
+  }
+});
+
+test("a manifest may name only this packet's own log paths, and the parser settles that before the read", async () => {
+  // The manifest is operator-supplied file content, and `attach-witness` reads whatever these
+  // paths name straight off disk. Before this, `parseWitnessManifest` accepted
+  // `../../../../etc/passwd` — the rule docs/10-schemas.md already stated was never enforced.
+  const { parseWitnessManifest, witnessLogPathViolation } = await import("./witness.ts");
+  const PKT = "pkt_github_awesome-copilot_2684";
+  const raw = (paths: Record<string, unknown>) =>
+    JSON.stringify({
+      ...boundWitness("e2b", "github/awesome-copilot", PKT),
+      testCommand: "true",
+      ...paths,
+    });
+
+  const strays: [string, Record<string, unknown>][] = [
+    ["traversal out of the tree", { testLogPath: "../../../../etc/passwd" }],
+    ["an absolute path", { testLogPath: "/etc/passwd" }],
+    ["a revert log outside the tree", { revertLogPath: "../../../../outside.log" }],
+    ["another packet's directory", {
+      testLogPath: "docs/evidence/logs/pkt_someone_else_1/test.log",
+      revertLogPath: "docs/evidence/logs/pkt_someone_else_1/revert.log",
+    }],
+    ["the right directory, the wrong filename", { testLogPath: `docs/evidence/logs/${PKT}/passwd` }],
+  ];
+  for (const [label, paths] of strays) {
+    const result = parseWitnessManifest(raw(paths), PKT);
+    assert.equal(result.ok, false, `${label} must be refused before anything is read`);
+    if (!result.ok) assert.match(result.error, /log path/i, label);
+  }
+
+  assert.equal(parseWitnessManifest(raw({}), PKT).ok, true, "the canonical paths must still parse");
+  // And a real run always satisfies the rule, so the check costs the honest path nothing.
+  const { witnessLogPaths } = await import("./witness.ts");
+  assert.equal(witnessLogPathViolation(PKT, witnessLogPaths(PKT)), undefined);
 });
 
 test("the evidence page tells the maintainer where the hashed logs are", () => {
@@ -1891,6 +2071,12 @@ test("the evidence page tells the maintainer where the hashed logs are", () => {
   const page = renderEvidencePage(attached.state.packets[0]);
   assert.match(page, new RegExp(`docs/evidence/logs/${id}/test\\.log`));
   assert.match(page, new RegExp(`docs/evidence/logs/${id}/revert\\.log`));
+  // A bare relative path resolves to nothing in an upstream maintainer's own tree, and the page is
+  // written for them (ADR 0005). The recompute offer has to name the repo the logs are committed in.
+  assert.match(page, /Recompute it yourself/);
+  assert.ok(page.includes(FOUNDRY_REPO_URL), page);
+  assert.match(page, /not yours/);
+  assert.match(page, new RegExp(`shasum -a 256 docs/evidence/logs/${id}/test\\.log`));
 });
 
 test("a witness forged straight into the ledger is refused at the promotion gate", () => {
@@ -1917,4 +2103,182 @@ test("a witness forged straight into the ledger is refused at the promotion gate
   assert.ok(advanced.error, "a forged host witness must not promote a Wave-1 packet");
   assert.match(advanced.error!, /host witnessing is Wave 0 only \(ADR 0003\)/);
   assert.equal(advanced.state.packets[0].status, "reviewing");
+});
+
+// --- The ingest verb, driven as the real binary (issues #35, #36) ---
+//
+// Every assertion above this line is at the reducer/parser level, and the whole `attach-witness`
+// handler could be deleted from cli.ts with the suite staying green — including the test that
+// asserts the refusal *names* the verb, which passed against a verb that need not exist. That is
+// #35's own defect blessed by a green test. These drive `node cli.ts attach-witness` for real.
+
+/** The one network call on the ingest path, stubbed in the child so the test needs no GitHub. */
+function writeCompareStub(dir: string, issueNumber: number): string {
+  const stub = join(dir, "stub-github.mjs");
+  const canned = {
+    status: "ahead",
+    ahead_by: 1,
+    behind_by: 0,
+    files: [{ additions: 1, deletions: 0 }],
+    commits: [{ commit: { message: `docs: close the reference gaps\n\nFixes #${issueNumber}` } }],
+  };
+  writeFileSync(
+    stub,
+    `const canned = ${JSON.stringify(canned)};\n` +
+      `globalThis.fetch = async (url) => {\n` +
+      `  const u = String(url);\n` +
+      `  if (u.includes("/compare/")) {\n` +
+      `    return new Response(JSON.stringify(canned), { status: 200, headers: { "content-type": "application/json" } });\n` +
+      `  }\n` +
+      `  throw new Error("unstubbed fetch: " + u);\n` +
+      `};\n`,
+  );
+  return stub;
+}
+
+function runCli(dir: string, args: string[], stub?: string) {
+  const nodeArgs = ["--experimental-strip-types"];
+  if (stub) nodeArgs.push("--import", pathToFileURL(stub).href);
+  nodeArgs.push(join(import.meta.dirname, "cli.ts"), ...args);
+  const run = spawnSync(process.execPath, nodeArgs, { cwd: dir, encoding: "utf8" });
+  return { ...run, seen: `${run.stdout}${run.stderr}` };
+}
+
+/**
+ * A temp tree the CLI can be pointed at: the ledger with a Wave-1 packet in `reviewing`, the two
+ * run logs where the schema says they live, and a manifest naming them.
+ */
+function ingestFixture(overrides: Record<string, unknown> = {}, logOverrides: Partial<{ test: string; revert: string }> = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "foundry-ingest-"));
+  const { state, id } = reviewingWave1();
+  const packet = state.packets[0];
+  writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+
+  const testLog = logOverrides.test ?? "42 passing\n";
+  const revertLog = logOverrides.revert ?? "3 failing\n";
+  const logDir = join(dir, "docs", "evidence", "logs", id);
+  mkdirSync(logDir, { recursive: true });
+  writeFileSync(join(logDir, "test.log"), testLog);
+  writeFileSync(join(logDir, "revert.log"), revertLog);
+
+  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+  const manifest = {
+    ...boundWitness("e2b", packet.repoId, id),
+    testLogSha: sha("42 passing\n"),
+    revertLogSha: sha("3 failing\n"),
+    testCommand: repoById(packet.repoId)!.testCommand,
+    notes: ["produced on the worker host"],
+    ...overrides,
+  };
+  const manifestPath = join(dir, "witness.json");
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  return { dir, id, packet, manifestPath, stub: writeCompareStub(dir, packet.issueNumber) };
+}
+
+function ledgerAt(dir: string): FactoryState {
+  const loaded = loadFactoryState(join(dir, ".foundry-state.json"));
+  assert.equal(loaded.ok, true);
+  return loaded.state;
+}
+
+test("the attach-witness verb exists and carries a legitimate manifest into the ledger", () => {
+  const { dir, id, manifestPath, stub } = ingestFixture();
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined, "nothing attached before the run");
+
+  const run = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
+  assert.equal(run.status, 0, run.seen);
+  assert.match(run.stdout, new RegExp(`witness ingested ${id} \\(e2b\\)`));
+  // The hashes were recomputed from the logs on disk, and it says so before touching the network.
+  assert.match(run.seen, /log hashes recomputed from disk/);
+
+  const after = ledgerAt(dir).packets[0];
+  assert.equal(after.evidence?.witness?.provider, "e2b");
+  assert.equal(after.evidence?.witness?.baseSha, BASE);
+  assert.equal(after.evidence?.witness?.headSha, HEAD);
+  assert.equal(after.evidence?.shaVerified, true);
+  assert.ok(after.evidence?.notes.some((n) => n.includes("produced on the worker host")));
+  assert.equal(evidenceIsReady(after), true, "an ingested witness must reach the promotion gate");
+
+  // ...and the packet really does promote through the verb the doctrine points the operator at.
+  const advanced = runCli(dir, ["advance", id]);
+  assert.equal(advanced.status, 0, advanced.seen);
+  assert.equal(ledgerAt(dir).packets[0].status, "draft-ready");
+});
+
+test("attach-witness refuses a manifest whose testCommand is not the repo's oracle", () => {
+  const { dir, id, manifestPath, stub } = ingestFixture({ testCommand: "echo green" });
+  const run = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
+  assert.equal(run.status, 1, run.seen);
+  assert.match(run.seen, /witness ran `echo green`/);
+  assert.match(run.seen, /oracle is `true`/);
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined, "a refusal must not write the ledger");
+});
+
+test("attach-witness refuses when a run log on disk is not what was witnessed", () => {
+  // The digest is the whole offer the evidence page makes to a maintainer. A log edited after the
+  // run — or a hash covering a log nobody has — must not reach the ledger.
+  const { dir, id, manifestPath, stub } = ingestFixture({}, { revert: "3 failing (edited)\n" });
+  const tampered = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
+  assert.equal(tampered.status, 1, tampered.seen);
+  assert.match(tampered.seen, /revert log .* does not match the witness sha256/);
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
+
+  const gone = ingestFixture();
+  rmSync(join(gone.dir, "docs", "evidence", "logs", gone.id, "test.log"));
+  const missing = runCli(gone.dir, ["attach-witness", gone.id, "--manifest", gone.manifestPath], gone.stub);
+  assert.equal(missing.status, 1, missing.seen);
+  assert.match(missing.seen, /missing or unreadable/);
+  assert.equal(ledgerAt(gone.dir).packets[0].evidence, undefined);
+});
+
+test("attach-witness refuses a manifest that names logs outside its own packet", () => {
+  // Driven end to end because this is the one input that decides which file the CLI opens.
+  const { dir, id, manifestPath, stub } = ingestFixture({ testLogPath: "../../../../etc/passwd" });
+  const run = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
+  assert.equal(run.status, 1, run.seen);
+  assert.match(run.seen, /log path/i);
+  assert.doesNotMatch(run.seen, /root:/, "nothing outside the tree may be read, let alone hashed");
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
+});
+
+test("witnessed run logs are written where the schema says, and land verifiable", async () => {
+  // #36's "logs persisted" bullet. The CLI's writer was reachable from no test at all: deleting
+  // the call left the suite green, and a digest whose logs were never written is not evidence.
+  const { persistWitnessLogs } = await import("./cli.ts");
+  const { verifyWitnessLogs, witnessLogPaths } = await import("./witness.ts");
+  const root = mkdtempSync(join(tmpdir(), "foundry-persist-"));
+  const { runner } = fakeRunner({
+    "run-tests@head": { exit: 0, output: "42 passing" },
+    "run-tests@revert": { exit: 1, output: "3 failing" },
+  });
+  const outcome = await witnessEvidence(
+    {
+      packetId: "pkt_ravidsrk_orca-fleet_71",
+      repoId: "ravidsrk/orca-fleet",
+      baseSha: BASE,
+      headSha: HEAD,
+      testCommand: "python3 scripts/validate.py",
+      sandbox: "host",
+      wave: 0,
+    },
+    runner,
+    {},
+  );
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+
+  persistWitnessLogs(outcome.witness, outcome.logs, root);
+  const want = witnessLogPaths("pkt_ravidsrk_orca-fleet_71");
+  assert.equal(outcome.witness.testLogPath, want.testLogPath);
+  assert.equal(readFileSync(join(root, want.testLogPath), "utf8"), "42 passing");
+  assert.equal(readFileSync(join(root, want.revertLogPath), "utf8"), "3 failing");
+  // The bytes on disk are what the declared sha256 covers — the maintainer's recompute succeeds.
+  const read = (p: string) => {
+    try {
+      return readFileSync(join(root, p), "utf8");
+    } catch {
+      return undefined;
+    }
+  };
+  assert.equal(verifyWitnessLogs(outcome.witness, read).ok, true);
 });

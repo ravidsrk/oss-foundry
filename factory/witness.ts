@@ -35,6 +35,14 @@ export interface IngestedWitness {
 /** Where a packet's run logs live, relative to the repo root. Committed beside the evidence page. */
 export const WITNESS_LOG_ROOT = "docs/evidence/logs";
 
+/**
+ * How an operator actually runs the ingest verb. `package.json` is `private: true` with no `bin`,
+ * so `foundry` is an npm script name, not a command on anyone's PATH — every pointer in this repo
+ * spells the real invocation (docs/05-v1.md, docs/08-operations.md, factory/README.md). A refusal
+ * that names a command the operator cannot type is the defect issue #35 was filed against.
+ */
+export const INGEST_INVOCATION = "node --experimental-strip-types factory/cli.ts attach-witness";
+
 export function witnessLogPaths(packetId: string): {
   testLogPath: string;
   revertLogPath: string;
@@ -43,6 +51,33 @@ export function witnessLogPaths(packetId: string): {
     testLogPath: `${WITNESS_LOG_ROOT}/${packetId}/test.log`,
     revertLogPath: `${WITNESS_LOG_ROOT}/${packetId}/revert.log`,
   };
+}
+
+/**
+ * The one rule docs/10-schemas.md states about log paths, enforced instead of assumed: the two run
+ * logs live at `docs/evidence/logs/<packetId>/{test,revert}.log` and nowhere else.
+ *
+ * This matters twice. A manifest is operator-supplied file content that `attach-witness` then reads
+ * off disk, so `../../../../etc/passwd` or an absolute path must be refused *before* the read, not
+ * after. And a path that is well-formed but names another packet's directory would let a witness
+ * whose `repoId`/`baseSha`/`headSha` all bind correctly still hash somebody else's run. Requiring
+ * exact equality with `witnessLogPaths(packetId)` closes both, and costs a real run nothing —
+ * `witnessEvidence` emits precisely these paths.
+ */
+export function witnessLogPathViolation(
+  packetId: string,
+  witness: { testLogPath?: string; revertLogPath?: string },
+): string | undefined {
+  const want = witnessLogPaths(packetId);
+  for (const [label, actual, expected] of [
+    ["test", witness.testLogPath, want.testLogPath],
+    ["revert", witness.revertLogPath, want.revertLogPath],
+  ] as const) {
+    if (actual !== expected) {
+      return `witness ${label} log path ${actual ? `\`${actual}\`` : "(absent)"} is not \`${expected}\` — run logs are repo-root-relative and live under ${WITNESS_LOG_ROOT}/<packetId>/ (docs/10-schemas.md); a witness may name only its own packet's logs`;
+    }
+  }
+  return undefined;
 }
 
 const TEST_PATH_RE = /(^|\/)(tests?|__tests__|spec)(\/|$)|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+$|_test\.(go|py)$|_spec\.rb$/i;
@@ -81,17 +116,19 @@ export async function witnessEvidence(
     return { ok: false, error: "host witnessing is Wave 0 only (ADR 0003) — untrusted clones never run on the operator machine" };
   }
   if (input.sandbox !== "host") {
+    // Both refusals name the ingest verb: an operator without a key is the *first* one to need it,
+    // since the way forward is a witness produced elsewhere, not a key on this machine.
     if (!env.E2B_API_KEY) {
       return {
         ok: false,
         error:
-          "cannot witness evidence in dry-run — wire E2B_API_KEY on the worker host (docs/06-v2.md). The factory refuses rather than degrading to operator-claimed results.",
+          `cannot witness evidence in dry-run — wire E2B_API_KEY on the worker host (docs/06-v2.md), or ingest a witness produced there with \`${INGEST_INVOCATION} ${input.packetId} --manifest <path>\`. The factory refuses rather than degrading to operator-claimed results.`,
       };
     }
     return {
       ok: false,
       error:
-        `${input.sandbox === "daytona" ? "Daytona" : "E2B"} execution runs on the worker host, not in this repo's CLI (ADR 0003) — run the witness there, then ingest it here with \`foundry attach-witness ${input.packetId} --manifest <path>\`. This CLI refuses rather than faking a green harvest.`,
+        `${input.sandbox === "daytona" ? "Daytona" : "E2B"} execution runs on the worker host, not in this repo's CLI (ADR 0003) — run the witness there, then ingest it here with \`${INGEST_INVOCATION} ${input.packetId} --manifest <path>\`. This CLI refuses rather than faking a green harvest.`,
     };
   }
 
@@ -216,12 +253,15 @@ function nonEmptyString(value: unknown): value is string {
 }
 
 /**
- * Parse an externally produced witness manifest. Shape validation cannot detect a lie — provenance
- * is settled by the engine gate and the log hashes by `verifyWitnessLogs`. This only refuses input
- * that could not have come from a run at all, so a malformed file never reaches the state machine.
+ * Parse an externally produced witness manifest for `packetId`. Shape validation cannot detect a
+ * lie — provenance is settled by the engine gate and the log hashes by `verifyWitnessLogs`. This
+ * refuses input that could not have come from a run at all, so a malformed file never reaches the
+ * state machine, and it settles the two log paths against `packetId` because the caller reads
+ * whatever they name off disk immediately afterwards.
  */
 export function parseWitnessManifest(
   raw: string,
+  packetId: string,
 ): { ok: true; manifest: IngestedWitness } | { ok: false; error: string } {
   let parsed: unknown;
   try {
@@ -267,6 +307,11 @@ export function parseWitnessManifest(
       error: "witness manifest must reference the persisted run logs (testLogPath, revertLogPath)",
     };
   }
+  const strayLogs = witnessLogPathViolation(packetId, {
+    testLogPath: o.testLogPath,
+    revertLogPath: o.revertLogPath,
+  });
+  if (strayLogs) return { ok: false, error: strayLogs };
   if (!nonEmptyString(o.testCommand)) {
     return { ok: false, error: "witness manifest must record the testCommand that was run" };
   }

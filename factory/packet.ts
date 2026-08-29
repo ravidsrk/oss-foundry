@@ -1,6 +1,6 @@
 import { repoById } from "./allowlist.ts";
 import { evidenceIsStale, needsRewitness, witnessedSha } from "./ledger-check.ts";
-import { ABORT_DEFAULT, commitTrailerLine, DISCLOSURE, NON_GOALS_DEFAULT } from "./neighbor.ts";
+import { ABORT_DEFAULT, commitTrailerLine, DISCLOSURE, FOUNDRY_REPO_URL, NON_GOALS_DEFAULT } from "./neighbor.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { scoreIssue } from "./scout.ts";
 import type { PacketClass, TaskPacket } from "./types.ts";
@@ -152,7 +152,9 @@ export function renderEvidencePage(packet: TaskPacket): string {
             : `- Negative control: ${ev.negativeControl} (recorded before machine witnessing shipped — attested, not witnessed)`,
           ...(w?.testLogPath && w?.revertLogPath
             ? [
-                `- Recompute it yourself: \`shasum -a 256 ${w.testLogPath} ${w.revertLogPath}\` — the logs those hashes cover, kept beside this page.`,
+                // Paths alone resolve to nothing in the maintainer's own tree — name the repository
+                // they are in, or the "recompute it yourself" offer is not one they can take.
+                `- Recompute it yourself: both logs are committed in ${FOUNDRY_REPO_URL} (Foundry's repo, not yours) at \`${w.testLogPath}\` and \`${w.revertLogPath}\`. From a clone of it: \`shasum -a 256 ${w.testLogPath} ${w.revertLogPath}\`.`,
               ]
             : []),
         ].join("\n") + stale

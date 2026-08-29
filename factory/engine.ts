@@ -18,6 +18,7 @@ import {
   type ScorecardRow,
   type TaskPacket,
 } from "./types.ts";
+import { witnessLogPathViolation } from "./witness.ts";
 
 export function hasInflight(packets: TaskPacket[]): boolean {
   return inflightCount(packets) >= CAPS.in_flight;
@@ -360,7 +361,9 @@ export function witnessProvenanceViolation(
     return `host witnessing is Wave 0 only (ADR 0003) — untrusted clones never run on the operator machine; ${repo.id} is Wave ${repo.wave} on ${repo.sandbox}, so its witness must come from that sandbox`;
   }
   if (w.provider !== "host" && w.provider !== repo.sandbox) {
-    return `witness provider ${w.provider} does not match ${repo.id}'s sandbox ${repo.sandbox} (ADR 0003) — a witness is evidence only from the environment the repo is gated to`;
+    // ADR 0003 permits either provider for Wave 1+ ("must use E2B (or Daytona)") and states no
+    // per-repo equality rule; the rule is the allowlist's, where each entry's `sandbox:` picks one.
+    return `witness provider ${w.provider} does not match ${repo.id}'s declared sandbox ${repo.sandbox} (allowlist.yaml) — ADR 0003 allows either provider at Wave 1+, but a repo is gated to the one its entry names, and a witness is evidence only from that environment`;
   }
 
   if (!w.repoId || !w.baseSha || !w.headSha) {
@@ -379,7 +382,9 @@ export function witnessProvenanceViolation(
   if (!w.testLogPath || !w.revertLogPath) {
     return "witness does not reference its persisted run logs — without testLogPath and revertLogPath the sha256 on the evidence page hashes something nobody can produce";
   }
-  return undefined;
+  // Subject binding is not complete while the log paths are free: a witness whose repo and range
+  // bind correctly could still point at another packet's log directory, or outside the repo.
+  return witnessLogPathViolation(packet.id, w);
 }
 
 /** The promotion gate. Takes the packet, not a bare manifest: provenance is unanswerable without the subject. */
