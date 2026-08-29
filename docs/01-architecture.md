@@ -27,7 +27,7 @@ TypeScript in `factory/`. Deterministic. No LLM required to refuse a banned repo
 - `engine.ts` — tick / queue / approve / advance. Honors inflight, halt, promotion, deny.
 - `packet.ts` — the unit of work. Objective, non-goals, acceptance, abort.
 - `sandbox.ts` — dry-run plan; never auto-harvests as green.
-- `scorecard.ts` — merge rate, tone, reverts. `health()` can halt a repo; the engine consults it.
+- `scorecard.ts` — merge rate, tone, reverts, the two review KPIs. `health()` can halt a repo; the engine consults it. `classifyRevert` decides what counts as a revert; `applyRevert` (engine) is the only writer of `reverts`.
 - `cli.ts` — operator freeze / tick / draft-body loop.
 
 There is no TanStack console in this repository. The clock **must not** open contribution PRs.

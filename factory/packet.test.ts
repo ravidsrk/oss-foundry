@@ -60,6 +60,8 @@ test("the evidence page and the divergence list agree about a terminal packet", 
       draft: false,
       headSha: head,
       body: `${DISCLOSURE}\n`,
+      // A merged packet is only "entirely clean" once the revert re-check has run (issue #39).
+      revert: { reverted: false, why: "no revert on the base branch since the merge" },
     }),
     [],
   );

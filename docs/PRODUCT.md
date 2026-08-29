@@ -151,7 +151,10 @@ Silence alone never halts — three still-open unreviewed drafts are `watch`, no
 
 Watch when tone is `cold`, or opened ≥ 2 and merge rate < 60% (watch carries no silence guard by design — it is soft caution).
 
-A `stop` repo is unselectable until a human edits `allowlist.yaml`.
+A `stop` repo is unselectable until a human edits the **scorecard row** that holds the stop — in live
+state, and in `factory/seed.ts` for the published one. Not `allowlist.yaml`: scorecard rows are built
+from the roster (`emptyScorecard()`), so removing a repo there deletes the row and erases whatever
+`reverts`/tone it was recording (corrected 2026-08-29, issue #39).
 
 PR volume is a vanity metric. Not shown as a success KPI.
 
@@ -266,11 +269,20 @@ The evidence is unchanged and still describes `48c2242`. Nobody re-ran the test 
 | bans | 0 | | | |
 | reverts | 0 | | | |
 
+Review KPIs, derived from the live PRs on 2026-08-29 and no longer typed by hand (issue #39):
+`ravidsrk/orca-fleet` — `reviewCommentsAvg` **1** over **1** reviewed PR (#70 carries two review
+comments; `greptile-apps[bot]` left the first at 2026-08-26T19:19:03Z and the human the second at
+19:25:30Z, so one of the two counts), `noReview` **1** (#72 drew no human review at all).
+`ravidsrk/frontguard` — `noReview` **1** (#196 merged silently). `reverts` **0**, and for the first
+time that is a measurement rather than a field nothing could write.
+
 Merge-rate halt is **not** tripped (`opened ≥ 3` required).
 
 **Corrections 2026-08-28 (issue #3):** six allowlist facts fixed after live verification — pydantic and stablyai/orca deny reasons rewritten (both were mischaracterized as AI-restrictions), OpenHands org rename, background-agents `welcome` → `unknown` (no written policy), E2B surface re-scoped toward e2b-cookbook, awesome-copilot language. Details in [12-ledger.md](12-ledger.md).
 
 **Corrections 2026-08-29 (issue #38):** three surfaces asserted that #1652's live body carries the *current* verbatim disclosure — this §8 paragraph, `docs/06-v2.md` Live packets, and `docs/12-ledger.md` Next. It carries the block **as recorded at open**; ADR 0004's qualifier landed later and an open PR's body does not follow a constant. All three re-worded, the drift made visible to the clock (advisory, doctrine), the grandfathering policy written next to `DISCLOSURE`, and `attach-draft` given the disclosure refusal `open-draft` already had. The upstream body itself is **untouched** — editing a PR on a repository this project does not own needs an explicit operator go, and it has not been given.
+
+**Corrections 2026-08-29 (issue #39):** three of the four 90-day KPIs were uncomputable. `noReview` had no writer, `reviewCommentsAvg` was never derived, and `reverts` had no producer at all — `applyPacketToScorecard`'s `"reverted"` branch had zero callers while `health()` treated `reverts > 0` as an unconditional stop and SPEC.md §7 made halting on a revert a MUST. All three now move under test. The hand-typed `reviewCommentsAvg: 0.5` on `ravidsrk/orca-fleet` was `1/2` — the seed's own `prMeta.reviewComments` over the two merged PRs — and wrong twice over structurally: the denominator was the merge-rate one rather than "PRs with ≥ 1 human review comment", and the numerator was GitHub's bot-inclusive `review_comments` scalar, which names no author and so cannot be the documented human-only count whatever number is typed into it. The live re-read (2026-08-29) makes it **1** over one reviewed PR, and puts a `noReview` on both orca-fleet and frontguard that the ledger had been reporting as zero. `reverts` gets two producers, one per half of its definition: the 6-hour clock and `reconcile` find an explicit `git revert` of our merge commit unattended, and `revert <packetId> --reason` records the maintainer-stated rollback no classifier should pretend to read. The commit read behind that check now follows GitHub's pagination cursor and reports a short read as an advisory — measured live, the single-page read it replaced was blind to the 31 hours after #70's merge, the window a revert is most likely to land in. And the remedies the operator surfaces named were corrected: `reconcile`/`revert` write gitignored local state, so clearing the clock's revert FATAL takes a promotion into `factory/seed.ts`, and the "edit `allowlist.yaml`" advice would have deleted the scorecard row holding the count. Details in [12-ledger.md](12-ledger.md).
 
 **Corrections 2026-08-29 (issue #49):** the ledger said #1652 was a draft at `48c2242`; it is ready for review at `6b6ff04`, and had been since 2026-08-28T18:09:24Z. Seed synced to live, seven doc surfaces corrected and date-qualified, the draft-only deviation disclosed above rather than healed. Evidence deliberately left at `48c2242` — nobody re-ran it at the new head. Details in [12-ledger.md](12-ledger.md).
 

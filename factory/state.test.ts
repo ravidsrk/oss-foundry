@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { buildPacket } from "./packet.ts";
-import { emptyScorecard, health, mergeRate } from "./scorecard.ts";
+import { applyReviewToScorecard, emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 
@@ -316,4 +316,87 @@ test("policy documents survive save and load unchanged", () => {
   assert.equal(loaded.ok, true, "a freshly built packet must load back");
   if (!loaded.ok) return;
   assert.deepEqual(loaded.state.packets.find((p) => p.id === built.id)?.policyDocs, built.policyDocs);
+});
+
+test("a ledger written before the review counters existed migrates to 0, never to NaN", () => {
+  // The two fields `reviewCommentsAvg` is derived from arrived after v6 shipped (issue #39). An
+  // older ledger has neither, and `undefined + 1` is NaN — a KPI that is silently not a number is
+  // worse than one that is stuck at zero, because nothing downstream refuses it.
+  const seed = seedState();
+  const scorecard = seed.scorecard.map((r) => {
+    const row = { ...r } as Record<string, unknown>;
+    delete row.humanReviewComments;
+    delete row.humanReviewedPrs;
+    return row;
+  });
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "pre-39.json");
+  writeFileSync(path, JSON.stringify({ ...seed, scorecard }));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true, loaded.ok ? "" : loaded.error);
+  if (!loaded.ok) return;
+  for (const row of loaded.state.scorecard) {
+    assert.equal(row.humanReviewComments, 0);
+    assert.equal(row.humanReviewedPrs, 0);
+  }
+  const rows = applyReviewToScorecard(loaded.state.scorecard, loaded.state.scorecard[0]!.repoId, {
+    reviews: 1,
+    comments: 2,
+  });
+  assert.equal(rows[0]!.reviewCommentsAvg, 2, "a migrated row must still be able to hold a mean");
+});
+
+test("a scorecard row whose review counters are the wrong type is refused, not coerced", () => {
+  // Every counter this unit added, one at a time. Corrupting only one of them left the other guards
+  // deletable — and a string that survives the load is a string that reaches `+= 1` and turns a KPI
+  // into "10" on the first fold. `reverts` is here too: it is what SPEC.md §7's halt reads.
+  for (const field of ["humanReviewedPrs", "humanReviewComments", "reviewCommentsAvg", "noReview", "reverts"]) {
+    const seed = seedState();
+    const scorecard = seed.scorecard.map((r, i) => (i === 0 ? ({ ...r, [field]: "2" } as unknown) : r));
+    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), `bad-${field}.json`);
+    writeFileSync(path, JSON.stringify({ ...seed, scorecard }));
+    assert.equal(
+      loadFactoryState(path).ok,
+      false,
+      `a hand-edited ${field} must make the ledger refuse to load`,
+    );
+  }
+  // The control: the same seed, untouched, still loads — so the refusals above are about the edit.
+  const clean = join(mkdtempSync(join(tmpdir(), "foundry-")), "clean.json");
+  writeFileSync(clean, JSON.stringify(seedState()));
+  assert.equal(loadFactoryState(clean).ok, true);
+});
+
+test("the review split and merge facts a sync records survive a round trip", () => {
+  const seed = seedState();
+  const packets = seed.packets.map((p) =>
+    p.prMeta
+      ? {
+          ...p,
+          prMeta: {
+            ...p.prMeta,
+            humanReview: { reviews: 1, comments: 1 },
+            mergeCommitSha: "36d0f23708adbdf911e4df050ed516821278a9fc",
+            mergedAt: "2026-08-27T07:04:52Z",
+            baseRef: "main",
+          },
+        }
+      : p,
+  );
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "prmeta.json");
+  saveFactoryState(path, { ...seed, packets });
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true, loaded.ok ? "" : loaded.error);
+  if (!loaded.ok) return;
+  const withMeta = loaded.state.packets.find((p) => p.prMeta)!;
+  assert.deepEqual(withMeta.prMeta!.humanReview, { reviews: 1, comments: 1 });
+  assert.equal(withMeta.prMeta!.mergeCommitSha, "36d0f23708adbdf911e4df050ed516821278a9fc");
+  assert.equal(withMeta.prMeta!.baseRef, "main");
+
+  // A malformed split is refused rather than read as zero reviews.
+  const broken = loaded.state.packets.map((p) =>
+    p.prMeta ? { ...p, prMeta: { ...p.prMeta, humanReview: { reviews: "1", comments: 1 } } } : p,
+  );
+  const badPath = join(mkdtempSync(join(tmpdir(), "foundry-")), "bad-prmeta.json");
+  writeFileSync(badPath, JSON.stringify({ ...loaded.state, packets: broken }));
+  assert.equal(loadFactoryState(badPath).ok, false);
 });

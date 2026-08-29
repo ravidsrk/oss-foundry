@@ -162,7 +162,17 @@ interface LivePr {
    * is a stub that cannot tell a compliant PR from an undisclosed one.
    */
   body: string;
+  /** The merge facts a revert re-check needs (issue #39); defaulted from the committed prMeta. */
+  mergeCommitSha?: string;
+  mergedAt?: string;
+  baseRef?: string;
+  /** What `GET /pulls/{n}/reviews` and `/comments` answer. Bots included — filtering is the code's job. */
+  reviews?: { login: string; type?: string }[];
+  reviewComments?: { login: string; type?: string }[];
 }
+
+/** What `GET /repos/{owner}/{repo}/commits?since=…` answers, keyed by repo id. */
+type CommitFacts = Record<string, { sha: string; message: string; committedAt: string }[]>;
 
 /**
  * GitHub's half of a reconciliation, as a table keyed by the packet's own `prUrl`.
@@ -176,11 +186,21 @@ function livePrs(overrides: Record<string, Partial<LivePr>> = {}): Record<string
   const table: Record<string, LivePr> = {};
   for (const packet of seedState().packets) {
     if (!packet.prUrl || !packet.prMeta) continue;
-    const { draft, state, merged, headSha, updatedAt } = packet.prMeta;
+    const { draft, state, merged, headSha, updatedAt, mergeCommitSha, mergedAt, baseRef } = packet.prMeta;
     // The body Foundry prepared, which is what "GitHub says exactly what the ledger says" means
     // for the disclosure MUST. The live #1652 body does NOT say this — the drift is the subject of
     // its own test below, stated there as the one fact that test changes.
-    table[packet.prUrl] = { draft, state, merged, headSha, updatedAt, body: packet.prBody ?? "" };
+    table[packet.prUrl] = {
+      draft,
+      state,
+      merged,
+      headSha,
+      updatedAt,
+      body: packet.prBody ?? "",
+      mergeCommitSha,
+      mergedAt,
+      baseRef,
+    };
   }
   for (const [url, over] of Object.entries(overrides)) {
     const base = table[url];
@@ -199,23 +219,55 @@ function livePrs(overrides: Record<string, Partial<LivePr>> = {}): Record<string
  * competing-work check before it binds anything: without them the verb refuses on a 404 and every
  * assertion about the binding rules would be passing over a network error instead.
  */
-function prFactsStub(table: Record<string, LivePr>): string {
+function prFactsStub(
+  table: Record<string, LivePr>,
+  commits: CommitFacts = {},
+  // Two ways the commit read can be less than a clean answer, per repo id. `fail` is GitHub
+  // refusing outright; `truncate` is GitHub answering with a `Link: rel="next"` that never runs
+  // out, so the paginated read stops at its page cap. The second exists because a capped read and
+  // a clean one return the same commits and the same verdict — the clock has to tell them apart.
+  commitReads: { fail?: string[]; truncate?: string[] } = {},
+): string {
   const preload = join(mkdtempSync(join(tmpdir(), "foundry-prfacts-")), "preload.mjs");
   writeFileSync(
     preload,
     `const facts = ${JSON.stringify(table)};
-const json = (status, body) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const commitFacts = ${JSON.stringify(commits)};
+const commitFail = ${JSON.stringify(commitReads.fail ?? [])};
+const commitTruncate = ${JSON.stringify(commitReads.truncate ?? [])};
+const json = (status, body, headers = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+const actors = (list) => (list ?? []).map((u) => ({ user: { login: u.login, type: u.type } }));
 globalThis.fetch = async (url) => {
   const u = String(url);
   if (/\\/pulls\\?state=open/.test(u)) return json(200, []);
   if (/\\/issues\\/\\d+\\/timeline/.test(u)) return json(200, []);
   const parts = new URL(u).pathname.split("/").filter(Boolean);
+  // The revert re-check's commit listing (issue #39). Answered per repo; the default is "nothing
+  // landed on the base branch since the merge", which is a real answer, not a hole.
+  if (parts[0] === "repos" && parts[3] === "commits") {
+    const repoId = parts[1] + "/" + parts[2];
+    if (commitFail.includes(repoId)) return json(500, { message: "commits unavailable" });
+    const list = commitFacts[repoId] ?? [];
+    const body = list.map((c) => ({ sha: c.sha, commit: { message: c.message, committer: { date: c.committedAt } } }));
+    if (commitTruncate.includes(repoId)) {
+      // A cursor that never ends, exactly as far as the reader can tell from the header. It points
+      // back at this same path, so every page answers and only the page cap ever stops the read.
+      const page = Number(new URL(u).searchParams.get("page") ?? "1") + 1;
+      const next = "https://api.github.com/repos/" + repoId + "/commits?page=" + page;
+      return json(200, body, { link: '<' + next + '>; rel="next", <' + next + '>; rel="last"' });
+    }
+    return json(200, body);
+  }
   const path = parts[0] === "repos" && parts[3] === "pulls"
     ? parts[1] + "/" + parts[2] + "/pull/" + parts[4]
     : "";
   const pr = facts["https://github.com/" + path];
   if (!pr) return json(404, { message: "unstubbed " + url });
+  // The two review surfaces the human-review split is read from (issue #39). Sub-resources of the
+  // pull, so they are matched before the pull itself.
+  if (parts[5] === "reviews") return json(200, actors(pr.reviews));
+  if (parts[5] === "comments") return json(200, actors(pr.reviewComments));
   return json(200, {
     html_url: "https://github.com/" + path,
     title: "stub",
@@ -225,9 +277,12 @@ globalThis.fetch = async (url) => {
     merged: pr.merged,
     mergeable_state: "clean",
     commits: 1,
-    review_comments: 0,
+    review_comments: (pr.reviewComments ?? []).length,
     comments: 0,
     head: { sha: pr.headSha },
+    base: { ref: pr.baseRef ?? "main" },
+    merge_commit_sha: pr.mergeCommitSha ?? null,
+    merged_at: pr.mergedAt ?? null,
     updated_at: pr.updatedAt,
   });
 };
@@ -236,8 +291,12 @@ globalThis.fetch = async (url) => {
   return preload;
 }
 
-function runClock(table: Record<string, LivePr>): Spawned {
-  return runNode(CLOCK, [], tmpdir(), { preload: prFactsStub(table) });
+function runClock(
+  table: Record<string, LivePr>,
+  commits: CommitFacts = {},
+  commitReads: { fail?: string[]; truncate?: string[] } = {},
+): Spawned {
+  return runNode(CLOCK, [], tmpdir(), { preload: prFactsStub(table, commits, commitReads) });
 }
 
 /** The seed with its in-flight packet rewound to draft-ready, so `open-draft` is the next step. */
@@ -1253,4 +1312,285 @@ test("approve names the absence when the gate parsed no policy text at all", () 
   assert.match(run.stdout, /no policy text/i);
   assert.equal(/no ban statement matched/i.test(run.stdout), false);
   assert.equal(run.code, 1, "a packet the gate denied still cannot be approved");
+});
+
+/* ------------------------------------------------------------------------------------------- *
+ * issue #39 — `reverts` gets a producer, and the clock gets eyes.
+ * ------------------------------------------------------------------------------------------- */
+
+/** The merged packet whose merge commit the tests below have the base branch revert. */
+const REVERTED = "pkt_ravidsrk_orca-fleet_42";
+
+function revertCommitFor(state: FactoryState, packetId: string, at = "2026-08-28T09:00:00Z") {
+  const packet = state.packets.find((p) => p.id === packetId)!;
+  const sha = packet.prMeta?.mergeCommitSha;
+  assert.ok(sha, `${packetId} must carry the merge commit a revert would name`);
+  return {
+    repoId: packet.repoId,
+    commit: {
+      sha: "ffff1110000000000000000000000000000000aa",
+      message: `Revert "${packet.prMeta!.title}"\n\nThis reverts commit ${sha}.`,
+      committedAt: at,
+    },
+  };
+}
+
+test("reconcile re-checks merged packets for a revert of our merge commit and records it", () => {
+  // `applyPrSync` has never seen a merged packet — its status guard refuses one — so the revert
+  // re-check cannot live there. `reconcile` already fetches every packet that names a PR,
+  // whatever its status, so this is the one loop that was already looking at merged PRs and
+  // simply had nothing to say about them.
+  const seed = seedState();
+  const path = writeState(seed);
+  const { repoId, commit } = revertCommitFor(seed, REVERTED);
+  const before = seed.scorecard.find((r) => r.repoId === repoId)!;
+  assert.equal(before.reverts, 0, "the seed must start clean or this proves nothing");
+
+  const run = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(livePrs(), { [repoId]: [commit] }),
+  });
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.out,
+    new RegExp(`^REVERT ${REVERTED}: ffff111`, "m"),
+    `reconcile must name the reverting commit it found:\n${run.out}`,
+  );
+  // The remedy the line names has to be one that exists. `emptyScorecard()` builds its rows from
+  // `ALLOWLIST` and `health()` gates on `row.reverts > 0`, so "edit allowlist.yaml" told the
+  // operator to delete the very row holding the count this unit was built to produce.
+  assert.match(run.out, /^REVERT .*factory\/seed\.ts/m, `the seed is the edit that moves it:\n${run.out}`);
+  assert.equal(
+    /edits? allowlist\.yaml/.test(run.out),
+    false,
+    `following that instruction erases reverts=1:\n${run.out}`,
+  );
+  assert.match(run.stdout, /reverts=1/, `the summary counter must follow the bucket:\n${run.out}`);
+
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const row = after.scorecard.find((r) => r.repoId === repoId)!;
+  assert.equal(row.reverts, 1, "the scorecard row is the thing the KPI is read from");
+  // The sibling merged packet on the same repo names a different merge commit; a re-check that
+  // matched on "some revert happened here" would have counted it twice.
+  assert.equal(after.packets.filter((p) => p.followUps?.some((f) => f.body.startsWith("revert:"))).length, 1);
+
+  // SPEC.md §7: the repository is halted. The operator surface is where that has to be visible.
+  const status = runCli(["status", "--state", path], tmpdir());
+  assert.equal(status.code, 0, status.out);
+  assert.match(
+    status.stdout,
+    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    `a recorded revert must show as a stop:\n${status.stdout}`,
+  );
+
+  // Idempotent across runs: reconcile re-reads the same reverting commit every time it runs.
+  const twice = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(livePrs(), { [repoId]: [commit] }),
+  });
+  assert.equal(twice.code, 0, twice.out);
+  const settled = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(settled.scorecard.find((r) => r.repoId === repoId)!.reverts, 1);
+});
+
+test("reconcile leaves reverts alone when the base branch only carries rework", () => {
+  const seed = seedState();
+  const path = writeState(seed);
+  const packet = seed.packets.find((p) => p.id === REVERTED)!;
+  const run = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(livePrs(), {
+      [packet.repoId]: [
+        {
+          sha: "bbbb2220000000000000000000000000000000cc",
+          message: "refactor the changelog helper this PR added",
+          committedAt: "2026-08-28T09:00:00Z",
+        },
+      ],
+    }),
+  });
+  assert.equal(run.code, 0, run.out);
+  assert.equal(/^REVERT /m.test(run.out), false, `rework is not a revert:\n${run.out}`);
+  assert.match(run.stdout, /reverts=0/);
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(after.scorecard.find((r) => r.repoId === packet.repoId)!.reverts, 0);
+});
+
+test("the clock stops on a revert the committed ledger has not recorded", () => {
+  // The 6-hour job is the only thing that runs unattended (.github/workflows/oss-tick.yml), so it
+  // is the only place SPEC.md §7's "MUST halt ... on any revert" can be machine-enforced rather
+  // than waiting on a human to notice. It cannot write the ledger; what it can do is refuse to
+  // call a ledger reconciled while GitHub says our patch was reverted and the record says
+  // `reverts: 0`.
+  const seed = seedState();
+  const { repoId, commit } = revertCommitFor(seed, REVERTED);
+  const red = runClock(livePrs(), { [repoId]: [commit] });
+  assert.equal(red.code, 1, `an unrecorded revert must stop the clock:\n${red.out}`);
+  assert.match(
+    red.out,
+    new RegExp(`^DIVERGENCE ${REVERTED}: ffff111.*reverts our merge commit`, "m"),
+    `the clock must name the commit, not merely complain:\n${red.out}`,
+  );
+
+  // A quiet base branch is not a revert, and must not red the clock.
+  const green = runClock(livePrs(), {});
+  assert.equal(green.code, 0, green.out);
+  assert.equal(/REVERT|reverts our merge commit/.test(green.out), false, green.out);
+});
+
+test("the revert verb records a maintainer-stated rollback, halts the repo, and counts once", () => {
+  // The half of docs/08-operations.md's definition no classifier should pretend to read: "a
+  // maintainer-stated rollback naming the PR". Prose, judged by a human, recorded by hand.
+  const seed = seedState();
+  const path = writeState(seed);
+  const id = "pkt_ravidsrk_frontguard_195";
+  const repoId = seed.packets.find((p) => p.id === id)!.repoId;
+
+  const bare = runCli(["revert", id, "--state", path], tmpdir());
+  assert.equal(bare.code, 1, `a revert with no stated reason is not a record:\n${bare.out}`);
+  assert.equal(
+    (JSON.parse(readFileSync(path, "utf8")) as FactoryState).scorecard.find((r) => r.repoId === repoId)!.reverts,
+    0,
+  );
+
+  const reason = "maintainer rolled back #196 in the 2026-08-30 release thread, naming the PR";
+  const run = runCli(["revert", id, "--reason", reason, "--state", path], tmpdir());
+  assert.equal(run.code, 0, run.out);
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(after.scorecard.find((r) => r.repoId === repoId)!.reverts, 1);
+  const packet = after.packets.find((p) => p.id === id)!;
+  assert.ok(
+    packet.followUps?.some((f) => f.body.startsWith("revert:") && f.body.includes(reason)),
+    "the operator's own words are the record; a paraphrase is not",
+  );
+
+  // Same rule on the operator's own verb: name the edit that works, not the one that destroys the
+  // record. `.foundry-state.json` is gitignored, so the seed promotion is also what greens the clock.
+  assert.match(run.stdout, /factory\/seed\.ts/, `the revert verb must name the seed:\n${run.stdout}`);
+  assert.equal(
+    /edits? allowlist\.yaml/.test(run.stdout),
+    false,
+    `the roster edit deletes the scorecard row:\n${run.stdout}`,
+  );
+
+  const status = runCli(["status", "--state", path], tmpdir());
+  assert.match(
+    status.stdout,
+    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    `a recorded revert must show as a stop:\n${status.stdout}`,
+  );
+
+  const again = runCli(["revert", id, "--reason", reason, "--state", path], tmpdir());
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /already recorded/);
+  assert.equal(
+    (JSON.parse(readFileSync(path, "utf8")) as FactoryState).scorecard.find((r) => r.repoId === repoId)!.reverts,
+    1,
+  );
+
+  // A packet that was never merged has nothing to revert.
+  const inflight = seed.packets.find((p) => p.status === "submitted")!;
+  const refused = runCli(["revert", inflight.id, "--reason", reason, "--state", path], tmpdir());
+  assert.equal(refused.code, 1, refused.out);
+  assert.match(refused.out, /never merged/);
+});
+
+test("sync folds the human review split into the scorecard when the PR reaches a terminal state", () => {
+  // The end-to-end shape of issue #39's first two bullets: GitHub's review endpoints, through the
+  // bot filter, into the two KPI columns the ledger prints.
+  const seed = seedState();
+  const path = writeState(seed);
+  const inflight = seed.packets.find((p) => p.status === "submitted")!;
+  const run = runCli(["sync", inflight.id, "--threads-answered", "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [inflight.prUrl!]: {
+          state: "closed",
+          merged: true,
+          reviews: [
+            { login: "coderabbitai[bot]", type: "Bot" },
+            { login: "ColeMurray", type: "User" },
+          ],
+          reviewComments: [
+            { login: "coderabbitai[bot]", type: "Bot" },
+            { login: "ColeMurray", type: "User" },
+            { login: "ColeMurray", type: "User" },
+          ],
+        },
+      }),
+    ),
+  });
+  assert.equal(run.code, 0, run.out);
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const row = after.scorecard.find((r) => r.repoId === inflight.repoId)!;
+  assert.equal(row.humanReviewedPrs, 1);
+  assert.equal(row.humanReviewComments, 2, "the bot's review comment is not a human's");
+  assert.equal(row.reviewCommentsAvg, 2);
+  assert.equal(row.noReview, 0);
+});
+
+test("sync counts a silently merged PR as noReview, and the ledger prints it", () => {
+  const seed = seedState();
+  const path = writeState(seed);
+  const inflight = seed.packets.find((p) => p.status === "submitted")!;
+  const run = runCli(["sync", inflight.id, "--threads-answered", "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [inflight.prUrl!]: {
+          state: "closed",
+          merged: true,
+          // A bot reviewed it. Nobody human did. docs/08-operations.md counts that as silence.
+          // Deliberately WITHOUT `type`: not every GitHub surface returns it, so the `[bot]` login
+          // suffix has to carry this on its own or a bot-only review reads as a human one.
+          reviews: [{ login: "coderabbitai[bot]" }],
+          reviewComments: [{ login: "coderabbitai[bot]" }],
+        },
+      }),
+    ),
+  });
+  assert.equal(run.code, 0, run.out);
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const row = after.scorecard.find((r) => r.repoId === inflight.repoId)!;
+  assert.equal(row.noReview, 1, "a bot-only review is not a human review");
+  assert.equal(row.humanReviewedPrs, 0);
+
+  const ledger = runCli(["ledger", "--state", path], tmpdir());
+  assert.equal(ledger.code, 0, ledger.out);
+  assert.match(
+    ledger.stdout,
+    new RegExp(`- ${inflight.repoId}: opened=\\d+ merged=\\d+ closedUnmerged=\\d+ noReview=1 `),
+    `the ledger's noReview column must carry the computed value:\n${ledger.stdout}`,
+  );
+});
+
+test("the clock says so when the commit read fails, and when it merely stops short", () => {
+  // Two ways the revert re-check can be less than an answer, and the clock must sound different
+  // from `ledger ok` for both. The FATAL this unit added cannot fire on a revert it never fetched,
+  // so a silent short read silently defeats it.
+  const unreadable = runClock(livePrs(), {}, { fail: ["ravidsrk/frontguard"] });
+  assert.equal(unreadable.code, 0, `an unreadable commit list is a debt, not a divergence:\n${unreadable.out}`);
+  assert.match(
+    unreadable.out,
+    /^ADVISORY pkt_ravidsrk_frontguard_195: could not read ravidsrk\/frontguard commits since the merge — a revert would go unnoticed this run/m,
+    `a failed read must name the packet and the risk:\n${unreadable.out}`,
+  );
+
+  // A capped read. GitHub answers 200 with a `Link: rel="next"` that never runs out, so the commits
+  // and the verdict are byte-identical to a clean run — the only difference is the flag. Live proof
+  // the cap is not hypothetical: ravidsrk/orca-fleet serves 111 commits since #70's merge over two
+  // pages, and page 1's oldest is 31 hours after the merge.
+  const capped = runClock(livePrs(), {}, { truncate: ["ravidsrk/frontguard"] });
+  assert.equal(capped.code, 0, `a short read is a debt, not a divergence:\n${capped.out}`);
+  assert.match(
+    capped.out,
+    /^ADVISORY pkt_ravidsrk_frontguard_195: the revert re-check on ravidsrk\/frontguard hit its page cap/m,
+    `a page-capped read must not read as a clean one:\n${capped.out}`,
+  );
+  assert.match(capped.out, /would go unnoticed this run/);
+
+  // And the control: the same clock, the same seed, a commit list GitHub serves in full. No line.
+  const clean = runClock(livePrs(), {});
+  assert.equal(clean.code, 0, clean.out);
+  assert.equal(
+    /could not read|page cap/.test(clean.out),
+    false,
+    `a complete read must stay quiet or the advisory means nothing:\n${clean.out}`,
+  );
 });

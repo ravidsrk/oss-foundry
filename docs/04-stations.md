@@ -163,13 +163,22 @@ A draft PR is not done. The packet stays on this station until merged, closed, o
 
 Does:
 
-- Sync the live PR (draft/open/merged, head SHA, review comment count). User-initiated. Never on load.
+- Sync the live PR (draft/open/merged, head SHA, review comment count; at a terminal outcome also
+  the merge commit and the human/bot review split). User-initiated. Never on load.
 - Record bot-reconcile and review-reply notes against the current head. `review-reply` is a reply
   that was **made**; a reply still **owed** — maintainer activity arriving while another packet
   holds the in-flight slot — is a `note` prefixed `reply-owed:`, the same shape as `stale-intent`
   (the shape only; `stale-intent` is deduped, a reply owed is not).
 - Mark quiet when threads are answered. **Never merge.**
 - When GitHub reports `merged`, write the scorecard `merged` row. When closed unmerged, write `closedUnmerged`.
+- At either terminal transition also write the two review KPIs from the human (non-bot) review
+  split GitHub reports: `noReview` when nothing human reviewed the PR, `reviewCommentsAvg` over the
+  PRs with ≥ 1 human review comment (docs/08-operations.md). If the review endpoints could not be
+  read, neither counter moves and the ledger says so — a zero nobody observed is an invented KPI.
+- A merged packet leaves `applyPrSync` behind for good (its status guard), so the revert re-check
+  lives in `reconcile` and in the 6-hour clock instead: both re-read the base branch for an explicit
+  `git revert` of our merge commit. `reconcile` records it (`reverts` +1, the repo becomes a
+  scorecard `stop`); the clock cannot write, so it fails the run until the ledger records it.
 
 Halt rules fire here. See `docs/06-v2.md`. `submitted` remains in-flight so a quiet-but-unmerged draft still blocks a new tick until `followed-up`.
 

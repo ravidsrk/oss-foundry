@@ -18,6 +18,8 @@ export function emptyScorecard(): ScorecardRow[] {
     merged: 0,
     closedUnmerged: 0,
     reviewCommentsAvg: 0,
+    humanReviewComments: 0,
+    humanReviewedPrs: 0,
     noReview: 0,
     reverts: 0,
     maintainerTone: "neutral" as const,
@@ -82,4 +84,124 @@ export function factoryKpis(rows: ScorecardRow[]) {
     noReview,
     banned,
   };
+}
+
+/**
+ * Fold one terminal PR's human review split into the repo's row (issue #39).
+ *
+ * The two KPIs docs/08-operations.md defines here have different denominators, and keeping them
+ * apart is the whole point:
+ *
+ *   - `noReview` counts terminal drafts with **zero human review activity** — no human review at
+ *     all, comment or bare approval.
+ *   - `reviewCommentsAvg` is a mean over **PRs with ≥1 human review comment**, so a bare approval
+ *     belongs to neither counter: it is review activity (not `noReview`) with nothing to average.
+ *
+ * `observed === undefined` means the review endpoints were not read. Nothing moves, and the caller
+ * is expected to say so — recording a 0 there would invent the very metric this function exists to
+ * stop inventing.
+ *
+ * The mean is recomputed from the stored sum and denominator on every write rather than folded
+ * into itself, so it is exact and re-derivable from the row by hand.
+ */
+export function applyReviewToScorecard(
+  rows: ScorecardRow[],
+  repoId: string,
+  observed: { reviews: number; comments: number } | undefined,
+): ScorecardRow[] {
+  if (!observed) return rows;
+  return rows.map((row) => {
+    if (!sameRepoId(row.repoId, repoId)) return row;
+    const next = { ...row };
+    if (observed.reviews === 0 && observed.comments === 0) {
+      next.noReview += 1;
+      return next;
+    }
+    if (observed.comments >= 1) {
+      next.humanReviewComments += observed.comments;
+      next.humanReviewedPrs += 1;
+      next.reviewCommentsAvg = next.humanReviewComments / next.humanReviewedPrs;
+    }
+    return next;
+  });
+}
+
+/**
+ * Prefix on the follow-up note a recorded revert writes. Also its dedupe key, and the way the
+ * clock tells "GitHub says our patch was reverted" from "…and the ledger already says so".
+ */
+export const REVERT_NOTE_PREFIX = "revert:";
+
+/** The recorded revert on a packet, if one has been. `applyRevert` counts a packet at most once. */
+export function revertNote(packet: TaskPacket) {
+  return (packet.followUps ?? []).find((f) => f.kind === "note" && f.body.startsWith(REVERT_NOTE_PREFIX));
+}
+
+/** docs/08-operations.md: a revert counts only "within 30 days of merge". */
+export const REVERT_WINDOW_DAYS = 30;
+
+export interface RevertCandidate {
+  sha: string;
+  message: string;
+  committedAt: string;
+}
+
+export type RevertVerdict =
+  | { reverted: true; sha: string; at: string; why: string }
+  | { reverted: false; why: string };
+
+/**
+ * Did anything on the base branch revert our merge commit? (SPEC.md §7 MUST, issue #39.)
+ *
+ * The only accepted evidence is a commit whose message names our merge commit after `This reverts
+ * commit` — the line `git revert` writes itself. That is deliberately narrow, and it is what makes
+ * docs/08-operations.md's exclusion structural rather than a judgement call: "Post-merge
+ * edits/refactors of our code are **rework** ... never counted as reverts." A refactor of our code
+ * cannot reach this counter, because it does not name the commit.
+ *
+ * The other half of the documented definition — "a maintainer-stated rollback naming the PR" — is
+ * prose, and no classifier should pretend to read it. That half is the operator's `revert` verb.
+ */
+export function classifyRevert(input: {
+  mergeCommitSha: string;
+  mergedAt: string;
+  commits: RevertCandidate[];
+}): RevertVerdict {
+  const merge = input.mergeCommitSha.toLowerCase();
+  const mergedMs = Date.parse(input.mergedAt);
+  if (merge.length < 7 || !Number.isFinite(mergedMs)) {
+    return { reverted: false, why: "no merge commit recorded for this packet — nothing to revert" };
+  }
+  const deadline = mergedMs + REVERT_WINDOW_DAYS * 86_400_000;
+  let late: RevertCandidate | undefined;
+  for (const commit of input.commits) {
+    // A commit cannot revert itself, and the merge commit is in the branch's own history.
+    if (commit.sha.toLowerCase() === merge) continue;
+    let names = false;
+    for (const match of commit.message.matchAll(/this reverts commit\s+([0-9a-f]{7,40})/gi)) {
+      const named = (match[1] ?? "").toLowerCase();
+      if (merge.startsWith(named) || named.startsWith(merge)) names = true;
+    }
+    if (!names) continue;
+    const at = Date.parse(commit.committedAt);
+    if (!Number.isFinite(at) || at < mergedMs) continue;
+    if (at > deadline) {
+      late = commit;
+      continue;
+    }
+    return {
+      reverted: true,
+      sha: commit.sha,
+      at: commit.committedAt,
+      why: `${commit.sha.slice(0, 12)} on the base branch reverts our merge commit ${merge.slice(0, 12)} (${commit.committedAt})`,
+    };
+  }
+  if (late) {
+    const days = Math.floor((Date.parse(late.committedAt) - mergedMs) / 86_400_000);
+    return {
+      reverted: false,
+      why: `${late.sha.slice(0, 12)} names our merge commit but landed ${days} days after the merge, past the ${REVERT_WINDOW_DAYS}-day window (docs/08-operations.md) — not counted as a revert`,
+    };
+  }
+  return { reverted: false, why: `no commit on the base branch since ${input.mergedAt} reverts ${merge.slice(0, 12)}` };
 }

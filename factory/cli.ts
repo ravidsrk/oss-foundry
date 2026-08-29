@@ -10,6 +10,7 @@ import {
   applyHalt,
   applyReject,
   applyPrSync,
+  applyRevert,
   applyTick,
   bindingFromCompare,
   classifyCompetition,
@@ -33,6 +34,7 @@ import {
   listCrossReferencingOpenPulls,
   listOpenPulls,
   parsePrUrl,
+  revertCheck,
   syncGithubPr,
   type IssueLiveState,
 } from "./github-pr.ts";
@@ -46,7 +48,7 @@ import {
 import { packetChecks, seedDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderEvidencePage, renderFreezeEvidence, renderPrBody } from "./packet.ts";
-import { health } from "./scorecard.ts";
+import { health, scorecardRow } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
@@ -309,6 +311,7 @@ function usage(): void {
   approve <packetId> --note <text> [--by <name>]   (identity also via FOUNDRY_OPERATOR)
   reject <packetId> --reason <text>
   halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
+  revert <packetId> --reason <text>   (a maintainer-stated rollback naming the PR — SPEC.md §7 stop; an explicit git revert of our merge commit is found by reconcile on its own)
   advance <packetId>
   evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
   witness-check [repoId]   (pre-flight: resolve the interpreter each allowlisted testCommand would really use here, before a packet is in flight)
@@ -317,7 +320,7 @@ function usage(): void {
   attach-draft <packetId> <prUrl>
   open-draft <packetId> --head <forkOwner:branch>   (machine-account PAT; draft-only; one create per run)
   sync <packetId> [--threads-answered]
-  reconcile
+  reconcile   (live re-read of every packet that names a PR; re-checks merged packets for a revert of our merge commit)
   ledger
   evidence-page <packetId>   (maintainer-facing audit page, markdown to stdout)
   clear-halt --by <name> --note <text>   (a human lifts the factory-wide rate-limit halt — not the halt above)
@@ -480,6 +483,41 @@ async function main() {
     // Echo the roster's spelling, not the operator's: a halt typed in GitHub's casing now moves the
     // row it names, and the line must say which row that was (issue #44 item 10).
     console.log(`halted ${result.repoId ?? repoId} (scorecard banned). Edit allowlist.yaml denylist the same hour.`);
+    return;
+  }
+
+  if (cmd === "revert") {
+    // The half of docs/08-operations.md's revert definition no classifier should pretend to read:
+    // "a maintainer-stated rollback naming the PR". `reconcile` catches an explicit `git revert`
+    // of our merge commit on its own; this is for prose, judged by a human. The reason is
+    // mandatory and stored verbatim — an unexplained stop on someone's repository is not a record.
+    const id = rest[0];
+    const reason = flag(rest, "--reason");
+    if (!id) {
+      console.error("revert requires a packet id");
+      process.exit(1);
+    }
+    if (!reason) {
+      console.error(
+        "revert requires --reason <text>: quote what the maintainer said. A revert halts the repo (SPEC.md §7); an unexplained halt is not a record.",
+      );
+      process.exit(1);
+    }
+    const result = applyRevert(state, id, { source: "operator", why: reason });
+    if (result.error) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    if (!result.recorded) {
+      console.log(`${id}: a revert is already recorded — reverts counts a packet once`);
+      return;
+    }
+    persist(result.state);
+    const packet = result.state.packets.find((p) => p.id === id)!;
+    const row = scorecardRow(result.state.scorecard, packet.repoId);
+    console.log(
+      `revert recorded on ${packet.repoId} for ${id}: ${reason}\n  reverts=${row?.reverts ?? 0} health=${health(row!)} — the repo is unselectable while the ledger records it (health() gates on reverts > 0).\n  This wrote local state only, and .foundry-state.json is gitignored: promote the revert into factory/seed.ts and regenerate the docs/12-ledger.md block, or the 6-hour clock keeps reading a seed that says reverts=0.\n  Do NOT take the repo out of allowlist.yaml: scorecard rows are built from the roster, so that deletes this row and erases the count.`,
+    );
     return;
   }
 
@@ -841,6 +879,11 @@ async function main() {
     let next = state;
     const doctrine: string[] = [];
     const owed: string[] = [];
+    // Reverts get their own bucket and their own word. `DIVERGENCE` means the ledger asserts
+    // something GitHub contradicts and `ADVISORY` means a debt on a ledger that reconciles; a
+    // revert is neither — it is a live safety event on a repository (SPEC.md §7). Overloading
+    // either word would teach it two meanings, which is the thing the split above exists to avoid.
+    const reverts: string[] = [];
     for (const packet of state.packets) {
       if (!packet.prUrl) continue;
       const synced = await syncGithubPr({ url: packet.prUrl });
@@ -864,7 +907,39 @@ async function main() {
         const applied = applyPrSync(next, packet.id, synced.meta, { threadsAnswered: false });
         if (!applied.error) next = applied.state;
       }
-      const checks = packetChecks(next.packets.find((p) => p.id === packet.id)!, live);
+      // The revert re-check (issue #39). It belongs here and not in `applyPrSync`, whose status
+      // guard has always refused a merged packet — which is precisely why nothing could ever
+      // notice a revert. `reconcile` was already fetching every packet that names a PR, merged
+      // ones included; it simply had nothing to say about them.
+      let reverted: Awaited<ReturnType<typeof revertCheck>> | undefined;
+      if (packet.status === "merged") {
+        reverted = await revertCheck(packet.repoId, synced.meta);
+        if (!reverted.ok) {
+          owed.push(
+            `${packet.id}: could not read ${packet.repoId} commits since the merge — a revert would go unnoticed this run (${reverted.error})`,
+          );
+        } else if (reverted.verdict.reverted) {
+          const applied = applyRevert(next, packet.id, {
+            source: "commit",
+            sha: reverted.verdict.sha,
+            why: reverted.verdict.why,
+            at: reverted.verdict.at,
+          });
+          if (applied.error) {
+            console.error(`${packet.id}: ${applied.error}`);
+            process.exit(1);
+          }
+          next = applied.state;
+          if (applied.recorded) reverts.push(`${packet.id}: ${reverted.verdict.why}`);
+        }
+      }
+      const checks = packetChecks(next.packets.find((p) => p.id === packet.id)!, {
+        ...live,
+        revert: reverted?.ok ? reverted.verdict : undefined,
+        // Same fact the clock reads (issue #39 round 2): a page-capped commit read is not a clean
+        // one, and both consumers must say so or the two verbs disagree about what was checked.
+        revertTruncated: reverted?.ok ? reverted.truncated : undefined,
+      });
       doctrine.push(...checks.fatal);
       owed.push(...checks.advisory);
     }
@@ -875,8 +950,13 @@ async function main() {
     // here and not there would teach two different meanings for one word.
     for (const a of owed) console.error(`ADVISORY ${a}`);
     for (const d of doctrine) console.error(`DIVERGENCE ${d}`);
+    for (const r of reverts) {
+      console.error(
+        `REVERT ${r} — SPEC.md §7: the repo is now a scorecard stop and stays unselectable while the ledger records it. Recorded in local state only; promote it into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that says reverts=0. Not allowlist.yaml — removing the repo there deletes the scorecard row that holds the count.`,
+      );
+    }
     console.log(
-      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length}`,
+      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length} reverts=${reverts.length}`,
     );
     return;
   }

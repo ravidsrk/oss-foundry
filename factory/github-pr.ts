@@ -1,3 +1,4 @@
+import { classifyRevert, type RevertVerdict } from "./scorecard.ts";
 import type { PrMeta } from "./types.ts";
 
 export type { PrMeta } from "./types.ts";
@@ -310,6 +311,235 @@ export async function compareCommits(
   }
 }
 
+/**
+ * Review bots this project has actually met, spelled without the `[bot]` suffix.
+ *
+ * Not a guess at every review bot on GitHub — a floor, and an **unexercised** one. Be exact about
+ * what it is for and what evidence exists, because the first draft of this comment was neither.
+ *
+ * The case it covers: a GitHub App can also be installed as an ordinary user account, and then it
+ * carries neither `type: "Bot"` nor the `[bot]` suffix, so the two higher-authority signals in
+ * `isBotAccount` both miss it and a bot's review counts as a human's.
+ *
+ * The evidence, re-read live 2026-08-29 (read-only GET): `greptile-apps[bot]` left one review and
+ * one review comment on ravidsrk/orca-fleet#70 — `type: "Bot"`, `[bot]` suffix. `coderabbitai[bot]`
+ * left ONE ISSUE COMMENT on ColeMurray/background-agents#1652, which is not a review surface: that
+ * PR's `review_comments` is 0 and both `/pulls/1652/reviews` and `/pulls/1652/comments` are empty,
+ * so it feeds neither KPI. Both logins therefore wear `type: "Bot"` AND the suffix, and **neither
+ * has ever reached this roster** — `isBotAccount` returns true two branches earlier for both.
+ *
+ * So this list is a documented floor against a case this project has not yet met, kept because the
+ * cost of the miss (a bot's review counted as a human's, silently, in a published KPI) is worse
+ * than the cost of the list. It is in tension with this repo's own doctrine — factory/run-tests.ts:
+ * "Discovered, not listed. A hand-maintained roster is the same silent hole this runner exists to
+ * close from the other end." The tension is resolved the only honest way available: the roster
+ * never overrides a discovered signal, it only runs after both have said no. Add a login here the
+ * first time one is observed reviewing a Foundry PR *without* either discovered signal — and if
+ * that never happens, this list should eventually be deleted rather than grown.
+ */
+export const KNOWN_REVIEW_BOTS: readonly string[] = ["coderabbitai", "greptile-apps"];
+
+/**
+ * Is this account a bot? docs/08-operations.md defines BOTH review KPIs over **human, non-bot**
+ * accounts, so this predicate is not a detail of the fetch — it is half of the definition.
+ *
+ * Three signals, in order of authority: GitHub's own `type` (only the reviews/comments endpoints
+ * carry it), the `[bot]` login suffix GitHub App accounts wear, and the roster above. Substring
+ * matching is deliberately NOT used — a person may be called `robotnik`.
+ */
+export function isBotAccount(user: { login?: string; type?: string } | null | undefined): boolean {
+  if (!user) return false;
+  if (user.type === "Bot") return true;
+  const login = (user.login ?? "").toLowerCase();
+  if (login.length === 0) return false;
+  if (login.endsWith("[bot]")) return true;
+  return KNOWN_REVIEW_BOTS.includes(login);
+}
+
+/**
+ * The two human review counts, kept apart on purpose.
+ *
+ * `reviews` and `comments` answer different KPIs and must not be collapsed into one number: a
+ * maintainer who clicks Approve with no text is **review activity** (so the PR is not `noReview`)
+ * but contributes **no review comment** (so it stays out of the `reviewCommentsAvg` denominator).
+ * Summing them would put a bare approval in a mean of comment counts, which is not the documented
+ * metric.
+ */
+export function countHumanReview(input: {
+  reviews: { user?: { login?: string; type?: string } | null }[];
+  comments: { user?: { login?: string; type?: string } | null }[];
+}): { reviews: number; comments: number } {
+  return {
+    reviews: input.reviews.filter((r) => !isBotAccount(r.user)).length,
+    comments: input.comments.filter((c) => !isBotAccount(c.user)).length,
+  };
+}
+
+/**
+ * The human review split for one pull request, or a failure.
+ *
+ * Two requests, spent on any PR `syncGithubPr` finds in a terminal STATE — not on a terminal
+ * *transition*. Be precise about that: `syncGithubPr` is handed a URL and knows nothing about the
+ * packet's prior status, so it cannot tell "this PR just closed" from "this PR closed last week".
+ * The practical cost is 2 extra requests per already-terminal PR on every `reconcile` and every
+ * 6-hourly clock tick, forever — at today's ledger, 6 requests a tick against a 5000/hour budget.
+ *
+ * That is a deliberate trade, not an oversight. A terminal PR is not frozen: a maintainer can leave
+ * a review comment days after closing it, and — more importantly — a sync whose review endpoints
+ * 500ed records `humanReview` as ABSENT, and re-reading on the next pass is the only way that ever
+ * gets filled in. A transition-gated fetch would strand such a packet at "not observed" forever.
+ * An OPEN PR is still skipped: `noReview` and `reviewCommentsAvg` are defined over terminal
+ * outcomes and an open PR has none, so it costs exactly the one request it always did.
+ *
+ * A failure is reported, never smoothed to zero: "we could not read it" and "nobody reviewed it"
+ * are different facts, and only one of them is a KPI.
+ */
+export async function fetchHumanReview(
+  repoId: string,
+  number: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; humanReview: { reviews: number; comments: number } } | { ok: false; error: string }> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
+  try {
+    const base = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
+    const [reviewsRes, commentsRes] = await Promise.all([
+      fetchImpl(`${base}/reviews?per_page=100`, { headers: githubApiHeaders() }),
+      fetchImpl(`${base}/comments?per_page=100`, { headers: githubApiHeaders() }),
+    ]);
+    if (!reviewsRes.ok) return { ok: false, error: `GitHub ${reviewsRes.status} on reviews` };
+    if (!commentsRes.ok) return { ok: false, error: `GitHub ${commentsRes.status} on review comments` };
+    const reviews = (await reviewsRes.json()) as { user?: { login?: string; type?: string } | null }[];
+    const comments = (await commentsRes.json()) as { user?: { login?: string; type?: string } | null }[];
+    if (!Array.isArray(reviews) || !Array.isArray(comments)) {
+      return { ok: false, error: "GitHub returned a non-list for the review endpoints" };
+    }
+    return { ok: true, humanReview: countHumanReview({ reviews, comments }) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
+/** `rel="next"` out of a GitHub `Link` header — the cursor, or `undefined` at the last page. */
+export function nextPageUrl(link: string | null | undefined): string | undefined {
+  if (!link) return undefined;
+  for (const part of link.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/i);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
+/**
+ * How many pages of commits one revert re-check may read: 1000 commits, ten requests. A bound is
+ * needed because this runs unattended every six hours over every merged packet, and an unbounded
+ * follow on a busy base branch is exactly the "excessive automated activity" the AUP names.
+ */
+export const MAX_COMMIT_PAGES = 10;
+
+/**
+ * Commits on a branch after a moment in time — the only place a revert of our merge commit can
+ * show up (docs/08-operations.md: "an explicit `git revert` of our merge commit ... within 30 days
+ * of merge").
+ *
+ * Deliberately not `compareCommits`: that one refuses a range that is not strictly ahead with a
+ * file diff, because it exists to bind evidence. Here the common answer is "nothing landed since
+ * the merge", which is a perfectly good answer and not an error.
+ *
+ * **Paginated, and loud when it stops short.** GitHub serves commits newest-first, so page 1 is the
+ * FAR end of the `since` window: a one-page read hides the hours immediately after the merge, which
+ * is when a revert is most likely to land. This was live, not theoretical — on ravidsrk/orca-fleet
+ * (read-only GET, 2026-08-29) `since` #70's merge returns 100 commits on page 1 and 11 on page 2,
+ * and page 1's oldest commit is `2026-08-28T14:08:01Z` against a merge at `2026-08-27T07:04:52Z`:
+ * a ~31-hour blind window opening at the merge, widening every day.
+ *
+ * The `truncated` flag exists because a short read and a clean read return the same commits and the
+ * same verdict. Every consumer already shouts about a read that FAILED; nothing could tell them
+ * about one that merely stopped early, and a capped read must never be indistinguishable from a
+ * clean one — least of all here, where the silent difference is a FATAL that never fires.
+ */
+export async function listCommitsSince(
+  repoId: string,
+  opts: { since: string; sha?: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<
+  | { ok: true; commits: { sha: string; message: string; committedAt: string }[]; truncated: boolean }
+  | { ok: false; error: string }
+> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
+  const query = new URLSearchParams({ since: opts.since, per_page: "100" });
+  if (opts.sha) query.set("sha", opts.sha);
+  let url = `https://api.github.com/repos/${owner}/${repo}/commits?${query}`;
+  const commits: { sha: string; message: string; committedAt: string }[] = [];
+  try {
+    for (let page = 0; page < MAX_COMMIT_PAGES; page += 1) {
+      const res = await fetchImpl(url, { headers: githubApiHeaders() });
+      if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
+      const body = (await res.json()) as {
+        sha?: string;
+        commit?: { message?: string; committer?: { date?: string } | null };
+      }[];
+      if (!Array.isArray(body)) return { ok: false, error: "GitHub returned a non-list for commits" };
+      for (const c of body) {
+        commits.push({
+          sha: c.sha ?? "",
+          message: c.commit?.message ?? "",
+          committedAt: c.commit?.committer?.date ?? "",
+        });
+      }
+      // GitHub's own cursor, followed verbatim rather than a `page=` this code increments: the
+      // header is what the API documents, and it is also the only thing that says "there is more".
+      const next = nextPageUrl(res.headers.get("link"));
+      if (!next) return { ok: true, commits, truncated: false };
+      url = next;
+    }
+    return { ok: true, commits, truncated: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
+/**
+ * Has our merge commit been reverted on the base branch? (SPEC.md §7 MUST, issue #39.)
+ *
+ * One seam, two callers on purpose: `verify-ledger.ts` (the 6-hour clock, which can only report)
+ * and `reconcile` (which records). Two hand-rolled copies of "list the commits, then classify"
+ * would be two chances to drift, and the clock and the operator verb disagreeing about whether a
+ * repository is halted is exactly the failure this check exists to prevent.
+ *
+ * A packet with no recorded merge commit is not an error: it answers "nothing to check".
+ *
+ * `truncated` rides out beside the verdict because `reverted: false` alone cannot distinguish "no
+ * revert" from "no revert in the part we read". Callers surface it on the same advisory path they
+ * already use for a read that failed outright — the two facts are the same fact at different
+ * strengths, and neither may be printed as a clean bill of health.
+ */
+export async function revertCheck(
+  repoId: string,
+  meta: { mergeCommitSha?: string; mergedAt?: string; baseRef?: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; verdict: RevertVerdict; truncated: boolean } | { ok: false; error: string }> {
+  if (!meta.mergeCommitSha || !meta.mergedAt) {
+    return {
+      ok: true,
+      truncated: false,
+      verdict: { reverted: false, why: `no merge commit recorded for ${repoId} — nothing to revert` },
+    };
+  }
+  const listed = await listCommitsSince(repoId, { since: meta.mergedAt, sha: meta.baseRef }, fetchImpl);
+  if (!listed.ok) return { ok: false, error: listed.error };
+  return {
+    ok: true,
+    truncated: listed.truncated,
+    verdict: classifyRevert({
+      mergeCommitSha: meta.mergeCommitSha,
+      mergedAt: meta.mergedAt,
+      commits: listed.commits,
+    }),
+  };
+}
+
 export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetch = fetch) {
   const parsed = parsePrUrl(data.url);
   if (!parsed) return { ok: false as const, error: "Not a GitHub pull request URL." };
@@ -332,6 +562,9 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
       review_comments: number;
       comments: number;
       head: { sha: string };
+      base?: { ref?: string } | null;
+      merge_commit_sha?: string | null;
+      merged_at?: string | null;
       updated_at: string;
     };
     const meta: PrMeta = {
@@ -342,12 +575,28 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
       merged: pr.merged,
       mergeable: pr.mergeable_state,
       commits: pr.commits,
+      // GitHub's own total, left un-doctored: it counts bots and carries no author, so it is a
+      // record of what the platform said and NOT the KPI. `humanReview` below is the KPI.
       reviewComments: pr.review_comments,
       issueComments: pr.comments,
       headSha: pr.head.sha,
       updatedAt: pr.updated_at,
       syncedAt: new Date().toISOString(),
     };
+    if (pr.base?.ref) meta.baseRef = pr.base.ref;
+    if (pr.merge_commit_sha) meta.mergeCommitSha = pr.merge_commit_sha;
+    if (pr.merged_at) meta.mergedAt = pr.merged_at;
+    // Enriched for a PR in a terminal STATE — both halves, merged and closed-unmerged, because
+    // docs/08-operations.md defines `noReview` and `reviewCommentsAvg` over terminal outcomes and
+    // `closedUnmerged` is half of that denominator. A state test, not a transition test: this
+    // function is handed a URL and has no idea what the packet's status was a moment ago. See
+    // `fetchHumanReview` for why re-reading an already-terminal PR is wanted rather than tolerated.
+    // An open PR costs exactly the one request it always did. A failure leaves `humanReview` ABSENT
+    // — the consumer must then say it could not compute the metric rather than record a zero.
+    if (pr.merged || pr.state === "closed") {
+      const review = await fetchHumanReview(parsed.owner + "/" + parsed.repo, parsed.number, fetchImpl);
+      if (review.ok) meta.humanReview = review.humanReview;
+    }
     return { ok: true as const, meta, title: pr.title ?? "", body: pr.body ?? "" };
   } catch (err) {
     return {

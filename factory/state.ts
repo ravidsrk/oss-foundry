@@ -192,8 +192,21 @@ function isPrMeta(value: unknown): boolean {
     typeof o.issueComments === "number" &&
     typeof o.headSha === "string" &&
     typeof o.updatedAt === "string" &&
-    typeof o.syncedAt === "string"
+    typeof o.syncedAt === "string" &&
+    optional(o.baseRef, (v) => typeof v === "string") &&
+    optional(o.mergeCommitSha, (v) => typeof v === "string") &&
+    optional(o.mergedAt, (v) => typeof v === "string") &&
+    // Absent is a fact here — "the review endpoints were not read" — so `humanReview` is optional.
+    // What it must never be is present-but-unreadable: a malformed split read as zero would be an
+    // invented `noReview`, which is the defect issue #39 exists to close.
+    optional(o.humanReview, isHumanReview)
   );
+}
+
+function isHumanReview(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return typeof o.reviews === "number" && typeof o.comments === "number";
 }
 
 function isFollowUp(value: unknown): boolean {
@@ -286,6 +299,8 @@ function isScorecardRow(value: unknown): boolean {
     typeof o.merged === "number" &&
     typeof o.closedUnmerged === "number" &&
     typeof o.reviewCommentsAvg === "number" &&
+    typeof o.humanReviewComments === "number" &&
+    typeof o.humanReviewedPrs === "number" &&
     typeof o.noReview === "number" &&
     typeof o.reverts === "number" &&
     typeof o.maintainerTone === "string" &&
@@ -371,6 +386,10 @@ function migrateScorecard(value: unknown): unknown {
   const o = { ...(value as Record<string, unknown>) };
   if (o.closedUnmerged === undefined) o.closedUnmerged = 0;
   if (o.reviewCommentsAvg === undefined) o.reviewCommentsAvg = 0;
+  // `reviewCommentsAvg` is derived from these two; a row that reaches `applyReviewToScorecard`
+  // without them yields `undefined + n` — NaN, a KPI nothing downstream would refuse (issue #39).
+  if (o.humanReviewComments === undefined) o.humanReviewComments = 0;
+  if (o.humanReviewedPrs === undefined) o.humanReviewedPrs = 0;
   if (o.noReview === undefined) o.noReview = 0;
   if (o.reverts === undefined) o.reverts = 0;
   if (o.lastTouch === undefined) o.lastTouch = "—";

@@ -429,6 +429,9 @@ test("a terminal packet is never re-flagged for evidence staleness", () => {
       draft: false,
       headSha: merged.prMeta!.headSha,
       body: VERBATIM_BODY,
+      // "Entirely clean" now includes the revert re-check having run and found nothing. Omitting
+      // it is not silence — it is the check reporting that nobody looked (issue #39).
+      revert: { reverted: false, why: "no revert on the base branch since the merge" },
     }),
     [],
   );
@@ -466,4 +469,125 @@ test("live state that has moved past the committed seed is reported packet by pa
     seedDivergences(advanced, seed).some((d) => d.includes(LIVE_HEAD.slice(0, 7))),
     true,
   );
+});
+
+test("an unrecorded revert is fatal, a recorded one is quiet, and a skipped re-check says so", () => {
+  // SPEC.md §7 makes halting on a revert a MUST, and `health()` has always turned `reverts > 0`
+  // into an unconditional stop — but nothing could set it, so the clock could print `ledger ok`
+  // over a reverted patch forever (issue #39). The bucket is the argument: this is `fatal`, not
+  // advisory, because it is the published ledger asserting something GitHub contradicts, and one
+  // commit to THIS repository clears it — record the revert.
+  const merged = seedState().packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_42")!;
+  const live = {
+    state: "closed" as const,
+    merged: true,
+    draft: false,
+    headSha: merged.prMeta!.headSha,
+    body: VERBATIM_BODY,
+  };
+
+  const unrecorded = packetChecks(merged, {
+    ...live,
+    revert: { reverted: true, sha: "ffff111", at: "2026-08-28T09:00:00Z", why: "ffff111 reverts our merge commit 36d0f2370" },
+  });
+  assert.equal(unrecorded.fatal.length, 1, unrecorded.fatal.join("\n"));
+  assert.match(unrecorded.fatal[0], /reverts our merge commit/);
+  assert.match(unrecorded.fatal[0], /SPEC\.md §7 MUST halt ravidsrk\/orca-fleet/);
+  assert.deepEqual(unrecorded.advisory, []);
+
+  // Once the ledger records it the line goes quiet — otherwise the clock stays red forever with
+  // nothing anyone can merge to fix it, which is the "green by any means" pressure this repo
+  // removed from the re-witness debt (issue #49).
+  const recorded = packetChecks(
+    {
+      ...merged,
+      followUps: [
+        ...(merged.followUps ?? []),
+        { id: "fu_rev", at: "2026-08-28T09:00:00Z", kind: "note" as const, body: "revert: (commit) ffff111 — reverted" },
+      ],
+    },
+    { ...live, revert: { reverted: true, sha: "ffff111", at: "2026-08-28T09:00:00Z", why: "x" } },
+  );
+  assert.deepEqual(recorded.fatal, []);
+
+  // A caller that does not supply the verdict gets a reported line, not a skipped check.
+  const skipped = packetChecks(merged, live);
+  assert.deepEqual(skipped.fatal, []);
+  assert.equal(skipped.advisory.length, 1, skipped.advisory.join("\n"));
+  assert.match(skipped.advisory[0], /revert re-check did not run/);
+
+  // A live open PR is not a merge, so nothing here fires on one.
+  const open = packetChecks({ ...merged, status: "submitted" as const }, { ...live, merged: false, state: "open" as const });
+  assert.equal(open.fatal.some((f) => /reverts our merge commit/.test(f)), false);
+  assert.equal(open.advisory.some((a) => /revert re-check/.test(a)), false);
+});
+
+test("a revert re-check that stopped short of the end is an advisory, never a clean bill of health", () => {
+  // A capped read and a complete one hand back the same `reverted: false`. The clock is already
+  // loud about a read that FAILED ("a revert would go unnoticed this run") and was silent about one
+  // that merely stopped early — so a truncated read printed `ledger ok`, which is the one thing it
+  // must never do. Live proof this is not hypothetical: on ravidsrk/orca-fleet (2026-08-29) the
+  // commit list since #70's merge is 111 commits over two pages, and the single-page read that
+  // shipped could not see the 31 hours right after the merge.
+  const merged = seedState().packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_42")!;
+  const live = {
+    state: "closed" as const,
+    merged: true,
+    draft: false,
+    headSha: merged.prMeta!.headSha,
+    body: VERBATIM_BODY,
+    revert: { reverted: false as const, why: "no commit on the base branch reverts 36d0f2370" },
+  };
+
+  const complete = packetChecks(merged, { ...live, revertTruncated: false });
+  assert.deepEqual(complete.fatal, []);
+  assert.deepEqual(complete.advisory, []);
+
+  const capped = packetChecks(merged, { ...live, revertTruncated: true });
+  // Advisory, not fatal, and for the same reason a failed read is: nothing in the published ledger
+  // is contradicted, and no commit to this repository can lengthen a page GitHub cut short.
+  assert.deepEqual(capped.fatal, []);
+  assert.equal(capped.advisory.length, 1, capped.advisory.join("\n"));
+  assert.match(capped.advisory[0], /page cap/);
+  assert.match(capped.advisory[0], /would go unnoticed this run/);
+  assert.match(capped.advisory[0], /ravidsrk\/orca-fleet/);
+
+  // A verdict that DID find the revert is not weakened by the cap — the fatal stands alone, and the
+  // advisory would be a false sentence ("unnoticed") next to a revert that was very much noticed.
+  const found = packetChecks(merged, {
+    ...live,
+    revertTruncated: true,
+    revert: { reverted: true, sha: "ffff111", at: "2026-08-28T09:00:00Z", why: "ffff111 reverts our merge commit 36d0f2370" },
+  });
+  assert.equal(found.fatal.length, 1, found.fatal.join("\n"));
+  assert.deepEqual(found.advisory, []);
+});
+
+test("the revert FATAL names the step that can actually green it — the seed edit, not `reconcile`", () => {
+  // Both verbs the shipped message offered terminate at `persist()` → `saveFactoryState(STATE_FILE)`
+  // → `.foundry-state.json`, which `.gitignore` line 2 excludes. This clock reads `seedState()`. An
+  // operator who followed the instruction watched it work locally, pushed nothing, and left `main`
+  // red with no explanation of why the thing they were told to do did not help. The step that
+  // clears it — promoting the recorded revert into factory/seed.ts — was named nowhere in the diff,
+  // though docs/08-operations.md:23 already states the doctrine and :117-119 states the same rule
+  // for the sibling case ("only a human editing the seed can green it again").
+  const merged = seedState().packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_42")!;
+  const unrecorded = packetChecks(merged, {
+    state: "closed",
+    merged: true,
+    draft: false,
+    headSha: merged.prMeta!.headSha,
+    body: VERBATIM_BODY,
+    revert: { reverted: true, sha: "ffff111", at: "2026-08-28T09:00:00Z", why: "ffff111 reverts our merge commit 36d0f2370" },
+  });
+  assert.equal(unrecorded.fatal.length, 1, unrecorded.fatal.join("\n"));
+  const line = unrecorded.fatal[0]!;
+  // The step that works, named.
+  assert.match(line, /factory\/seed\.ts/);
+  // And why the local verbs alone do not: the clock never reads the file they write.
+  assert.match(line, /\.foundry-state\.json is gitignored/);
+  assert.match(line, /Only the seed edit greens this line/);
+  // The local verbs are still offered — they are how the revert gets recorded in the first place.
+  assert.match(line, /reconcile/);
+  assert.match(line, /revert pkt_ravidsrk_orca-fleet_42 --reason/);
 });
