@@ -211,7 +211,7 @@ Removed: `kortix-ai/suna` (secret-gated dev loop; externally unverifiable — is
 | [`docs/`](.) | Protocol. This file is the takeover bible |
 | [`CONTEXT.md`](../CONTEXT.md) | Glossary |
 
-Tests: `node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts factory/github-pr.test.ts` (Node 22+).
+Tests: `node --experimental-strip-types --test factory/*.test.ts` (Node 22+).
 
 ---
 
@@ -368,6 +368,7 @@ Terms are defined operationally in [08-operations.md](08-operations.md) — deno
 
 ## 14. Handoff note
 
-You own: follow-up on #1652, all future freezes, allowlist edits, and the halt switch.
+You own: follow-up on #1652, all future freezes, allowlist edits, and stopping the factory
+([08-operations.md](08-operations.md) — three mechanisms, only one of which `clear-halt` lifts).
 
 Foundry still does not merge. Even on repos you own.

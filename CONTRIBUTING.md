@@ -8,7 +8,7 @@ Foundry is a factory that contributes *elsewhere*. Changes *here* follow the sam
 4. Tests (Node 22+):
 
    ```
-   node --experimental-strip-types --test factory/engine.test.ts factory/policy.test.ts factory/load-allowlist.test.ts factory/state.test.ts factory/github-pr.test.ts
+   node --experimental-strip-types --test factory/*.test.ts
    ```
 
 5. Draft PRs. Disclose agent help. Do not merge your own default-branch push unless you own the repo and still used a PR.

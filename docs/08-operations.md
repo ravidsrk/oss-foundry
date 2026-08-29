@@ -8,6 +8,50 @@
 - Approvals record who attested: `approve <id> --note … --by <name>` (or set `FOUNDRY_OPERATOR`).
 - If a maintainer replies “please stop,” remove the repo the same hour.
 
+## What the clock actually verifies
+
+`factory/verify-ledger.ts` (the 6h job) checks the **committed seed** — `factory/seed.ts`, the
+published ledger — against live GitHub, and fails the run on divergence. It does **not** read
+`.foundry-state.json`: that file is gitignored and absent in CI, so it does not exist to be checked.
+
+The guarantee is therefore: *what this repository publishes about its PRs is true.* It is not:
+*what the operator has in flight locally is true.* Two consequences:
+
+1. **Promoting live state into the seed is an explicit human step.** Nothing does it automatically.
+   After a status change lands (a sync, a merge, a park), hand-edit `factory/seed.ts` and regenerate
+   the block in `docs/12-ledger.md`. Until you do, the clock is verifying the older story.
+2. **The local pre-flight is `status`.** It compares the live state file against the committed seed
+   and prints `SEED DRIFT …` per packet that differs. Drift is not an error — it is the list of
+   promotions you owe the seed.
+
+`reconcile` is the other half: it absorbs live GitHub into local state and prints `DIVERGENCE …`
+for anything a human must resolve. Neither command rewrites doctrine on its own.
+
+## Stopping the factory
+
+Three mechanisms, in descending scope. They are not interchangeable — know which one is in force.
+
+**1. Factory halt (durable, automatic, factory-wide).** A GitHub **secondary rate limit** during
+`open-draft` writes a halt into the ledger (`halt` on the state record) and prints the halt banner.
+SPEC.md §6 is "halt the factory, never retry", so the halt is factory-wide, not per repo, and it
+persists across runs: `maySelectRepo` refuses every repository — tick, approve, and open-draft
+included — until a human runs `clear-halt --by <name> --note <text>`. It is not a scorecard
+`banned` tone: `bans` counts maintainer asks, and a platform throttle is not a maintainer saying
+stop. Nothing sets this halt by hand; only the rate-limit path writes it.
+
+**2. Scorecard stop (durable, per repo).** A repo with scorecard health `stop` cannot be queued or
+approved. Every other allowlisted repo keeps running. This is the one an operator writes by hand:
+`halt <repoId> --reason <text>` is the same-hour stop for "a maintainer said stop". It sets that
+repo's scorecard tone to `banned` (`applyHalt`), counts a ban, and parks that repo's in-flight
+packet. `clear-halt` does **not** undo it — that lifts the §1 factory halt only, and no command
+lifts a `banned` tone. Denylist the repo in `allowlist.yaml` the same hour, per the incident drill
+below.
+
+**3. Operator stand-down (procedural, factory-wide).** Nothing writes the §1 *factory* halt by
+hand, and §2's `halt` stops one repo per invocation, so a deliberate full stop across the factory
+is still a procedure: reject the in-flight packets and stop pressing tick. The GHA default is dry
+(`FOUNDRY_LIVE` unset), so the 6-hour clock does not open PRs on its own.
+
 ## Tick cadence
 
 Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in flight, including `submitted`.
@@ -17,10 +61,6 @@ Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in fli
 1. Wave 0 attested 2/2: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72).
 2. [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) merged by `ravidsrk`. Do not repeat operator-merge on a Foundry packet.
 3. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652). Follow up. Do not merge. Do not tick.
-
-## Halt switch
-
-A repo with scorecard health `stop` cannot be queued or approved. To halt everything, reject in-flight packets and stop pressing tick. The GHA default is dry (`FOUNDRY_LIVE` unset).
 
 ## Metrics that matter — operational definitions
 

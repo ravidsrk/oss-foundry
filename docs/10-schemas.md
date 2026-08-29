@@ -49,6 +49,22 @@ A packet without `negativeControl=red-on-revert`, real (non-placeholder) `baseSh
 
 See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, `maxFiles`, `maxDiffLines`, `sandbox`, `preferredLabels`. Optional: `setupCommand` — environment step the witness runs after clone (and re-runs after the between-phases clean), e.g. `npm ci`; without it, dependency-needing suites read as red-at-head and the witness refuses. It MUST be a clean-slate installer (`npm ci`, `pnpm install --frozen-lockfile`), never an incremental one — the between-phases `git clean` excludes `node_modules`, so the re-run of this command is what guarantees a fresh dependency tree. Optional: `policyNotes` — a free-text provenance note (why a policy value was chosen, dated). It is appended to the policy-scan blob, so keep it free of gate phrases. Optional: `disclosureTrailer` — `assisted-by` | `generated-by` | `pr-body-only` (default): the commit-disclosure convention the target follows; the evidence gate requires the matching trailer when set. Wave 1+ should name at least one `firstIssues` entry before the clock may select them.
 
+## Factory state (`.foundry-state.json`)
+
+`version: 6`, plus `packets`, `events`, `scorecard`, `ticksRun`, `lastTickAt`, `mergedTotal`,
+`bans`, `humanApprovalsRemaining`, and:
+
+```
+halt?        { at, reason, source: "secondary-rate-limit", repoId? }
+```
+
+A durable, factory-wide stop (SPEC.md §6). While it is set, `maySelectRepo` refuses every repo, so
+tick, approve, and open-draft all stop; only `clear-halt` removes it. `isFactoryState` validates
+`halt` like every other field, so a halt record present but unreadable makes the whole ledger
+refuse to load — no command runs at all until a human fixes the file, which is stricter than
+letting an unreadable record through and re-reading it defensively. Distinct from `bans`, which
+counts maintainer asks.
+
 ## Policy record (`policy-records.json`)
 
 One record per allowlisted repo; the validator refuses records for unlisted repos.

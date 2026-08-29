@@ -43,8 +43,10 @@ public repos is a **classic PAT**. So the moment of contact is machine-enforced 
   call: `createDraftPull` → `POST /pulls` with `draft: true` hard-coded;
 - `open-draft <packetId> --head <fork:branch>` re-runs the competing-work check, refuses a body
   without the verbatim disclosure, opens the draft, and records it via the normal attach flow;
-- one create per CLI run; a secondary-rate-limit response is a **factory halt signal**, never a
-  retry (AUP: excessive automated bulk activity);
+- one create per CLI run; a secondary-rate-limit response is a **durable factory halt**, never a
+  retry (AUP: excessive automated bulk activity): it is written into the state record, not just
+  printed, so the next run refuses too until a human runs `clear-halt`
+  ([08-operations.md](08-operations.md) §1);
 - setup is human-only: `scripts/machine-account-wizard.sh` walks account, 2FA, token, and
   verification. No agent creates accounts.
 

@@ -1,4 +1,5 @@
 import { repoById } from "./allowlist.ts";
+import { evidenceIsStale, needsRewitness, witnessedSha } from "./ledger-check.ts";
 import { ABORT_DEFAULT, commitTrailerLine, DISCLOSURE, NON_GOALS_DEFAULT } from "./neighbor.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { scoreIssue } from "./scout.ts";
@@ -110,6 +111,21 @@ export function renderEvidencePage(packet: TaskPacket): string {
   const ev = packet.evidence;
   const w = ev?.witness;
   const record = packet.policy.record;
+  // The witnessed commit is immutable; the PR head is not. When they differ, the maintainer is
+  // reading proof that is older than the branch in front of them, and must be told so here.
+  //
+  // Staleness is decided by the SAME predicate the divergence list uses (`evidenceIsStale`), so
+  // the audit page and `packetDivergences` can never disagree about the fact. They differ only in
+  // what they ask for: a live packet owes a re-witness, and `needsRewitness` says so on both
+  // surfaces; a terminal packet is at rest, so the page states the limit of the proof as history
+  // and the divergence list stays silent rather than re-flagging it every tick.
+  const witnessed = witnessedSha(packet);
+  const liveHead = packet.prMeta?.headSha;
+  const stale = !evidenceIsStale(packet, liveHead)
+    ? ""
+    : needsRewitness(packet, liveHead)
+      ? `\n- **The pull request has moved past the witnessed commit.** Proof above is bound to \`${witnessed!.slice(0, 12)}\`; the branch is at \`${liveHead!.slice(0, 12)}\`. Commits after the witness are not covered by it. Re-witness before this evidence is read as current.`
+      : `\n- **The pull request moved past the witnessed commit before it reached ${packet.status}.** Proof above is bound to \`${witnessed!.slice(0, 12)}\`; the branch ended at \`${liveHead!.slice(0, 12)}\`. Commits after the witness were never covered by it. Nothing to re-witness — this is the historical limit of the proof.`;
   const lines = [
     `# Evidence — ${packet.repoId}#${packet.issueNumber}`,
     "",
@@ -134,7 +150,7 @@ export function renderEvidencePage(packet: TaskPacket): string {
           w
             ? `- Witnessed by the ${w.provider} sandbox at ${w.ranAt}: tests exit ${w.testExit} at head; **exit ${w.revertExit} with the change reverted** (the proof binds). Log hashes sha256 ${w.testLogSha.slice(0, 12)}… / ${w.revertLogSha.slice(0, 12)}…`
             : `- Negative control: ${ev.negativeControl} (recorded before machine witnessing shipped — attested, not witnessed)`,
-        ].join("\n")
+        ].join("\n") + stale
       : "No evidence manifest — this packet must not reach a maintainer.",
     "",
     "## Standing commitments",
