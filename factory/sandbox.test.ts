@@ -55,6 +55,37 @@ test("negative-control refusal tells the operator to reject, not to press a verb
 });
 
 /**
+ * Every comment in a source, separately: each block comment, and each run of consecutive `//` lines.
+ *
+ * Separately is the whole point. The first version of the guard below matched
+ * `/KNOWN DEFECT[\s\S]{0,200}issue #\d+/` over the raw file, and `[\s\S]` crosses newlines, code and
+ * the boundary between two comments — so a `KNOWN DEFECT` note with an unrelated `issue #N` mention
+ * 200 characters downstream tripped it (issue #99).
+ */
+function commentsIn(source: string): string[] {
+  const out = [...source.matchAll(/\/\*[\s\S]*?\*\//g)].map((m) => m[0]);
+  let run: string[] = [];
+  for (const line of source.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("//")) {
+      run.push(trimmed);
+      continue;
+    }
+    if (run.length > 0) {
+      out.push(run.join("\n"));
+      run = [];
+    }
+  }
+  if (run.length > 0) out.push(run.join("\n"));
+  return out;
+}
+
+/** One comment that both flags a defect and points at an issue to track it. */
+function tracksAnIssue(comment: string): boolean {
+  return comment.includes("KNOWN DEFECT") && /issue #\d+/.test(comment);
+}
+
+/**
  * A tracking comment that names an issue reads as accounted for, and it outlives the issue: that is
  * exactly how this defect was orphaned when #44 closed with the item unfixed (issue #62).
  *
@@ -66,10 +97,51 @@ test("negative-control refusal tells the operator to reject, not to press a verb
 test("no KNOWN DEFECT comment in factory/ carries an issue pointer", () => {
   const factory = fileURLToPath(new URL(".", import.meta.url));
   const hits: string[] = [];
+  let scanned = 0;
   for (const name of readdirSync(factory)) {
     if (!name.endsWith(".ts") || name.endsWith(".test.ts")) continue;
-    const text = readFileSync(join(factory, name), "utf8");
-    if (/KNOWN DEFECT[\s\S]{0,200}issue #\d+/.test(text)) hits.push(name);
+    scanned += 1;
+    const found = commentsIn(readFileSync(join(factory, name), "utf8"));
+    if (found.some(tracksAnIssue)) hits.push(name);
   }
   assert.deepEqual(hits, []);
+  // Not vacuous: a rename or an extraction that stopped finding comments would pass over nothing.
+  assert.ok(scanned >= 10, `only ${scanned} production file(s) scanned; the discovery has drifted`);
+});
+
+test("the KNOWN DEFECT scan reads one comment at a time, not a 200-character window", () => {
+  // The direction the guard exists for.
+  assert.equal(
+    commentsIn("// KNOWN DEFECT: tracked in issue #12\nconst x = 1;\n").some(tracksAnIssue),
+    true,
+    "a comment that flags a defect and points at an issue must be caught",
+  );
+  assert.equal(
+    commentsIn("/**\n * KNOWN DEFECT, see issue #12.\n */\nconst x = 1;\n").some(tracksAnIssue),
+    true,
+    "a block comment must be caught too",
+  );
+
+  // ...and the direction issue #99 is about: two SEPARATE comments, neither of which tracks
+  // anything. The old window matched across the gap and reported a violation that was not one.
+  const separate = [
+    "// KNOWN DEFECT: the refusal below names the wrong verb.",
+    "const x = 1;",
+    "// Unrelated: this mirrors the shape issue #34 settled.",
+    "const y = 2;",
+  ].join("\n");
+  assert.equal(
+    commentsIn(separate).some(tracksAnIssue),
+    false,
+    "an issue mentioned in a DIFFERENT comment is not this comment tracking it",
+  );
+  // The premise of that case, so it cannot pass by finding no comments at all.
+  assert.equal(commentsIn(separate).length, 2, "the two comments must be extracted as two");
+
+  // A blank line ends a `//` run: two notes separated by one are two comments, not one.
+  assert.equal(
+    commentsIn("// KNOWN DEFECT: something.\n\n// Filed as issue #7.\n").some(tracksAnIssue),
+    false,
+    "a blank line separates two comments",
+  );
 });
