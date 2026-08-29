@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { sanitizeTerminalText } from "./terminal.ts";
 import type { EvidenceWitness, SandboxKind, Wave } from "./types.ts";
 
 /**
@@ -104,62 +105,20 @@ export const PREFLIGHT_INVOCATION = "node --experimental-strip-types factory/cli
 export const WITNESS_TAIL_LINES = 40;
 
 /**
- * ANSI/OSC/DCS/APC and friends, as full sequences rather than as a lone `\x1b` (issue #78).
+ * The one boundary between third-party bytes and the operator's terminal now lives in
+ * `terminal.ts`, and this module is one of its CALLERS rather than its owner.
  *
- * Stripping only the introducer would leave `]52;c;<base64>` sitting in the text, one concatenation
- * away from being a working OSC 52 again — so a sequence is removed whole or not at all.
+ * It moved because the name was making the mistake. A sanitiser that lives in `witness.ts` reads as
+ * a witness concern, and issue #78's fix was scoped to witness sinks accordingly — while the freeze
+ * printed a fetched CONTRIBUTING raw, seven `fail()` sites here printed `setupCommand` output raw,
+ * and the class stayed open. The subject was never "the witness"; it is any text a third party
+ * wrote that a human is about to read.
  *
- * Both encodings of each introducer are handled, because a strip that knows only about `\x1b` is a
- * strip a terminal in 8-bit mode walks straight through: `\x9b` IS `\x1b[` and `\x9d` IS `\x1b]`,
- * so they take the same body grammar rather than merely losing their first byte and leaving the
- * parameters behind as text.
- *
- * The string-terminated forms are bounded by `[^\x07\x1b\x9c]*` rather than allowed to run to the
- * end of the input: an unterminated OSC should cost the operator that one sequence, not every line
- * of the run log after it. The final byte of each form is optional so a sequence truncated by the
- * tail slice still loses its introducer and parameters.
+ * The two sanitise calls left in this file are the ones whose result is RECORDED, not merely
+ * printed: `runFailureDetail` splits into lines and counts them, so a `\r` must not become a
+ * "line"; `resolveToolchain` stores `path`/`raw` on the witness, which the evidence page renders
+ * from disk. The stream boundary cannot do either of those — it sees the finished string.
  */
-const TERMINAL_SEQUENCE = new RegExp(
-  [
-    // OSC / DCS / SOS / PM / APC: introducer, string body, string terminator.
-    "(?:\\x1b[\\]PX^_]|[\\x9d\\x90\\x98\\x9e\\x9f])[^\\x07\\x1b\\x9c]*(?:\\x07|\\x1b\\\\|\\x9c)?",
-    // CSI: parameter bytes, intermediate bytes, final byte.
-    "(?:\\x1b\\[|\\x9b)[0-?]*[ -/]*[@-~]?",
-    // Any other two-character escape sequence, and a lone ESC.
-    "\\x1b[@-Z\\\\-_]?",
-  ].join("|"),
-  "g",
-);
-/** Everything else a terminal acts on rather than shows: C0, DEL, C1. `\n` and `\t` are not that. */
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHAR = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
-
-/**
- * Make text produced by a WITNESSED REPOSITORY safe to put in front of an operator.
- *
- * The repository under witness is third-party code from the allowlist, executed in a sandbox
- * precisely because it is not trusted, and its stdout/stderr is therefore attacker-controllable on
- * the one surface whose entire job is to report what actually happened. With control sequences
- * intact that output can repaint a red witness as green (`\r` plus a cursor move), scroll its own
- * failure out of the scrollback, or invoke a terminal action outright (OSC 52 writes the clipboard).
- * #41 added the diagnostic because a silent refusal was indistinguishable from a broken interpreter;
- * printing it raw just moves the question up a level.
- *
- * `\n` and `\t` are kept: they are the shape of a test log, and a diagnostic flattened to one line
- * is the diagnostic thrown away.
- *
- * This is a RENDERING boundary, not a record one. The run logs persisted to disk keep the original
- * bytes and the sha256 on the evidence page is computed over those, so the audit trail is unchanged
- * — what is sanitised is the copy a human reads.
- *
- * `removed` is returned rather than discarded so a caller can say that something was taken out. A
- * sanitiser that silently tidies hostile output is itself a concealment channel: the operator would
- * see a coherent transcript with no sign that the coherence was ours.
- */
-export function sanitizeTerminalText(text: string): { text: string; removed: number } {
-  const stripped = text.replace(TERMINAL_SEQUENCE, "").replace(CONTROL_CHAR, "");
-  return { text: stripped, removed: text.length - stripped.length };
-}
 
 /**
  * The diagnostic block every run-failure refusal ends with.
@@ -391,6 +350,17 @@ export async function witnessEvidence(
 
   const dir = join(tmpdir(), `foundry-witness-${input.repoId.replace("/", "_")}-${Date.now()}`);
   const url = `https://github.com/${input.repoId}.git`;
+  // Every refusal below interpolates a step's raw output, and that output is REPOSITORY-CONTROLLED:
+  // `allowlist.yaml` carries `setupCommand: npm ci`, run with `cwd` set to this clone, so the
+  // repository's own lifecycle scripts author every byte of "setup command failed (exit 1) — …".
+  //
+  // Not sanitised here, and that is deliberate rather than an oversight. Issue #78's round-1 fix was
+  // a sanitise call at each sink, and the list came up seven short — precisely these. The boundary
+  // is now on the operator's terminal streams (`terminal.ts`, installed by every entry point), which
+  // is the one place that cannot be short. Adding calls back here would trade a complete rule for a
+  // list that has to stay complete, and the list is what failed. `runFailureDetail` keeps its own
+  // call because it SPLITS the output into lines and counts them — a `\r` must not become a "line" —
+  // which the stream boundary cannot do; it sees the finished string.
   const fail = async (error: string): Promise<WitnessOutcome> => {
     await runner("cleanup", [dir]);
     return { ok: false, error };

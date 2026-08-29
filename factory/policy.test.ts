@@ -284,16 +284,35 @@ test("the derived-figure guard reads case-insensitively and does not mistake a p
   }
 
   // Strict direction. A numeric path segment is a path, not a measurement.
+  //
+  // BOTH lookarounds are exercised. Every fixture here used to put the numeric pair AFTER a `/`,
+  // which only ever tested the LOOKBEHIND: deleting `(?![/\w])` on its own left the suite green.
+  // The last two put a numeric segment BEFORE a `/` with an ordinary word boundary in front of it,
+  // so the trailing exclusion is the only thing that can save them.
   for (const note of [
     "no CONTRIBUTING.md at docs/2026/08 as of 2026-08-28",
     "nothing under .github/2026/08/ and nothing in AGENTS.md as of 2026-08-28",
     "checked https://example.invalid/docs/2026/08/policy as of 2026-08-28",
+    "read 2026/08/28 of the archived policy page as of 2026-08-28",
+    "no AGENTS.md; the wiki path is 2026/08/28/contributing as of 2026-08-28",
   ]) {
     assert.ok(
       parsePolicyRecords(record({ quote: note })).get("ColeMurray/background-agents"),
       note,
     );
   }
+
+  // The guard's known limit, pinned rather than left to be rediscovered. A bare two-component
+  // `2026/08` — no third segment, no surrounding path — is indistinguishable IN FORM from the
+  // ratio `141/272`, and the constant's comment says in as many words that it will not learn to
+  // recognise dates ("without needing to know it is a date"). So it refuses, and that is the right
+  // direction: the guard THROWS, so a false positive stops `validate` in front of a human who can
+  // reword the note, while a false negative puts an unreproducible measurement in a maintainer's
+  // mouth on the evidence page and nothing ever says so. What the comment promises is that an ISO
+  // date passes, and it does.
+  assert.equal(hasDerivedFigure("no CONTRIBUTING.md as of 2026-08-28"), false);
+  assert.equal(hasDerivedFigure("no CONTRIBUTING.md as of 2026/08"), true, "known limit, not a promise");
+  assert.equal(hasDerivedFigure("no CONTRIBUTING.md as of 2026/08/28"), false, "three segments read as a path");
 
   // …and the loosening must not cost the catch it was loosened around: a bare ratio still dies.
   assert.throws(

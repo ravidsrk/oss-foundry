@@ -1250,6 +1250,11 @@ export function applyRevert(
   }
   const already = revertNote(packet);
   if (already) return { state, recorded: false };
+  // `at` is WHEN THE ROLLBACK HAPPENED. Both callers now supply it from the event — `reconcile`
+  // from the reverting commit's `committedAt`, the `revert` verb from `--at` — because a shared
+  // predicate handed two different subjects is not a shared predicate. Defaulting to `now()` is the
+  // operator who did not say otherwise, and nothing else; it is not a licence to date a maintainer's
+  // rollback by when somebody got round to recording it (issue #81, round 2).
   const at = input.at ?? now();
   // docs/08-operations.md's window, on BOTH paths into this counter (issue #81).
   //
@@ -1272,7 +1277,10 @@ export function applyRevert(
         `refusing to record a revert on ${id}: the rollback is dated ${at}, ${window.days} days after the ` +
         `merge at ${packet.prMeta!.mergedAt} — past the ${REVERT_WINDOW_DAYS}-day window that closed ${window.deadline} ` +
         `(docs/08-operations.md, "within 30 days of merge"). classifyRevert discards a commit this late for the same ` +
-        `reason, and reverts is a permanent scorecard stop. Record it as a follow-up note instead if it should be kept.`,
+        `reason, and reverts is a permanent scorecard stop. If the maintainer rolled it back earlier than this and you ` +
+        `are only writing it down now, re-run with \`--at <iso>\` naming the day THEY did it — the window is measured ` +
+        `from the rollback, not from when you typed. If it really did land this late it is rework, not a revert ` +
+        `(docs/08-operations.md), and the scorecard is right to stay as it is.`,
       recorded: false,
     };
   }

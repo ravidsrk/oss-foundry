@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -50,6 +50,7 @@ import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { runSandboxDry } from "./sandbox.ts";
+import { installTerminalBoundary, sanitizeTerminalText } from "./terminal.ts";
 import {
   applyPacketToScorecard,
   applyReviewToScorecard,
@@ -2048,6 +2049,115 @@ test("a witnessed repository's output cannot write control sequences to the oper
 });
 
 /**
+ * THE NEGATIVE CONTROL for the removal notice. #77 has one; #78 shipped without it.
+ *
+ * `if (scrubbed.removed > 0)` survived being widened to `>= 0` and `${scrubbed.removed}` survived
+ * being replaced by `0`, which means the suite could not tell "we removed 46 bytes" from "we removed
+ * 0 bytes" from "we print this line on every failure". A notice that fires on every run is one the
+ * operator learns to skip, and `0 byte(s) … removed` printed over output that WAS tampered with is
+ * an affirmative false statement — the same shape of harm as `0 characters not shown`.
+ */
+test("the removal notice fires only when something was removed, and states the real count", () => {
+  const clean = runFailureDetail("npm test", "FAIL src/a.test.js\n  expected 200, got 500", "npm 10.9.2");
+  assert.match(clean, /FAIL src\/a\.test\.js/);
+  assert.equal(/removed/.test(clean), false, `a clean run must carry no removal notice:\n${clean}`);
+  assert.equal(/0 byte\(s\)/.test(clean), false, clean);
+
+  // …and when it does fire, the number is the number. Derived from the fixture rather than written
+  // down twice: the assertion has to move when the input does, or it is pinning a constant.
+  const hostile = "FAIL src/a.test.js\x1b]52;c;aGVsbG8=\x07\x1b[2J\r";
+  const removed = hostile.length - sanitizeTerminalText(hostile).text.length;
+  assert.ok(removed > 0);
+  const dirty = runFailureDetail("npm test", hostile, "npm 10.9.2");
+  assert.match(dirty, new RegExp(`^ {2}${removed} byte\\(s\\) of terminal control sequence removed`, "m"), dirty);
+});
+
+/**
+ * ISSUE #78, AS A CLASS, at the witness protocol's own refusals.
+ *
+ * `witnessEvidence` refuses through a `fail()` helper at seven places, and every one of them
+ * interpolates a step's raw output. They are not theoretical: `allowlist.yaml` carries
+ * `setupCommand: npm ci`, run with `cwd` set to the UNTRUSTED CLONE, so that repository's lifecycle
+ * scripts author every byte of `setup command failed (exit 1) — …`. Round 1 of this sweep fixed
+ * `runFailureDetail` and `resolveToolchain` and left these; three of them leak an OSC 52 body intact.
+ *
+ * The fix is not a sanitise call at each of the seven — that is the list that keeps coming up short.
+ * It is the boundary on the process's terminal streams. So this test drives the STAGES rather than
+ * naming the source lines: fail each one in turn, put its refusal through the boundary the CLI
+ * installs, and require that nothing a terminal acts on comes out. A refusal added at an eighth
+ * stage tomorrow is covered by the same loop the day it exists.
+ */
+test("no refusal the witness protocol can produce reaches the terminal with control bytes in it", async () => {
+  const OSC52 = "\x1b]52;c;cm0gLXJmIH4=\x07";
+  const hostile = `${OSC52}\x1b[8mconcealed\r\x1b[2Jrepainted\x9b31m`;
+
+  /** Fail exactly one stage; everything else answers the way a healthy clone would. */
+  const stagedRunner = (fail: string) => {
+    let setups = 0;
+    return async (cmd: string, args: string[]) => {
+      const line = [cmd, ...args].join(" ");
+      if (cmd === "run-setup") {
+        setups += 1;
+        const which = setups === 1 ? "setup" : "setup-rerun";
+        return which === fail ? { exit: 1, output: hostile } : { exit: 0, output: "" };
+      }
+      if (cmd === "run-tests@head") return fail === "head" ? { exit: 1, output: hostile } : { exit: 0, output: "ok" };
+      // `control` is the negative control STAYING GREEN — the one refusal whose trigger is an
+      // exit 0 rather than an exit 1.
+      if (cmd === "run-tests@revert") return fail === "control" ? { exit: 0, output: hostile } : { exit: 1, output: hostile };
+      if (cmd === "probe") return { exit: 0, output: `${hostile}\nnpm 10.9.2` };
+      if (cmd === "cleanup") return { exit: 0, output: "" };
+      const stage =
+        line.includes(" clone ") ? "clone"
+        : line.includes(" fetch ") ? "fetch"
+        : line.includes("checkout --detach") ? "checkout"
+        : line.includes("clean -fdx") ? "clean"
+        : line.includes(`checkout ${BASE}`) ? "revert"
+        : line.includes("diff --name-only") ? "diff"
+        : "other";
+      if (stage === fail) return { exit: 1, output: hostile };
+      if (stage === "diff") return { exit: 0, output: "src/thing.ts\n" };
+      return { exit: 0, output: "" };
+    };
+  };
+
+  const stages = ["clone", "fetch", "checkout", "setup", "clean", "setup-rerun", "revert", "head", "control"];
+  for (const stage of stages) {
+    const outcome = await witnessEvidence(
+      { ...WAVE0, testCommand: "npm test", setupCommand: "npm ci" },
+      stagedRunner(stage),
+      {},
+    );
+    assert.equal(outcome.ok, false, `stage ${stage} was supposed to refuse`);
+    if (outcome.ok) continue;
+
+    // Through the boundary the CLI installs — the same code path, not a re-implementation of it.
+    const stream: { text: string; write(chunk: unknown): boolean } = {
+      text: "",
+      write(chunk: unknown) {
+        this.text += String(chunk);
+        return true;
+      },
+    };
+    installTerminalBoundary([stream]);
+    stream.write(`${outcome.error}\n`);
+
+    assert.equal(
+      /[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(stream.text),
+      false,
+      `the ${stage} refusal put a control byte on the terminal: ${JSON.stringify(stream.text.slice(0, 300))}`,
+    );
+    assert.equal(
+      stream.text.includes("52;c;"),
+      false,
+      `the ${stage} refusal left an OSC 52 body one concatenation from working: ${JSON.stringify(stream.text.slice(0, 300))}`,
+    );
+    // The diagnostic survives the sanitising — this must not be passing by printing nothing.
+    assert.ok(stream.text.trim().length > 20, `${stage}: ${JSON.stringify(stream.text)}`);
+  }
+});
+
+/**
  * The second sink, and the reason issue #78 says "check for OTHER sinks besides this one".
  *
  * `resolveToolchain` runs `command -v <tool> && <tool> --version` through the same runner as the
@@ -3242,18 +3352,97 @@ test("attach-witness resolves witness logs against the log root, not the operato
   assert.equal(ledgerAt(gone.dir).packets[0].evidence, undefined);
 });
 
+/**
+ * The OTHER half of #80's split, and the half every fixture was hiding.
+ *
+ * `readOperatorPath` (cwd-relative) and `readRepoRelative` (log-root-relative) are two functions
+ * with the anchor in the name because they were one function with two call sites and one right
+ * answer between them. That split is the fix's central design claim — and it was unfalsifiable,
+ * because every fixture passed an ABSOLUTE `--manifest`, and `resolve()` ignores its base for an
+ * absolute path. Swapping `readOperatorPath` for `readRepoRelative` at the manifest call site left
+ * the whole suite green.
+ *
+ * So: a RELATIVE `--manifest`, typed from a cwd that is not the log root, with the file present in
+ * only one of the two trees. `--manifest ./witness.json` means the operator's shell, and nothing
+ * else can make it resolve.
+ */
+test("a relative --manifest is the operator's path, resolved against their shell and not the log root", () => {
+  const { dir, id, manifestPath, stub } = ingestFixture();
+  // The operator's shell: a third directory, holding the manifest under a name the log root does
+  // not have. If the manifest call site ever anchors to the log root, this file is invisible.
+  const shell = mkdtempSync(join(tmpdir(), "foundry-shell-"));
+  writeFileSync(join(shell, "operator-witness.json"), readFileSync(manifestPath, "utf8"));
+  assert.equal(existsSync(join(dir, "operator-witness.json")), false, "the log root must NOT hold this name");
+
+  const run = runCli(
+    shell,
+    ["attach-witness", id, "--manifest", "operator-witness.json", "--logs-root", dir],
+    stub,
+    {},
+    dir,
+  );
+  assert.equal(run.status, 0, `a relative --manifest must resolve against the operator's cwd:\n${run.seen}`);
+  assert.ok(ledgerAt(dir).packets[0].evidence, "the witness must have reached the ledger");
+
+  // The negative half, from the same shell: a relative path that names nothing still refuses, so
+  // "read anything, anywhere" cannot satisfy the assertion above.
+  const gone = ingestFixture();
+  const absent = runCli(
+    shell,
+    ["attach-witness", gone.id, "--manifest", "no-such-witness.json", "--logs-root", gone.dir],
+    gone.stub,
+    {},
+    gone.dir,
+  );
+  assert.equal(absent.status, 1, absent.seen);
+  assert.match(absent.seen, /cannot read witness manifest/);
+  assert.equal(ledgerAt(gone.dir).packets[0].evidence, undefined);
+});
+
 test("the witness log root defaults to the repository root and the state file's own anchor", async () => {
   // The default is the half an override can hide. `--logs-root` above proves the plumbing; this
   // proves that an operator who passes nothing gets the checkout rather than their shell's cwd —
   // which is the whole defect. Asserted through the CLI's own resolver so it cannot be satisfied by
   // a test-local reimplementation of the rule.
   const { witnessLogRootFor } = await import("./cli.ts");
-  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  // `resolve()`d, and that is the assertion, not an incidental. `new URL("..", …)` yields a path
+  // with a TRAILING SLASH, and the default branch used to return it raw while the override branch
+  // resolved — so `--help` printed `…/oss-foundry//docs/evidence/logs/<packetId>/`, a doubled slash
+  // in the one line that tells the operator where the run logs are. `STATE_FILE` normalises for the
+  // same reason; the sibling did not.
+  const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+  assert.equal(repoRoot.endsWith("/"), false, "the anchor must be normalised, not merely correct");
   assert.equal(witnessLogRootFor([]), repoRoot);
   assert.equal(witnessLogRootFor(["attach-witness", "pkt_x", "--manifest", "w.json"]), repoRoot);
-  // Not the cwd: this test's own process is started in the repo root by the runner, so the two
-  // would be indistinguishable if the assertion were `!== process.cwd()`. Name the value instead.
   assert.equal(witnessLogRootFor(["--logs-root", "/tmp/elsewhere"]), resolve("/tmp/elsewhere"));
+
+  // …AND FROM A CWD THAT IS NOT THE REPOSITORY, through a spawned CLI, because nothing above can
+  // tell the anchor from the cwd. This suite runs with cwd set to the repo root, so `resolve(".")`
+  // and the anchor are the same string, and "name the value instead" — what this test used to
+  // rely on — names a value both answers produce. That is not hypothetical: replacing the default
+  // with `resolve(".")` SURVIVED every assertion above once the anchor was normalised. It had only
+  // ever been killed by the trailing slash the normalisation removed, which is a coincidence, not
+  // a test.
+  //
+  // `--help` is the surface, and it is the one an operator reads to find their run logs. Deliberately
+  // no `--logs-root` and no `--state`: the DEFAULT is the half the bug was in and the half an
+  // override hides.
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "foundry-help-")));
+  const help = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", join(import.meta.dirname, "cli.ts"), "--help"],
+    { cwd: elsewhere, encoding: "utf8", env: { ...process.env, NODE_NO_WARNINGS: "1" } },
+  );
+  assert.equal(help.status, 0, help.stderr);
+  assert.ok(
+    help.stdout.includes(`Witness logs: ${repoRoot}/docs/evidence/logs/<packetId>/`),
+    `--help must name the checkout, with one slash, whatever the cwd:\n${help.stdout}`,
+  );
+  assert.equal(
+    help.stdout.includes(elsewhere),
+    false,
+    `--help named the operator's shell as the log root:\n${help.stdout}`,
+  );
 });
 
 test("attach-witness refuses a manifest that names logs outside its own packet", () => {
@@ -4026,7 +4215,15 @@ test("classifyRevert names the reverting commit, and only inside the 30-day wind
     commits: [{ sha: "dddd444", message: `This reverts commit ${merge}.`, committedAt: "2026-09-27T09:00:00Z" }],
   });
   assert.equal(late.reverted, false);
-  if (!late.reverted) assert.match(late.why, /30-day/);
+  // The COUNT as well as the rule. `const days = window.known ? window.days : 0` survives being
+  // replaced by `const days = 0`, and `days:` can be dropped from `revertWindow`'s return
+  // altogether — strip-types erases the type that would have caught either — leaving the operator
+  // reading "landed 0 days after the merge" or "landed undefined days after the merge" about a
+  // rollback that landed 31 days out.
+  if (!late.reverted) {
+    assert.match(late.why, /30-day/);
+    assert.match(late.why, /landed 31 days after the merge/, late.why);
+  }
 
   // The merge commit cannot revert itself, and nothing before the merge can revert it.
   const self = classifyRevert({
@@ -4399,6 +4596,77 @@ test("applyRevert enforces the 30-day window on the operator's path, not only th
     const note = revertNote(blind.state.packets.find((p) => p.id === id)!);
     assert.match(note?.body ?? "", /window could not be checked/i, note?.body);
   }
+});
+
+/**
+ * ONE definition, ONE predicate — and the SAME SUBJECT (issue #81, round 2).
+ *
+ * Round 1 gave both halves the shared `revertWindow`. It did not give them the same date. The
+ * classifier passes the reverting commit's `committedAt`; `applyRevert` took `at`, and the `revert`
+ * verb never supplied one, so it defaulted to `now()` — WHEN THE OPERATOR TYPED. There was no
+ * `--at`. Reproduced: merge at T0, maintainer rollback on day 10, operator records it on day 35 —
+ * `classifyRevert` + `reconcile` said `reverted: true`, `reverts: 1`, `health(): stop`; the
+ * operator's verb refused with "35 days after the merge", `reverts: 0`, `health(): good`. Identical
+ * rollback, opposite answers, in the safety-relevant direction, with no operator path to the
+ * SPEC.md §7 MUST at all. docs/08-operations.md dates the window from the EVENT in so many words:
+ * "a maintainer-stated rollback naming the PR, within 30 days of merge".
+ *
+ * A shared predicate handed two different subjects is not a shared predicate; it is two rules that
+ * happen to be spelled once.
+ */
+test("both halves of the revert definition date the window from the rollback, not from the typing", () => {
+  const seed = seedState();
+  const id = "pkt_ravidsrk_orca-fleet_71";
+  const merged = seed.packets.find((p) => p.id === id)!;
+  const mergedAt = merged.prMeta!.mergedAt!;
+  const mergedMs = Date.parse(mergedAt);
+  const day = (n: number) => new Date(mergedMs + n * 86_400_000).toISOString();
+
+  // The mechanical half, on the maintainer's rollback: day 10, well inside the window.
+  const classified = classifyRevert({
+    mergeCommitSha: merged.prMeta!.mergeCommitSha!,
+    mergedAt,
+    commits: [
+      {
+        sha: "ffff1110000",
+        message: `Revert "the thing"\n\nThis reverts commit ${merged.prMeta!.mergeCommitSha}.`,
+        committedAt: day(10),
+      },
+    ],
+  });
+  assert.equal(classified.reverted, true, "precondition: the mechanical half records a day-10 rollback");
+
+  // The operator's half, writing the SAME day-10 rollback down on day 35. Dated by the event, it
+  // agrees with the classifier; dated by the typing, it used to contradict it.
+  const recorded = applyRevert(seed, id, {
+    source: "operator",
+    why: "maintainer rolled it back on day 10; noticed in the thread today",
+    at: day(10),
+  });
+  assert.equal(recorded.recorded, true, recorded.error);
+  assert.equal(scorecardRow(recorded.state.scorecard, merged.repoId)!.reverts, 1);
+  assert.equal(health(scorecardRow(recorded.state.scorecard, merged.repoId)!), "stop");
+
+  // …and the two halves now agree about this rollback, which is the property under test.
+  assert.equal(classified.reverted, recorded.recorded);
+
+  // The refusal, when it does fire, states the three facts an operator needs to act: how late, the
+  // deadline it passed, and the flag that dates it correctly. Each is asserted separately because
+  // `--experimental-strip-types` erases the types around them: `deadline:` and `days:` can both be
+  // dropped from `revertWindow`'s return and the refusal would read "closed undefined" /
+  // "undefined days after the merge" with nothing to notice.
+  const late = applyRevert(seed, id, { source: "operator", why: "rolled back", at: day(35) });
+  assert.equal(late.recorded, false);
+  const error = late.error ?? "";
+  assert.match(error, /the rollback is dated 2026-/, error);
+  assert.match(error, /\b35 days after the merge\b/, error);
+  assert.match(error, new RegExp(`closed ${day(30).replace(/[.]/g, "\\.")}`), error);
+  assert.match(error, /`--at <iso>`/, error);
+  assert.doesNotMatch(error, /undefined/, error);
+  // A refusal that names a command the operator cannot type is the defect issue #35 was filed
+  // against, and this message carried one: "Record it as a follow-up note instead" named a verb
+  // that does not exist — 18 verbs in `--help`, none of them records a note.
+  assert.doesNotMatch(error, /follow-up note/i, error);
 });
 
 test("a recorded revert points the operator at the seed, never at allowlist.yaml", () => {

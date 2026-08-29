@@ -119,9 +119,13 @@ scorecard read `0` forever, correct or not.
    on the base branch saying `This reverts commit <our merge commit>` within 30 days — is found
    without a human: `verify-ledger` (the 6-hour clock, the only unattended runner) fails the run
    while the ledger still records no revert, and `reconcile` records it and stops the repo. The prose
-   half — "a maintainer-stated rollback naming the PR" — is `revert <packetId> --reason <text>`,
-   reason mandatory and stored verbatim. Post-merge rework is excluded structurally: nothing but a
-   commit naming our merge commit can reach the counter.
+   half — "a maintainer-stated rollback naming the PR" — is
+   `revert <packetId> --reason <text> [--at <iso>]`, reason mandatory and stored verbatim, `--at`
+   the day the ROLLBACK happened (defaults to now). Both halves measure the 30-day window from the
+   event, through one shared predicate: the classifier passes the reverting commit's `committedAt`,
+   the verb passes `--at`. Without that flag an operator writing up a day-10 rollback on day 35 was
+   refused by the verb and recorded by `reconcile` — one rollback, two verdicts. Post-merge rework is
+   excluded structurally: nothing but a commit naming our merge commit can reach the counter.
 4. **`applyPrSync`'s status guard is untouched.** It has never seen a merged packet and still does
    not — the quiet-day and `closedUnmerged` semantics ADR 0002 describes are unchanged. The revert
    re-check went where merged packets were already being fetched: `reconcile`'s loop and the clock.

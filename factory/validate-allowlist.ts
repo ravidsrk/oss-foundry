@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { assertAllowlist, loadAllowlistFile } from "./load-allowlist.ts";
 import { parsePolicyRecords, policyRecordsPath } from "./policy-records.ts";
+import { installTerminalBoundary } from "./terminal.ts";
+
+// Uniform with the other entry points on purpose. What `validate` prints today is ours — repo
+// ids off the roster — but the maintainer prose in `policy-records.json` is one throw away, and
+// an entry point that is exempt "because it only prints our own strings" is the exemption the
+// next print lands behind. Zero exemptions except the test harness; see cli.test.ts.
+installTerminalBoundary();
 
 const parsed = loadAllowlistFile();
 assertAllowlist(parsed);

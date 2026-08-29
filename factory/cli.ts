@@ -53,6 +53,7 @@ import { health, scorecardRow } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
+import { installTerminalBoundary } from "./terminal.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
 import {
   hostRunner,
@@ -171,7 +172,12 @@ const STATE_FILE = resolve(STATE_FILE_FLAG ?? resolve(REPO_ROOT, ".foundry-state
  */
 export function witnessLogRootFor(argv: string[]): string {
   const override = flag(argv, "--logs-root");
-  return override ? resolve(override) : REPO_ROOT;
+  // Both branches go through `resolve()`, and the default branch needs it as much as the override:
+  // `REPO_ROOT` comes from `new URL("..", …)` and therefore carries a trailing slash, which `--help`
+  // printed straight into `…/oss-foundry//docs/evidence/logs/…`. `STATE_FILE` already normalises for
+  // the same reason one line up; a doubled slash in the one line that tells the operator where the
+  // logs are is a small thing that makes the reader doubt the rest of the sentence.
+  return resolve(override ?? REPO_ROOT);
 }
 const LOGS_ROOT_FLAG = flag(ARGV, "--logs-root");
 const LOGS_ROOT = witnessLogRootFor(ARGV);
@@ -395,7 +401,7 @@ function usage(): void {
   approve <packetId> --note <text> [--by <name>]   (identity also via FOUNDRY_OPERATOR)
   reject <packetId> --reason <text>
   halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
-  revert <packetId> --reason <text>   (a maintainer-stated rollback naming the PR — SPEC.md §7 stop; an explicit git revert of our merge commit is found by reconcile on its own)
+  revert <packetId> --reason <text> [--at <iso>]   (a maintainer-stated rollback naming the PR — SPEC.md §7 stop; an explicit git revert of our merge commit is found by reconcile on its own. --at is WHEN THE ROLLBACK HAPPENED, which is what the 30-day window is measured from; it defaults to now)
   advance <packetId>
   evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
   witness-check [repoId]   (pre-flight: resolve the interpreter each allowlisted testCommand would really use here, before a packet is in flight)
@@ -604,7 +610,26 @@ async function main() {
       );
       process.exit(1);
     }
-    const result = applyRevert(state, id, { source: "operator", why: reason });
+    // WHEN THE ROLLBACK HAPPENED, not when the operator typed (issue #81, round 2).
+    //
+    // `applyRevert` and `classifyRevert` share one 30-day predicate so the two halves of
+    // docs/08-operations.md's single definition cannot disagree — but they were handing it two
+    // different SUBJECTS. `classifyRevert` passes the commit's `committedAt`; this verb passed
+    // nothing, so `applyRevert` defaulted to `now()`. A maintainer who rolled our merge back on
+    // day 10 and an operator who wrote it down on day 35 therefore produced OPPOSITE verdicts from
+    // the same predicate over the same rollback: the mechanical path recorded it and halted the
+    // repo, the operator's path refused it as out of window and left `health()` reading `good`.
+    // Opposite answers in the safety-relevant direction, with no operator path to the SPEC.md §7
+    // MUST at all. The window dates from the EVENT on both paths now; the default is still now,
+    // which is the right reading of an operator who does not say otherwise.
+    const at = flag(rest, "--at");
+    if (at !== undefined && !Number.isFinite(Date.parse(at))) {
+      console.error(
+        `revert --at ${at} is not a date this can parse — pass the rollback's own timestamp as ISO-8601 (e.g. 2026-08-19T14:00:00Z). Omit --at to date it now.`,
+      );
+      process.exit(1);
+    }
+    const result = applyRevert(state, id, { source: "operator", why: reason, at });
     if (result.error) {
       console.error(result.error);
       process.exit(1);
@@ -1277,5 +1302,16 @@ function isProcessEntryPoint(): boolean {
 // Guarded so the module can be imported (by a test, or another verb) without the whole CLI running
 // and calling `process.exit`. Spawning `cli.ts` as the entry point still runs `main()` unchanged.
 if (isProcessEntryPoint()) {
+  // BEFORE `main()`, and inside this guard rather than at module scope, because the boundary is a
+  // property of *being the process*: an importer (a test, another verb) owns its own streams and
+  // must not have them rewritten underneath it.
+  //
+  // Every verb below prints third-party text somewhere — a fetched CONTRIBUTING at the freeze, a
+  // phrase quoted out of one, an issue title, a witnessed repository's stdout, a `setupCommand`'s
+  // output from inside the untrusted clone. Sanitising those at each `console.*` is a list that has
+  // to stay complete, and issue #78 shipped an incomplete one: two sinks closed, nine open. This is
+  // the same fix applied where it cannot be forgotten — a `console.log` added tomorrow, in any verb,
+  // is already behind it.
+  installTerminalBoundary();
   await main();
 }

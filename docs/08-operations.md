@@ -182,9 +182,18 @@ Silence is the modal outcome for external agent PRs, so every KPI names its deno
     the base branch whose message says `This reverts commit <our merge commit>` inside the 30-day
     window — is found without a human: `verify-ledger` (the 6-hour clock) fails the run while the
     ledger still records no revert, and `reconcile` records it and stops the repo. The **prose**
-    half — a maintainer-stated rollback — is `revert <packetId> --reason <text>`, where the reason
-    is mandatory and stored verbatim. Nothing else can set `reverts`, and one revert is counted per
-    packet: `health()` already stops the repo at one, so a second would only inflate the number.
+    half — a maintainer-stated rollback — is `revert <packetId> --reason <text> [--at <iso>]`, where
+    the reason is mandatory and stored verbatim. Nothing else can set `reverts`, and one revert is
+    counted per packet: `health()` already stops the repo at one, so a second would only inflate the
+    number.
+  - **Both halves date the window from the EVENT.** "Within 30 days of merge" is a fact about when
+    the rollback happened, not about when anybody wrote it down, and the two halves share one
+    predicate (`revertWindow`) precisely so they cannot disagree about it — but a shared predicate
+    only agrees if it is handed the same subject. The mechanical half passes the reverting commit's
+    `committedAt`; the prose half passes `--at`, which defaults to now for an operator recording a
+    rollback as it happens. An operator writing up a day-10 rollback on day 35 passes `--at` with
+    day 10; without it the same rollback would be refused as out of window while `reconcile` would
+    have recorded it, which is the SPEC.md §7 MUST going unsatisfied with no path to satisfy it.
   - The mechanical half reads `GET /repos/{o}/{r}/commits?since=<mergedAt>&until=<mergedAt+30d>`
     **through GitHub's own `Link: rel="next"` cursor**, up to a cap of 10 pages (1000 commits).
     GitHub serves commits newest-first, so a single-page read hides the window that opens *at the

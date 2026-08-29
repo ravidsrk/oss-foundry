@@ -139,10 +139,13 @@ function withheldChars(docs: PolicyDocSource[]): number {
  *
  * PARTIAL absence is the same defect one step in, and it is issue #77. The scanner reads the whole
  * fetched document; the packet keeps `POLICY_DOC_EXCERPT_LIMIT` characters of it. So this surface
- * could print 4,000 characters and then close with "no ban statement matched in 4,882 chars from
- * CONTRIBUTING" — a claim of coverage over 882 characters the reader had not been given, phrased as
- * reassurance, immediately above the attest. Combined with the scanner's known-and-parked miss mode
- * (#37) that is an operator approving a contribution to a repository that said in words not to.
+ * could print 4,000 characters and then close with "no ban statement matched in 5234 chars from
+ * CONTRIBUTING" — a claim of coverage over the 1,234 characters the reader had not been given,
+ * phrased as reassurance, immediately above the attest. Those two numbers are the fixture in
+ * `packet.test.ts` ("the freeze never claims a clean scan over characters it did not show"), so the
+ * example is re-derivable rather than illustrative. Combined with the scanner's known-and-parked
+ * miss mode (#37) that is an operator approving a contribution to a repository that said in words
+ * not to.
  *
  * The fix is loudness, not more text, and the reason is that the excerpt limit is a LEDGER bound:
  * `policyDocs` is stored state, the full document is never kept, and re-fetching at freeze time
@@ -167,8 +170,9 @@ export function renderFreezeEvidence(packet: TaskPacket): string {
     );
     for (const line of doc.excerpt.split("\n")) lines.push(`  | ${line}`);
     // Where the text stops, because that is where a scrolling reader's eye lands. The header above
-    // carries the same number, but after 4,000 characters of quoted prose it is dozens of screens
-    // back — a disclosure the operator has to remember is not one they have at the decision.
+    // carries the same number, but 4,000 characters of quoted prose renders as 63 quoted lines —
+    // one to three screens back, depending on the terminal — and a disclosure the operator has to
+    // remember having read is not one they have at the decision.
     if (missing > 0) {
       lines.push(
         `  ⟪ ${missing} more characters of ${doc.name} are NOT shown above. The scanner read them; you have not. ⟫`,

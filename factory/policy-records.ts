@@ -19,6 +19,14 @@ const STANCES = new Set(["forbidden", "conditional", "welcome", "silent"]);
  * whole difference between a ratio and a path: a ratio has whitespace or a sentence around it, a
  * path segment has another `/` on one side. Adjacent slashes are therefore the exclusion, which
  * also drops `2026/08/28` — a date written the other way — without needing to know it is a date.
+ *
+ * KNOWN LIMIT, pinned in `policy.test.ts`: a bare two-component `2026/08`, with no third segment and
+ * no path around it, is refused. It is indistinguishable in form from `141/272`, and the paragraph
+ * above is a deliberate commitment not to start recognising dates. The promise is that an ISO date
+ * (`2026-08-28`) passes, and it does. The fail direction is also the safe one — this guard THROWS,
+ * so a false positive stops `validate` in front of a human who rewords the note, while a false
+ * negative puts an unreproducible measurement into a maintainer's mouth on the evidence page and
+ * nothing ever says so.
  */
 const RATIO_IN_WORDS = /\b\d[\d,]*\s*of\s*\d[\d,]*\b/i;
 const RATIO_AS_SLASH = /(?<![/\w])\b\d[\d,]*\s*\/\s*\d[\d,]*\b(?![/\w])/;
