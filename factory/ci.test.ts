@@ -83,21 +83,61 @@ test("some workflow runs the full test suite on the pull-request path", () => {
 });
 
 /**
+ * The `pull_request:` trigger's own nested block, ending at the next sibling key.
+ *
+ * `{2}` is a literal space count, not `\s{2}`: `\s` also matches a newline, so the sloppier form
+ * expresses "two of any whitespace" when the actual rule is "a sibling key indented two spaces".
+ * `\S` rather than `\w` so a quoted key (`"push":`) also ends the block. Erring toward returning
+ * MORE text is the safe direction here — the caller asserts an absence, so over-reading can only
+ * cause a false failure, never a false pass.
+ */
+function pullRequestBlock(on: string): string {
+  const from = on.slice(on.indexOf("pull_request:"));
+  const next = from.slice(1).search(/\n {2}\S/);
+  return next === -1 ? from : from.slice(0, next + 1);
+}
+
+/**
  * A `paths:` or `paths-ignore:` filter on the gate's `pull_request` trigger is the quiet version of
  * deleting the workflow: the check does not fail, it does not run, and a pull request that changes
  * nothing on the list merges with no suite behind it. This repo has no such filter and should not
  * acquire one silently — every `*.ts` in `factory/` is load-bearing for every other one.
  */
 test("the pull-request gate is not narrowed by a path filter", () => {
+  /**
+   * The extractor first, against the shapes it has to survive — raised in review of this file as
+   * "the boundary regex treats the first nested property as the next trigger", which would have
+   * left `scoped` equal to `pull_request:\n` and the assertion below permanently green. The claim
+   * was checked and is not true of either indentation, but "I checked" is not evidence, so the
+   * cases are pinned here where a future edit to the regex has to keep them passing.
+   */
+  const NARROWED = [
+    'on:\n  pull_request:\n    paths: ["docs/**"]\n  push:\n    branches: ["main"]\n',
+    'on:\n  push:\n    branches: ["main"]\n  pull_request:\n    paths-ignore:\n      - "docs/**"\n',
+    'on:\n  pull_request:\n    types: [opened]\n    paths: ["docs/**"]\n',
+  ];
+  for (const yaml of NARROWED) {
+    const block = pullRequestBlock(triggerBlock(yaml));
+    assert.match(
+      block,
+      /paths(-ignore)?:/,
+      `the pull_request block extractor stops before a path filter in:\n${yaml}\nso the assertion below could never see one`,
+    );
+  }
+  // ...and it does not over-read into a sibling trigger's keys, which would make the absence
+  // assertion fail on a workflow that is perfectly fine.
+  assert.doesNotMatch(
+    pullRequestBlock(triggerBlock('on:\n  pull_request:\n  push:\n    paths: ["x"]\n')),
+    /paths:/,
+    "the extractor read past pull_request: into push:, so an unrelated trigger's path filter would red this test",
+  );
+
   for (const w of workflows()) {
     const on = triggerBlock(w.text);
     if (!/^\s*pull_request:\s*$/m.test(on)) continue;
     if (!/run:\s*npm test\b/.test(w.text) && !/run-tests\.ts/.test(w.text)) continue;
-    const pullRequest = on.slice(on.indexOf("pull_request:"));
-    const next = pullRequest.slice(1).search(/\n\s{2}\w/);
-    const scoped = next === -1 ? pullRequest : pullRequest.slice(0, next + 1);
     assert.doesNotMatch(
-      scoped,
+      pullRequestBlock(on),
       /paths(-ignore)?:/,
       `${w.name} filters its pull_request trigger by path, so a change outside the filter merges with no suite behind it`,
     );
@@ -141,14 +181,22 @@ test("the suite also runs on push to main, so a merge commit is tested", () => {
      * An unconditional `cancel-in-progress` is the quiet way to lose this gate: two merges landing
      * close together cancel the earlier run, and the merge commit it was testing keeps a green
      * check it never earned. Caught in review of this very file, where it was written that way
-     * first. If cancellation is enabled at all it must be conditional on the event.
+     * first.
+     *
+     * The expression must NAME THE EVENT, not merely be an expression. Round 1 of this test only
+     * required a `${{`, which `${{ true }}` satisfies while cancelling exactly the runs this
+     * protects — raised on the pull request. Deliberately not pinned to one literal spelling:
+     * `github.event_name == 'pull_request'` and `github.event_name != 'push'` are the same
+     * decision, and a test that reds on a semantically identical rewrite trains people to edit the
+     * test instead of reading it. Naming `github.event_name` is the invariant; which comparison is
+     * style.
      */
     const concurrency = /^concurrency:$([\s\S]*?)(?=^\S)/m.exec(w.text)?.[1] ?? "";
     if (/cancel-in-progress:/.test(concurrency)) {
       assert.match(
         concurrency,
-        /cancel-in-progress:\s*\$\{\{/,
-        `${w.name} cancels in-progress runs unconditionally, which would cancel a push run and leave a merge commit on main with no suite behind it`,
+        /cancel-in-progress:\s*\$\{\{[^}]*github\.event_name[^}]*\}\}/,
+        `${w.name} enables cancel-in-progress without conditioning it on github.event_name, so a push run can be cancelled and a merge commit keeps a green check it never earned`,
       );
     }
   }
