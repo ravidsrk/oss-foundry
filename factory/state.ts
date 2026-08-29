@@ -135,7 +135,10 @@ function isWitness(value: unknown): boolean {
     /^[0-9a-f]{64}$/.test(o.testLogSha) &&
     typeof o.revertLogSha === "string" &&
     /^[0-9a-f]{64}$/.test(o.revertLogSha) &&
-    typeof o.ranAt === "string"
+    typeof o.ranAt === "string" &&
+    // Optional, because it is advisory and post-dates every witness in the committed seed. Still
+    // validated, because the evidence page interpolates it into a sentence for the maintainer.
+    optional(o.toolchain, (v) => typeof v === "string")
   );
 }
 

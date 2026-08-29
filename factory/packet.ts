@@ -157,7 +157,10 @@ export function renderEvidencePage(packet: TaskPacket): string {
           `- Range: \`${ev.baseSha.slice(0, 12)}..${ev.headSha.slice(0, 12)}\` — ${ev.filesChanged} files, ${ev.diffLines} changed lines`,
           `- Test command: \`${ev.testCommand}\``,
           w
-            ? `- Witnessed by the ${w.provider} sandbox at ${w.ranAt}: tests exit ${w.testExit} at head; **exit ${w.revertExit} with the change reverted** (the proof binds). Log hashes sha256 ${w.testLogSha.slice(0, 12)}… / ${w.revertLogSha.slice(0, 12)}…`
+            ? // The toolchain answers the question a maintainer cannot answer from our machine:
+              // *which* interpreter produced this exit 0. Printed only when the witness resolved
+              // one — a witness that did not know says nothing rather than implying it asked.
+              `- Witnessed by the ${w.provider} sandbox at ${w.ranAt}${w.toolchain ? ` (toolchain: ${w.toolchain})` : ""}: tests exit ${w.testExit} at head; **exit ${w.revertExit} with the change reverted** (the proof binds). Log hashes sha256 ${w.testLogSha.slice(0, 12)}… / ${w.revertLogSha.slice(0, 12)}…`
             : `- Negative control: ${ev.negativeControl} (recorded before machine witnessing shipped — attested, not witnessed)`,
           ...(w?.testLogPath && w?.revertLogPath
             ? [

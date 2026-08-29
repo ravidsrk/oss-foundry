@@ -206,6 +206,15 @@ export interface EvidenceWitness {
   /** Repo-root-relative paths to the persisted run logs the two sha256s hash. */
   testLogPath: string;
   revertLogPath: string;
+  /**
+   * What the `testCommand` actually resolved to on the machine that ran it — `"python3 3.14.7"`.
+   *
+   * Advisory, never a gate. It is absent on every witness produced before issue #41 and on any run
+   * whose tools reported no version, and an absent toolchain must not stop a packet: the claim it
+   * supports is "here is which interpreter produced this exit 0", not "this run is legitimate".
+   * The gate's job is provenance and subject binding; this is for the reader.
+   */
+  toolchain?: string;
 }
 
 export interface EvidenceManifest {

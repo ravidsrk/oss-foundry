@@ -1,19 +1,67 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { EvidenceWitness, SandboxKind, Wave } from "./types.ts";
 
 /**
- * A witness step is one of: "git" (args passed to git), "run-tests@head" / "run-tests@revert"
- * (args[0] is the repo's test command, executed by the runner), "cleanup" (args[0] is a scratch
- * dir). The runner seam is what makes the protocol testable without a network or a shell.
+ * A witness step is one of: "git" (args passed to git), "run-setup" / "run-tests@head" /
+ * "run-tests@revert" / "probe" (args[0] is a shell command line the runner executes), "cleanup"
+ * (args[0] is a scratch dir). The runner seam is what makes the protocol testable without a
+ * network or a shell.
  */
-export type WitnessStep = "git" | "run-setup" | "run-tests@head" | "run-tests@revert" | "cleanup";
+export type WitnessStep =
+  | "git"
+  | "run-setup"
+  | "run-tests@head"
+  | "run-tests@revert"
+  | "probe"
+  | "cleanup";
 export type WitnessRunner = (
   step: WitnessStep,
   args: string[],
   opts?: { cwd?: string },
 ) => Promise<{ exit: number; output: string }>;
+
+/**
+ * The host implementation of the seam: what actually runs on the operator's machine at Wave 0.
+ *
+ * It lives beside the protocol rather than in `cli.ts` because *which shell this picks* is a
+ * property of the witness, not of the operator loop — it decides which interpreter produced an
+ * exit code we then publish as evidence. It is also the one part of the protocol a fake runner
+ * cannot cover, so it needs to be importable without dragging the CLI in (`witness-host.test.ts`).
+ *
+ * **The shell is `bash -c`: non-login, non-interactive, inheriting this process's environment.**
+ * That is the whole of the contract, and each half of it was chosen against a failure:
+ *
+ * - **Non-login.** `bash -lc` sources `/etc/profile`, and on macOS that runs `path_helper`, which
+ *   rebuilds `PATH` from `/etc/paths` and puts `/usr/bin` ahead of everything the operator
+ *   installed — even against an explicit override on the invocation. On a stock machine the
+ *   witness therefore ran `/usr/bin/python3` (3.9.6) while the operator's own shell had 3.14.x,
+ *   and the repo's suite died on `str | None` at head with no output. Issue #41.
+ * - **Non-interactive, and no `$SHELL`.** The operator's login shell is not a stable contract: it
+ *   may be zsh, fish, or nushell, whose `-c` semantics differ, and whose rc files are theirs to
+ *   change. `bash -c` is the same shell everywhere the factory runs, including CI.
+ * - **Inherited environment.** `execFile` passes `process.env` through untouched, so the witness
+ *   runs under exactly the PATH the operator invoked the CLI with. `witness-check` resolves
+ *   through this same function, so the pre-flight cannot disagree with the run.
+ *
+ * A repo needing anything more than this declares it as `setupCommand` in `allowlist.yaml`, where
+ * it is visible, rather than relying on a profile nobody reads.
+ */
+export const hostRunner: WitnessRunner = (step, args, opts) =>
+  new Promise((resolveRun) => {
+    const [cmd, cmdArgs] =
+      step === "git"
+        ? ["git", args]
+        : step === "cleanup"
+          ? ["rm", ["-rf", ...args]]
+          : ["bash", ["-c", args[0] ?? "false"]]; // run-setup, probe and both run-tests phases execute the repo's own commands
+    execFile(cmd, cmdArgs, { cwd: opts?.cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const exit = err && typeof (err as { code?: unknown }).code === "number" ? ((err as { code: number }).code) : err ? 1 : 0;
+      resolveRun({ exit, output: `${stdout}${stderr}` });
+    });
+  });
 
 /** The two run logs, returned so the caller can persist them at the paths the witness declares. */
 export interface WitnessLogs {
@@ -42,6 +90,132 @@ export const WITNESS_LOG_ROOT = "docs/evidence/logs";
  * that names a command the operator cannot type is the defect issue #35 was filed against.
  */
 export const INGEST_INVOCATION = "node --experimental-strip-types factory/cli.ts attach-witness";
+
+/**
+ * The pre-flight verb, spelled the same way and for the same reason as `INGEST_INVOCATION`: a
+ * refusal that names a command the operator cannot type is the defect issue #35 was filed against.
+ */
+export const PREFLIGHT_INVOCATION = "node --experimental-strip-types factory/cli.ts witness-check";
+
+/** How much of a failed run a refusal carries. Enough to read a stack trace, not a whole suite. */
+export const WITNESS_TAIL_LINES = 40;
+
+/**
+ * The diagnostic block every run-failure refusal ends with.
+ *
+ * Before this, `tests are red at head d91fe2f (exit 1) — nothing to witness` was the entire
+ * message: it never referenced the run's output at all, so a broken patch and a six-minor-versions
+ * -too-old interpreter produced byte-identical refusals in about three seconds (issue #41). The
+ * command is included because the operator does not necessarily know it by heart, and the
+ * toolchain because that is the fact that separates the two cases.
+ */
+export function runFailureDetail(command: string, output: string, toolchain?: string): string {
+  const detail = [`  command: ${command}`];
+  if (toolchain) detail.push(`  toolchain: ${toolchain}`);
+  const body = output.replace(/\s+$/, "");
+  if (body.length === 0) {
+    // The single most misleading case, so it gets a sentence rather than an empty block: a command
+    // that dies before printing anything is usually the environment, not the patch.
+    detail.push(
+      `  the run produced no output at all — the command may not have started. \`${PREFLIGHT_INVOCATION} <repoId>\` resolves what this machine would actually run.`,
+    );
+    return `\n${detail.join("\n")}`;
+  }
+  const lines = body.split("\n");
+  const omitted = Math.max(0, lines.length - WITNESS_TAIL_LINES);
+  detail.push(
+    omitted > 0
+      ? `  last ${WITNESS_TAIL_LINES} lines (${omitted} earlier lines omitted):`
+      : `  output (${lines.length} line${lines.length === 1 ? "" : "s"}):`,
+  );
+  for (const line of lines.slice(-WITNESS_TAIL_LINES)) detail.push(`  | ${line}`);
+  return `\n${detail.join("\n")}`;
+}
+
+/** What a `testCommand` resolves to on the machine that would run it. */
+export interface ToolResolution {
+  tool: string;
+  /** Absolute path the shell selects, or undefined when the tool is not on PATH at all. */
+  path?: string;
+  /** First dotted number the tool's own `--version` printed, when it printed one. */
+  version?: string;
+  /** That `--version` line verbatim, so an unparseable one is still readable. */
+  raw?: string;
+}
+
+/** `&&`, `||`, `|`, `;` and newlines separate commands. A bare `&` does not — `2>&1` is not one. */
+const COMMAND_SEPARATOR = /&&|\|\||[;|\n]/;
+/** `FOO=1 python3 …` — a leading environment assignment is not the tool. */
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+/** A bare command name or path. Anything else (a substitution, a quote, a glob) is not probed. */
+const TOOL_TOKEN = /^[A-Za-z0-9_.+-][A-Za-z0-9_.+/-]*$/;
+const VERSION = /\d+(?:\.\d+)+/;
+
+/**
+ * The distinct tools a `testCommand` would invoke, in the order it names them.
+ *
+ * Each token is interpolated into a probe command, so anything that is not a bare command name is
+ * dropped rather than resolved. That is not a new trust boundary — `testCommand` comes from
+ * `allowlist.yaml` and the witness already runs it verbatim — it is a refusal to open a second one.
+ */
+export function commandTools(testCommand: string): string[] {
+  const tools: string[] = [];
+  for (const segment of testCommand.split(COMMAND_SEPARATOR)) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    const first = tokens.find((t) => !ENV_ASSIGNMENT.test(t));
+    if (!first || !TOOL_TOKEN.test(first)) continue;
+    if (!tools.includes(first)) tools.push(first);
+  }
+  return tools;
+}
+
+/**
+ * Resolve each tool through the runner — i.e. through the very shell the test phases use.
+ *
+ * Probing one way and executing another is how a green pre-flight and a red witness coexist, which
+ * is the whole failure this exists to prevent. `cwd` matters for the same reason: a repo that pins
+ * its interpreter (`.python-version`, `.tool-versions`, `.nvmrc`) selects a different one inside
+ * the clone than in the operator's home directory.
+ */
+export async function resolveToolchain(
+  testCommand: string,
+  runner: WitnessRunner,
+  cwd?: string,
+): Promise<ToolResolution[]> {
+  const resolved: ToolResolution[] = [];
+  for (const tool of commandTools(testCommand)) {
+    // `&&` binds looser than `|`, so this is `command -v tool && (tool --version | head -1)`: the
+    // pipeline's status is `head`'s, which keeps a tool whose `--version` is unsupported (BSD
+    // `tee`) from being reported as missing.
+    const probe = await runner(
+      "probe",
+      [`command -v ${tool} && ${tool} --version 2>&1 | head -n 1`],
+      cwd ? { cwd } : undefined,
+    );
+    const lines = probe.output.split("\n").map((l) => l.trim()).filter(Boolean);
+    const path = probe.exit === 0 ? lines[0] : undefined;
+    if (!path) {
+      resolved.push({ tool });
+      continue;
+    }
+    const raw = lines[1];
+    const version = raw ? (VERSION.exec(raw)?.[0] ?? undefined) : undefined;
+    resolved.push({ tool, path, ...(raw ? { raw } : {}), ...(version ? { version } : {}) });
+  }
+  return resolved;
+}
+
+/**
+ * The one-line summary a witness records. Only tools that actually reported a version appear:
+ * `python3 (not found)` on an evidence page would read as a fact about the run that produced the
+ * green, and a run that produced a green did not fail to find its interpreter.
+ */
+export function toolchainLabel(resolved: ToolResolution[]): string {
+  return resolved
+    .filter((r) => r.version)
+    .map((r) => `${r.tool} ${r.version}`)
+    .join(", ");
+}
 
 export function witnessLogPaths(packetId: string): {
   testLogPath: string;
@@ -160,9 +334,17 @@ export async function witnessEvidence(
     }
   }
 
+  // Resolved after setup (a `setupCommand` may be what provisions the interpreter) and before the
+  // head run, so the refusal below can name the toolchain that produced the red — the one fact
+  // that tells "your patch is broken" apart from "this machine's python3 is six minors too old".
+  const toolchain = toolchainLabel(await resolveToolchain(input.testCommand, runner, dir)) || undefined;
+
   const headRun = await runner("run-tests@head", [input.testCommand], { cwd: dir });
   if (headRun.exit !== 0) {
-    return fail(`tests are red at head ${input.headSha.slice(0, 7)} (exit ${headRun.exit}) — nothing to witness`);
+    return fail(
+      `tests are red at head ${input.headSha.slice(0, 7)} (exit ${headRun.exit}) — nothing to witness` +
+        runFailureDetail(input.testCommand, headRun.output, toolchain),
+    );
   }
 
   // Untracked artifacts from the head run (build output, caches) must not keep the revert run
@@ -194,7 +376,8 @@ export async function witnessEvidence(
       // `factory/sandbox.ts` already says. The wording here should read "reject the packet"; delete
       // this comment with that edit.
       error:
-        "negative control failed — tests stayed green with the production change reverted. The proof does not bind the change; park the packet.",
+        "negative control failed — tests stayed green with the production change reverted. The proof does not bind the change; park the packet." +
+        runFailureDetail(input.testCommand, revertRun.output, toolchain),
     };
   }
 
@@ -210,6 +393,7 @@ export async function witnessEvidence(
       repoId: input.repoId,
       baseSha: input.baseSha,
       headSha: input.headSha,
+      ...(toolchain ? { toolchain } : {}),
       ...witnessLogPaths(input.packetId),
     },
     logs: { test: headRun.output, revert: revertRun.output },
@@ -320,6 +504,15 @@ export function parseWitnessManifest(
   if (!nonEmptyString(o.testCommand)) {
     return { ok: false, error: "witness manifest must record the testCommand that was run" };
   }
+  // Optional in both directions: every witness produced before #41 has no toolchain and must still
+  // ingest, while one that has it cannot smuggle a non-string into the ledger — `renderEvidencePage`
+  // interpolates it into the sentence a maintainer reads.
+  if (o.toolchain !== undefined && !nonEmptyString(o.toolchain)) {
+    return {
+      ok: false,
+      error: 'witness manifest toolchain, when present, must be a non-empty string naming the resolved tools (e.g. "python3 3.14.7")',
+    };
+  }
   const notes = Array.isArray(o.notes) && o.notes.every((n) => typeof n === "string")
     ? (o.notes as string[])
     : [];
@@ -340,6 +533,7 @@ export function parseWitnessManifest(
         headSha: o.headSha.toLowerCase(),
         testLogPath: o.testLogPath,
         revertLogPath: o.revertLogPath,
+        ...(nonEmptyString(o.toolchain) ? { toolchain: o.toolchain.trim() } : {}),
       },
     },
   };

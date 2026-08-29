@@ -72,6 +72,50 @@ test("malformed nested packet fields are refused", () => {
   }
 });
 
+test("a stored witness may carry a toolchain string, and nothing else in that slot", () => {
+  // `toolchain` is advisory, not a gate: a ledger written before #41 has no such field and must
+  // load untouched, while a hand-edited one cannot put a non-string where the evidence page
+  // interpolates a sentence for the maintainer.
+  const seed = seedState();
+  const base = seed.packets[0];
+  const witness = {
+    provider: "host",
+    testExit: 0,
+    revertExit: 1,
+    testLogSha: "c".repeat(64),
+    revertLogSha: "d".repeat(64),
+    ranAt: "2026-08-29T09:00:00.000Z",
+    repoId: base.repoId,
+    baseSha: base.evidence!.baseSha,
+    headSha: base.evidence!.headSha,
+    testLogPath: `docs/evidence/logs/${base.id}/test.log`,
+    revertLogPath: `docs/evidence/logs/${base.id}/revert.log`,
+  };
+  const withWitness = (extra: Record<string, unknown>) => ({
+    ...seed,
+    packets: [{ ...base, evidence: { ...base.evidence, witness: { ...witness, ...extra } } }],
+  });
+  const write = (state: unknown): string => {
+    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "toolchain.json");
+    writeFileSync(path, JSON.stringify(state));
+    return path;
+  };
+
+  assert.equal(loadFactoryState(write(withWitness({}))).ok, true, "a witness without one still loads");
+  const carried = loadFactoryState(write(withWitness({ toolchain: "python3 3.14.7" })));
+  assert.equal(carried.ok, true);
+  if (carried.ok) {
+    assert.equal(carried.state.packets[0].evidence?.witness?.toolchain, "python3 3.14.7");
+  }
+  for (const junk of [3.14, { python3: "3.14.7" }, ["python3"], null]) {
+    assert.equal(
+      loadFactoryState(write(withWitness({ toolchain: junk }))).ok,
+      false,
+      `toolchain: ${JSON.stringify(junk)} must not load`,
+    );
+  }
+});
+
 test("v6 ledger missing later-required fields is migrated, not stranded", () => {
   const seed = seedState();
   const packet = { ...seed.packets[0] } as Record<string, unknown>;

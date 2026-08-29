@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { ALLOWLIST } from "./allowlist.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
 import { seedState } from "./seed.ts";
 import type { FactoryState } from "./types.ts";
@@ -452,6 +453,43 @@ test("`clear-halt` does not undo `halt`, and --help says so", () => {
   const help = runCli(["--help"], tmpdir());
   assert.match(help.stdout, /halt <repoId>[^\n]*NOT cleared by clear-halt/);
   assert.match(help.stdout, /clear-halt[^\n]*not the halt above/);
+});
+
+test("witness-check reports the toolchain each allowlisted repo's testCommand would really use", () => {
+  // The pre-flight issue #41 asked for. Its whole value is being runnable with nothing in flight:
+  // the alternative is discovering at evidence time that `python3` on this machine is 3.9.6, from
+  // a refusal that looks identical to a bad patch.
+  const path = writeState(seedState());
+  const run = runCli(["witness-check", "--state", path], tmpdir());
+  assert.equal(run.code, 0, run.out);
+
+  for (const repo of ALLOWLIST) {
+    assert.ok(run.stdout.includes(repo.id), `${repo.id} is not in the pre-flight: ${run.stdout}`);
+    assert.ok(run.stdout.includes(repo.testCommand), `${repo.id}'s testCommand is not printed`);
+  }
+  // A host repo resolves for real: an absolute path and a version, both read off this machine.
+  assert.match(run.stdout, /python3\s+\/\S+python3\s+\S*\d+\.\d+/, run.stdout);
+  // A sandboxed repo must not be given a host answer — this CLI does not run those (ADR 0003), so
+  // resolving OUR python3 for a Wave-1 e2b repo would be a confident report about another machine.
+  const e2bLine = run.stdout.split("\n").find((l) => l.includes("github/awesome-copilot"))!;
+  assert.ok(e2bLine, run.stdout);
+  assert.match(run.stdout.slice(run.stdout.indexOf(e2bLine)), /e2b[\s\S]*?worker host/i, run.stdout);
+
+  // An operator who has not read the issue meets this verb in `--help` or not at all.
+  const help = runCli(["--help"], tmpdir());
+  assert.match(help.stdout, /witness-check \[repoId\]/, help.stdout);
+});
+
+test("witness-check narrows to one repo and refuses one that is not on the allowlist", () => {
+  const path = writeState(seedState());
+  const one = runCli(["witness-check", "ravidsrk/orca-fleet", "--state", path], tmpdir());
+  assert.equal(one.code, 0, one.out);
+  assert.ok(one.stdout.includes("ravidsrk/orca-fleet"), one.out);
+  assert.ok(!one.stdout.includes("github/awesome-copilot"), one.out);
+
+  const stranger = runCli(["witness-check", "attacker/orca-fleet", "--state", path], tmpdir());
+  assert.equal(stranger.code, 1, stranger.out);
+  assert.match(stranger.out, /not on the allowlist/i);
 });
 
 /**
