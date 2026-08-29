@@ -2,7 +2,7 @@ import { ALLOWLIST, CAPS, isDenied, repoById, sameRepoId } from "./allowlist.ts"
 import { parsePrUrl, type IssueLiveState } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import { factoryHalt } from "./halt.ts";
-import { AGENT_NAME_RE, commitTrailerLine, type DisclosureTrailer } from "./neighbor.ts";
+import { AGENT_NAME_RE, commitTrailerLine, DISCLOSURE, type DisclosureTrailer } from "./neighbor.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { planSandbox, runSandboxDry } from "./sandbox.ts";
 import { applyPacketToScorecard, health, scorecardRow } from "./scorecard.ts";
@@ -830,6 +830,24 @@ export function applyAttachDraft(
     return {
       state,
       error: `PR does not close packet issue ${packet.repoId}#${packet.issueNumber}`,
+    };
+  }
+  // SPEC.md §6: "The PR body MUST disclose ... verbatim and unabridged." `open-draft` refuses a
+  // body without the block before its POST (factory/cli.ts); this is the same refusal for the
+  // browser path, which is the path that opened ColeMurray/background-agents#1652 with a shortened
+  // block (docs/PRODUCT.md §8). It lives in the reducer, not in `cli.ts`, because both create paths
+  // bind through here — `open-draft` records its own POST with this function — so a gate in one
+  // verb would leave the other open, which is exactly the state issue #38 found.
+  //
+  // Only the whole constant satisfies it: an abridged or older Foundry block is the miss the record
+  // above describes, not a near-enough. A body that predates a change to `DISCLOSURE` is
+  // grandfathered where it already is (factory/neighbor.ts) and reported by `packetChecks`; it is
+  // never bound as new.
+  if (!(opts.body ?? "").includes(DISCLOSURE)) {
+    return {
+      state,
+      error:
+        "PR body does not carry the verbatim disclosure block (SPEC.md §6) — add it upstream, unabridged, before attaching; the block is `DISCLOSURE` in factory/neighbor.ts",
     };
   }
   const alreadyOpened = packet.status === "submitted" || Boolean(packet.prUrl);

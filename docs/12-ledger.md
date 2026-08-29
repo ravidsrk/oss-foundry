@@ -114,18 +114,29 @@ is recorded, and it does not license a second one. What changed:
    gained the deviation and the clock section below.
 3. No doc states a live PR property in bare present tense any more. Every such claim now names the
    sync it came from, because one click in a browser this factory does not control can falsify a
-   sentence written in the present tense.
+   sentence written in the present tense. **This sweep missed one** (issue #38): `docs/06-v2.md`
+   read "Verbatim disclosure in body", and `docs/PRODUCT.md` §8 and this file's Next list asserted
+   the same match with a date that no longer covered it. A change to `DISCLOSURE` falsifies such a
+   sentence just as a browser click does, and nothing was watching that axis — `packetChecks` never
+   read body text. All three are corrected, and the drift is now a check rather than a claim.
 4. **The evidence was not touched.** It still describes `48c2242`, because nobody re-ran the test
    command at `6b6ff04`. Re-stamping `reviewedSha` would have made the clock green by claiming a
    test run that never happened. A re-witness is owed and outstanding.
 5. `verify-ledger` now separates a **divergence** (the ledger contradicting GitHub — SPEC.md §7,
    still fatal, still reds `main`) from an **advisory** (a debt on a ledger that already
-   reconciles — printed every tick, never a gate). The re-witness gap is the only advisory
-   outstanding. See "What stops the clock" in `docs/08-operations.md`.
+   reconciles — printed every tick, never a gate). See "What stops the clock" in
+   `docs/08-operations.md`. Two advisories are outstanding on #1652 as of 2026-08-29: the
+   re-witness gap, and the disclosure drift issue #38 added (Next, item 2).
 
 ## Next
 
-1. Follow #1652 (**ready for review, not draft**, as of the 2026-08-29 sync — disclosure verbatim as verified 2026-08-28; the draft-only deviation is recorded above) until quiet / merged-by-maintainer / closed.
-2. Re-witness #1652 at `6b6ff04` before its evidence is read as covering the live head. `verify-ledger` reports the gap as an advisory every tick until someone does.
-3. `sync pkt_ColeMurray_background-agents_1476 --threads-answered` once ≥14 quiet days accrue — the slot releases itself.
-4. Idle. One packet in flight.
+1. Follow #1652 (**ready for review, not draft**, as of the 2026-08-29 sync — disclosure verbatim **as recorded at open**, no longer matching the current `DISCLOSURE` since ADR 0004's qualifier landed; the draft-only deviation is recorded above and the disclosure drift below) until quiet / merged-by-maintainer / closed.
+2. #1652's body carries the pre-qualifier disclosure block. It is grandfathered and flagged, not
+   falsified: `verify-ledger` prints it as an advisory every tick. Clearing it means editing a pull
+   request on a repository this project does not own — **an outward-facing write needing an explicit
+   operator go, which has not been given.** Until then the advisory is the correct output, and
+   re-wording `DISCLOSURE` back to match would be falsifying doctrine for every future PR to make
+   one old body look compliant. Policy is written beside the constant in `factory/neighbor.ts`.
+3. Re-witness #1652 at `6b6ff04` before its evidence is read as covering the live head. `verify-ledger` reports the gap as an advisory every tick until someone does.
+4. `sync pkt_ColeMurray_background-agents_1476 --threads-answered` once ≥14 quiet days accrue — the slot releases itself.
+5. Idle. One packet in flight.

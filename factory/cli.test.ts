@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { ALLOWLIST } from "./allowlist.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
+import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket } from "./packet.ts";
 import { emptyScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
@@ -155,6 +156,12 @@ interface LivePr {
   merged: boolean;
   headSha: string;
   updatedAt: string;
+  /**
+   * The body GitHub serves. `packetChecks` reads it for the SPEC.md §6 disclosure MUST (issue
+   * #38), so it is a fact of the reconciliation exactly like `headSha`, and a stub that omits it
+   * is a stub that cannot tell a compliant PR from an undisclosed one.
+   */
+  body: string;
 }
 
 /**
@@ -170,7 +177,10 @@ function livePrs(overrides: Record<string, Partial<LivePr>> = {}): Record<string
   for (const packet of seedState().packets) {
     if (!packet.prUrl || !packet.prMeta) continue;
     const { draft, state, merged, headSha, updatedAt } = packet.prMeta;
-    table[packet.prUrl] = { draft, state, merged, headSha, updatedAt };
+    // The body Foundry prepared, which is what "GitHub says exactly what the ledger says" means
+    // for the disclosure MUST. The live #1652 body does NOT say this — the drift is the subject of
+    // its own test below, stated there as the one fact that test changes.
+    table[packet.prUrl] = { draft, state, merged, headSha, updatedAt, body: packet.prBody ?? "" };
   }
   for (const [url, over] of Object.entries(overrides)) {
     const base = table[url];
@@ -184,6 +194,10 @@ function livePrs(overrides: Record<string, Partial<LivePr>> = {}): Record<string
  * A preload that answers `GET /repos/{owner}/{repo}/pulls/{n}` from that table and 404s the rest,
  * in the shape `syncGithubPr` parses. Same mechanism as `githubStub` above: replace `globalThis
  * .fetch` before the spawned entry module runs, so no test here can reach the network.
+ *
+ * The empty open-pulls list and empty timeline are served too, because `attach-draft` re-runs the
+ * competing-work check before it binds anything: without them the verb refuses on a 404 and every
+ * assertion about the binding rules would be passing over a network error instead.
  */
 function prFactsStub(table: Record<string, LivePr>): string {
   const preload = join(mkdtempSync(join(tmpdir(), "foundry-prfacts-")), "preload.mjs");
@@ -193,7 +207,10 @@ function prFactsStub(table: Record<string, LivePr>): string {
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 globalThis.fetch = async (url) => {
-  const parts = new URL(String(url)).pathname.split("/").filter(Boolean);
+  const u = String(url);
+  if (/\\/pulls\\?state=open/.test(u)) return json(200, []);
+  if (/\\/issues\\/\\d+\\/timeline/.test(u)) return json(200, []);
+  const parts = new URL(u).pathname.split("/").filter(Boolean);
   const path = parts[0] === "repos" && parts[3] === "pulls"
     ? parts[1] + "/" + parts[2] + "/pull/" + parts[4]
     : "";
@@ -202,7 +219,7 @@ globalThis.fetch = async (url) => {
   return json(200, {
     html_url: "https://github.com/" + path,
     title: "stub",
-    body: "",
+    body: pr.body,
     draft: pr.draft,
     state: pr.state,
     merged: pr.merged,
@@ -703,6 +720,225 @@ test("reconcile calls a contradiction DIVERGENCE and a re-witness debt ADVISORY,
     new RegExp(`divergences=${claimedMerged.length} advisories=1`),
     `the counters must follow the buckets they count:\n${run.out}`,
   );
+});
+
+/**
+ * The disclosure block ColeMurray/background-agents#1652 actually carries, read-only from
+ * `GET /repos/ColeMurray/background-agents/pulls/1652` (fetched 2026-08-29). ADR 0004 added the
+ * `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` after this PR was open; an open PR's body is
+ * not retroactively patched by a constant change, so the live block is still the unqualified one.
+ * Transcribed, not derived — a derivation would follow the constant, and not following it is the
+ * whole fact under test.
+ */
+const LIVE_DISCLOSURE_1652 = `This patch was prepared by Foundry, an operator-gated contribution factory.
+A human reviewed the packet, the diff, and the tests before this draft was opened.
+The factory does not merge. Maintainers own the merge.`;
+
+test("the clock names the live disclosure drift it cannot fix, and still exits 0", () => {
+  // SPEC.md §6 is a MUST, and until issue #38 the clock was structurally unable to see it break:
+  // `packetChecks` diffed status, draft and head, never body text. So the qualifier landed in
+  // `DISCLOSURE` while #1652 was open, the live body kept the old block, and `verify-ledger`
+  // printed `ledger ok` over a violated MUST on a stranger's repository.
+  //
+  // Advisory, not fatal, and both halves are load-bearing here because this is where the choice is
+  // actually made. Fatal would red `main` until someone edits a pull request on a repo this
+  // project does not own — an outward write needing an operator's explicit go — which is precisely
+  // the "green by any means" pressure #49 removed for the re-witness debt. Silence would be worse:
+  // the doctrine would be unenforced and unspoken.
+  assert.notEqual(
+    LIVE_DISCLOSURE_1652,
+    DISCLOSURE,
+    "the transcribed live block matches the constant — re-fetch #1652 or this test is vacuous",
+  );
+  const drifted = `## Summary\n\nFixes #1476\n\n## Disclosure\n\n${LIVE_DISCLOSURE_1652}\n`;
+  const run = runClock(livePrs({ [INFLIGHT.prUrl!]: { body: drifted } }));
+
+  assert.equal(run.code, 0, `a body no commit here can edit must not stop the clock:\n${run.out}`);
+  assert.equal(/DIVERGENCE/.test(run.out), false, run.out);
+  // The DRIFT, specifically — not merely the word "disclosure". `disclosureDivergence` also
+  // reports "the body was not supplied", and a call site that stopped passing `synced.body` would
+  // still print a line containing "disclosure": the looser assertion passed under exactly the
+  // wiring mutation this test exists to catch.
+  assert.match(
+    run.out,
+    new RegExp(`^ADVISORY ${INFLIGHT.id}: live PR body carries a Foundry disclosure that is not the current block`, "m"),
+    `the clock must read the live body and name the drift it found:\n${run.out}`,
+  );
+  // Beside the re-witness debt, not instead of it: two independent debts on the same packet, and a
+  // check that reported only the newer one would have quietly retired the older.
+  assert.match(
+    run.out,
+    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${INFLIGHT.evidence!.reviewedSha!.slice(0, 7)}`, "m"),
+    `the re-witness debt must survive alongside the disclosure drift:\n${run.out}`,
+  );
+  assert.match(run.stdout, /2 advisory outstanding/, run.out);
+});
+
+test("reconcile prints the disclosure drift as an ADVISORY and counts it", () => {
+  // The split's other consumer. A classifier that buckets correctly behind a call site that never
+  // passes the body reports nothing, and the two verbs an operator reads would disagree about
+  // whether the doctrine is being checked at all.
+  const seed = seedState();
+  const path = writeState(seed);
+  const drifted = `## Summary\n\nFixes #1476\n\n## Disclosure\n\n${LIVE_DISCLOSURE_1652}\n`;
+  const run = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(livePrs({ [INFLIGHT.prUrl!]: { body: drifted } })),
+  });
+
+  assert.equal(run.code, 0, run.out);
+  // Same tightening as the clock test: naming the drift, not just the topic, is what proves this
+  // call site passed the live body rather than reporting that it had none.
+  assert.match(
+    run.out,
+    new RegExp(`^ADVISORY ${INFLIGHT.id}: live PR body carries a Foundry disclosure that is not the current block`, "m"),
+    `reconcile must read the live body too:\n${run.out}`,
+  );
+  assert.match(
+    run.stdout,
+    /divergences=0 advisories=2/,
+    `the drift must reach the counter, beside the re-witness debt:\n${run.out}`,
+  );
+});
+
+test("attach-draft refuses a browser-opened PR whose body carries no disclosure", () => {
+  // The moment of contact on the only route still open for a repo the App 403s on
+  // (docs/07-github-app.md): a human opens the PR in a browser, then binds it here. `open-draft`
+  // refuses a body without the block before its POST; this verb did not, in the CLI or in the
+  // reducer — so the one path that actually produced #1652's shortened disclosure was the one path
+  // with no gate on it. Issue #38.
+  const seed = draftReadyState();
+  const packet = seed.packets.find((p) => p.status === "draft-ready" && p.evidence)!;
+  const url = "https://github.com/ColeMurray/background-agents/pull/1652";
+  const path = writeState(seed);
+  const run = runCli(["attach-draft", packet.id, url, "--state", path], tmpdir(), {
+    preload: prFactsStub({
+      [url]: {
+        draft: true,
+        state: "open",
+        merged: false,
+        headSha: packet.evidence!.reviewedSha!,
+        updatedAt: "2026-08-28T16:16:39Z",
+        body: `Fixes #${packet.issueNumber}\n\nSee the issue for context, nothing else to say here.`,
+      },
+    }),
+  });
+
+  assert.equal(run.code, 1, `a body without the disclosure must not bind:\n${run.out}`);
+  assert.match(run.out, /verbatim disclosure/, run.out);
+  // The ledger is the proof, not the exit code: a refusal that still wrote the packet would leave
+  // an undisclosed live PR recorded as a Foundry contribution.
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const bound = after.packets.find((p) => p.id === packet.id)!;
+  assert.equal(bound.status, "draft-ready", `a refused attach must not move the packet:\n${run.out}`);
+  assert.equal(bound.prUrl, undefined, `a refused attach must not record a PR URL:\n${run.out}`);
+});
+
+test("attach-draft binds the same PR once its body carries the verbatim block", () => {
+  // The complement, so the gate above is a body check and not a broken verb. Same packet, same
+  // URL, same stub — one fact different.
+  const seed = draftReadyState();
+  const packet = seed.packets.find((p) => p.status === "draft-ready" && p.evidence)!;
+  const url = "https://github.com/ColeMurray/background-agents/pull/1652";
+  const path = writeState(seed);
+  const run = runCli(["attach-draft", packet.id, url, "--state", path], tmpdir(), {
+    preload: prFactsStub({
+      [url]: {
+        draft: true,
+        state: "open",
+        merged: false,
+        headSha: packet.evidence!.reviewedSha!,
+        updatedAt: "2026-08-28T16:16:39Z",
+        body: `Fixes #${packet.issueNumber}\n\n## Disclosure\n\n${DISCLOSURE}\n`,
+      },
+    }),
+  });
+
+  assert.equal(run.code, 0, run.out);
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const bound = after.packets.find((p) => p.id === packet.id)!;
+  assert.equal(bound.status, "submitted", run.out);
+  assert.equal(bound.prUrl, url, run.out);
+});
+
+/**
+ * A preload for the PAT create path: the pre-flight reads `open-draft` makes, a `POST /pulls` that
+ * echoes back what was sent (GitHub stores the body it is given), and the `GET /pulls/{n}` the
+ * verb then syncs. Without the echo the create and the sync could disagree about the body and
+ * nothing would notice — which is the whole failure class `applyAttachDraft` now guards.
+ */
+function createStub(): string {
+  const preload = join(mkdtempSync(join(tmpdir(), "foundry-create-")), "preload.mjs");
+  writeFileSync(
+    preload,
+    `let created = null;
+const json = (status, body) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+globalThis.fetch = async (url, init) => {
+  const u = String(url);
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (method === "POST" && /\\/pulls$/.test(u)) {
+    const sent = JSON.parse(init.body);
+    created = { ...sent, html_url: u.replace("https://api.github.com/repos/", "https://github.com/").replace(/\\/pulls$/, "/pull/4242"), number: 4242 };
+    return json(201, created);
+  }
+  if (/\\/pulls\\?state=open/.test(u)) return json(200, []);
+  if (/\\/issues\\/\\d+\\/timeline/.test(u)) return json(200, []);
+  if (/\\/issues\\/\\d+$/.test(u)) {
+    const n = Number(u.split("/").pop());
+    return json(200, { number: n, html_url: "https://github.com/x/y/issues/" + n, state: "open", state_reason: null, closed_at: null, closed_by: null });
+  }
+  if (/\\/pulls\\/\\d+$/.test(u)) {
+    if (!created) return json(404, { message: "nothing created yet" });
+    return json(200, {
+      html_url: created.html_url,
+      title: created.title,
+      body: created.body,
+      draft: true,
+      state: "open",
+      merged: false,
+      mergeable_state: "clean",
+      commits: 1,
+      review_comments: 0,
+      comments: 0,
+      head: { sha: ${JSON.stringify("PLACEHOLDER")} },
+      updated_at: "2026-08-29T00:00:00Z",
+    });
+  }
+  return json(404, { message: "unstubbed " + method + " " + u });
+};
+`,
+  );
+  return preload;
+}
+
+test("open-draft records its own POST through the same disclosure gate", () => {
+  // `applyAttachDraft` has two production call sites, and the gate is in the reducer precisely so
+  // both are covered. This is the other one: `open-draft` renders the body, refuses it before the
+  // POST if the block is missing, then hands GitHub's copy back to the reducer. Pinning it here is
+  // what stops the create path from silently breaking on a reducer that just grew a refusal.
+  const seed = draftReadyState();
+  const packet = seed.packets.find((p) => p.status === "draft-ready" && p.evidence)!;
+  const path = writeState(seed);
+  const preload = readFileSync(createStub(), "utf8").replace(
+    JSON.stringify("PLACEHOLDER"),
+    JSON.stringify(packet.evidence!.reviewedSha!),
+  );
+  const preloadPath = join(mkdtempSync(join(tmpdir(), "foundry-create2-")), "preload.mjs");
+  writeFileSync(preloadPath, preload);
+
+  const run = runCli(
+    ["open-draft", packet.id, "--head", "ravidsrk:foundry/issue-1476", "--state", path],
+    tmpdir(),
+    { preload: preloadPath, env: { FOUNDRY_PAT: "test-pat" } },
+  );
+  assert.equal(run.code, 0, run.out);
+  assert.match(run.out, /packet submitted/, run.out);
+
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const bound = after.packets.find((p) => p.id === packet.id)!;
+  assert.equal(bound.status, "submitted", run.out);
+  // The body it actually posted carried the block — that is why the reducer accepted it.
+  assert.equal(bound.prBody?.includes(DISCLOSURE), true, "open-draft must post the verbatim block");
 });
 
 /**

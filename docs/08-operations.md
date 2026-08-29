@@ -118,11 +118,22 @@ things and gates on only one.
   clock measures a live system it has no authority over. Resolve a divergence by deciding what is
   true and syncing the seed, or by changing the live state. Never by relaxing the check.
 - An **advisory** is a debt on a seed that already reconciles. It prints on the same terminal and
-  exits 0. Today there is exactly one: #1652's evidence covers `48c2242` and the branch has moved to
-  `6b6ff04`. No commit to this repository can clear it — only a sandbox re-run against the upstream
-  branch can. Gating CI on that would leave `main` red for days with nothing mergeable that fixes
-  it, which is the precise pressure that gets an evidence SHA re-stamped by someone who never re-ran
-  the tests. The signal is louder when it is honest than when it is fatal.
+  exits 0. Today there are exactly two, both on #1652:
+  1. Its evidence covers `48c2242` and the branch has moved to `6b6ff04`. No commit to this
+     repository can clear it — only a sandbox re-run against the upstream branch can.
+  2. Its body carries the disclosure block as recorded at open, which ADR 0004's
+     `(ravidsrk/oss-foundry)` qualifier moved past. No commit here can clear that one either: the
+     only cure is editing a pull request on a repository this project does not own, which is an
+     outward-facing write needing an explicit operator go. Already-open PRs are grandfathered and
+     flagged, never re-stated as matching — the policy is beside the constant in
+     `factory/neighbor.ts` (issue #38).
+
+  Both share the shape that decides the bucket. Gating CI on either would leave `main` red for days
+  with nothing mergeable that fixes it, which is the precise pressure that gets an evidence SHA
+  re-stamped by someone who never re-ran the tests — or, here, a disclosure constant quietly
+  re-worded to match one old body. The signal is louder when it is honest than when it is fatal.
+  What the clock *can* enforce is the moment of contact, and does: `open-draft` and
+  `attach-draft` both refuse a body without the verbatim block before a PR is ever bound.
 
 ## Metrics that matter — operational definitions
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evidenceIsStale, needsRewitness, packetDivergences } from "./ledger-check.ts";
+import { DISCLOSURE } from "./neighbor.ts";
 import { renderEvidencePage } from "./packet.ts";
 import { seedState } from "./seed.ts";
 
@@ -53,7 +54,13 @@ test("the evidence page and the divergence list agree about a terminal packet", 
     "a terminal packet must not be given an action item the operator cannot take",
   );
   assert.deepEqual(
-    packetDivergences(merged, { state: "closed", merged: true, draft: false, headSha: head }),
+    packetDivergences(merged, {
+      state: "closed",
+      merged: true,
+      draft: false,
+      headSha: head,
+      body: `${DISCLOSURE}\n`,
+    }),
     [],
   );
 });

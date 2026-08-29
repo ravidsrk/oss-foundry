@@ -644,7 +644,9 @@ test("attach-draft rejects a non-PR URL, wrong repo, or ready PR", () => {
       draft: true,
       headSha: HEAD,
       title: `fix #${state.packets[0].issueNumber}`,
-      body: `Fixes #${state.packets[0].issueNumber}`,
+      // The disclosure block is now part of what makes a body attachable (SPEC.md §6, issue #38);
+      // the refusal it added has its own test below.
+      body: `Fixes #${state.packets[0].issueNumber}\n\n${DISCLOSURE}`,
     },
   );
   assert.equal(ok.error, undefined);
@@ -732,6 +734,95 @@ test("attach-draft requires the PR head to match reviewed evidence", () => {
   assert.ok(mismatch.error);
   assert.match(mismatch.error!, /does not match evidence head/);
   assert.equal(mismatch.state.packets[0].status, "draft-ready");
+});
+
+/**
+ * The block ColeMurray/background-agents#1652 actually carries: the current constant minus the
+ * repo qualifier ADR 0004 added while that PR was already open. Derived from `DISCLOSURE` rather
+ * than re-typed, so it cannot drift into a copy of it — and asserted different below, because a
+ * derivation that stopped substituting would make every assertion using it vacuous.
+ */
+const SHORTENED_DISCLOSURE = DISCLOSURE.replace(" (ravidsrk/oss-foundry)", "");
+
+/** A live PR body that satisfies SPEC.md §6 — the current block, verbatim and unabridged. */
+const VERBATIM_BODY = `## Summary\n\nFixes the thing.\n\n## Disclosure\n\n${DISCLOSURE}\n`;
+
+/**
+ * SPEC.md §6: "The PR body MUST disclose ... verbatim and unabridged."
+ *
+ * `open-draft` refuses a body without the block before its POST (factory/cli.ts). `attach-draft` —
+ * the path for a manually/browser-opened PR, kept alive because the App still 403s on stranger
+ * repos (docs/07-github-app.md) — had no such check in the CLI or here, so the one MUST that
+ * governs the moment of contact was unguarded on the only route still in use for those repos.
+ *
+ * That is not hypothetical: docs/PRODUCT.md §8 records that #1652 was opened from a browser with a
+ * shortened disclosure. The refusal has to live in the reducer, not in `cli.ts`, because both
+ * create paths funnel through here — `open-draft` records its own POST through this same function.
+ * Issue #38.
+ */
+/**
+ * Policy item 3 beside the constant (`factory/neighbor.ts`): a change to `DISCLOSURE` obliges
+ * every doc that quotes it to move with it. The two in-repo copies are the ones this tree can
+ * actually enforce — a live PR body upstream is grandfathered and reported instead — so they are
+ * checked byte-for-byte here. Without this, the docs that show a maintainer "the block" could
+ * quietly become a third version nobody ships. Issue #38.
+ */
+test("every in-repo quotation of the disclosure block is the constant, byte for byte", () => {
+  const quoting = ["../docs/02-good-neighbor.md", "../docs/PRODUCT.md"];
+  for (const rel of quoting) {
+    const doc = readFileSync(new URL(rel, import.meta.url), "utf8");
+    assert.ok(
+      doc.includes(DISCLOSURE),
+      `${rel} quotes a disclosure block that is not \`DISCLOSURE\` — a doc showing maintainers a version this factory does not send`,
+    );
+  }
+  // ...and the list is not empty of its own accord: a rename that moved these files would leave
+  // the loop above iterating over nothing and passing.
+  assert.equal(quoting.length, 2, "both quoting docs must stay in the list");
+});
+
+test("attach-draft refuses a PR body without the verbatim disclosure block", () => {
+  const started = reviewing();
+  const packet = started.state.packets[0];
+  const ready = readyEvidence(packet);
+  let state = applyAttachEvidence(started.state, started.id, ready.evidence, ready.binding).state;
+  state = applyAdvance(state, started.id).state;
+  const repoId = state.packets[0].repoId;
+  const url = `https://github.com/${repoId}/pull/99`;
+  const n = state.packets[0].issueNumber;
+  const openedBefore = state.scorecard.find((r) => r.repoId === repoId)?.opened ?? 0;
+  const attach = (body: string) =>
+    applyAttachDraft(state, started.id, url, { draft: true, headSha: HEAD, title: `Fixes #${n}`, body });
+
+  // The executed repro from issue #38: a body that closes the issue and carries zero disclosure
+  // text was bound, `error: undefined`, and the packet moved to `submitted`.
+  const bare = attach(`Fixes #${n}\n\nSee the issue for context, nothing else to say here.`);
+  assert.ok(bare.error, "a body with no disclosure at all must not bind to a packet");
+  assert.match(bare.error!, /verbatim disclosure/);
+  assert.equal(bare.state.packets[0].status, "draft-ready");
+  assert.equal(
+    bare.state.scorecard.find((r) => r.repoId === repoId)?.opened ?? 0,
+    openedBefore,
+    "a refused attach must not score an opened PR",
+  );
+
+  // "Unabridged" is the other half of the MUST, and the half #1652 actually missed: a Foundry
+  // disclosure that is not THIS block is still a violation, so the check is a substring of the
+  // whole constant and not a keyword sniff.
+  assert.notEqual(
+    SHORTENED_DISCLOSURE,
+    DISCLOSURE,
+    "the shortened form no longer differs from the constant — re-derive it or this assertion is vacuous",
+  );
+  const shortened = attach(`Fixes #${n}\n\n${SHORTENED_DISCLOSURE}`);
+  assert.ok(shortened.error, "an abridged disclosure must not bind either");
+  assert.match(shortened.error!, /verbatim disclosure/);
+  assert.equal(shortened.state.packets[0].status, "draft-ready");
+
+  // ...and the verbatim block binds, so the gate refuses bodies rather than refusing everything.
+  const ok = attach(`Fixes #${n}\n\n${DISCLOSURE}`);
+  assert.equal(ok.error, undefined, ok.error);
+  assert.equal(ok.state.packets[0].status, "submitted");
 });
 
 test("tick skips issues that already have a competing PR", () => {
@@ -1400,6 +1491,7 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
     merged: true,
     draft: false,
     headSha: submitted.prMeta?.headSha ?? "",
+    body: VERBATIM_BODY,
   });
   assert.equal(mergedUpstream.some((d) => d.includes(`sync ${submitted.id}`)), true);
 
@@ -1408,6 +1500,7 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
     merged: false,
     draft: !(submitted.prMeta?.draft ?? false),
     headSha: submitted.prMeta?.headSha ?? "",
+    body: VERBATIM_BODY,
   });
   assert.equal(draftFlip.some((d) => /draft=/.test(d) && /by hand|doctrine/.test(d)), true);
 
@@ -1417,6 +1510,7 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
     merged: false,
     draft: true,
     headSha: "0000000000000000000000000000000000000000",
+    body: VERBATIM_BODY,
   });
   assert.equal(ghost.some((d) => /ledger says merged/.test(d)), true);
 
@@ -1429,6 +1523,7 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
     merged: false,
     draft: submitted.prMeta?.draft ?? false,
     headSha: submitted.prMeta?.headSha ?? "",
+    body: VERBATIM_BODY,
   });
   assert.deepEqual(clean.fatal, []);
   assert.equal(
@@ -1447,7 +1542,13 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
     at: "2026-09-02T00:00:00.000Z",
   });
   const after = absorbed.state.packets.find((p) => p.id === submitted.id)!;
-  const live = { state: "closed" as const, merged: false, draft: closedMeta.draft, headSha: closedMeta.headSha };
+  const live = {
+    state: "closed" as const,
+    merged: false,
+    draft: closedMeta.draft,
+    headSha: closedMeta.headSha,
+    body: VERBATIM_BODY,
+  };
   assert.deepEqual(packetDivergences(after, live), []);
   const unabsorbed = packetDivergences(submitted, live);
   assert.equal(unabsorbed.some((d) => d.includes(`sync ${submitted.id}`)), true);
@@ -1467,6 +1568,7 @@ test("a rejected packet with a still-open PR never rots invisibly in the ledger 
     merged: false,
     draft: submitted.prMeta?.draft ?? true,
     headSha: submitted.prMeta?.headSha ?? "",
+    body: VERBATIM_BODY,
   });
   assert.equal(
     stillLive.some((d) => d.includes(rejected.id) && d.includes(rejected.prUrl!)),
@@ -1479,6 +1581,7 @@ test("a rejected packet with a still-open PR never rots invisibly in the ledger 
     merged: false,
     draft: submitted.prMeta?.draft ?? true,
     headSha: submitted.prMeta?.headSha ?? "",
+    body: VERBATIM_BODY,
   });
   assert.deepEqual(nowClosed, []);
 });
@@ -1499,6 +1602,7 @@ test("a parked packet with a still-open PR never rots invisibly in the ledger ch
     merged: false,
     draft: submitted.prMeta?.draft ?? true,
     headSha: submitted.prMeta?.headSha ?? "",
+    body: VERBATIM_BODY,
   });
   assert.equal(
     stillLive.some(
@@ -1513,6 +1617,7 @@ test("a parked packet with a still-open PR never rots invisibly in the ledger ch
     merged: false,
     draft: submitted.prMeta?.draft ?? true,
     headSha: submitted.prMeta?.headSha ?? "",
+    body: VERBATIM_BODY,
   });
   assert.deepEqual(nowClosed, []);
 });

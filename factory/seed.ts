@@ -266,7 +266,7 @@ export function seedState(): FactoryState {
       diffLines: 89,
       notes: [
         "Opened ready, not draft (historical miss). Converted to draft 2026-08-28T16:16:39Z, then marked ready for review again by the operator at 18:09:24Z — the state it is in.",
-        "Disclosure verbatim on the live body as verified 2026-08-28.",
+        "Disclosure verbatim on the live body as verified 2026-08-28 — as the block read THEN. ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` afterwards, and an open PR's body does not follow a constant, so the live body no longer matches the current block. Grandfathered and flagged, not re-stated as matching: `verify-ledger` reports it as an advisory every tick until an operator with an explicit go edits the upstream body (issue #38).",
         "Covers 48c2242 only. 6b6ff04 landed after the review and was never witnessed; do not read this proof as covering the live head.",
         "Fork PR #1 closed unmerged.",
       ],

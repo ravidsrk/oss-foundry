@@ -1,3 +1,4 @@
+import { DISCLOSURE, DISCLOSURE_TAIL } from "./neighbor.ts";
 import type { FactoryState, TaskPacket } from "./types.ts";
 
 export interface LivePrLite {
@@ -5,6 +6,13 @@ export interface LivePrLite {
   merged: boolean;
   draft: boolean;
   headSha: string;
+  /**
+   * The PR body as GitHub serves it (`syncGithubPr` returns it beside `meta`). Required, not
+   * optional: `disclosureDivergence` reads it for the SPEC.md §6 MUST, and a caller that omits it
+   * gets a reported line rather than a silently skipped check — a check that can be turned off by
+   * forgetting a field is not a check.
+   */
+  body: string;
 }
 
 /**
@@ -89,7 +97,55 @@ export function packetChecks(packet: TaskPacket, live: LivePrLite): LedgerReconc
       `${packet.id}: recorded head ${packet.prMeta.headSha.slice(0, 7)} but live head ${live.headSha.slice(0, 7)} — new commits since the last sync`,
     );
   }
+  // (3) A third independent signal, and deliberately not chained behind either of the above: a
+  // body can drift while the head is current, and a head can move while the body is untouched.
+  const disclosure = disclosureDivergence(packet, live.body);
+  if (disclosure) advisory.push(disclosure);
   return { fatal: out, advisory };
+}
+
+/**
+ * The live PR body against the current `DISCLOSURE` — SPEC.md §6, "the PR body MUST disclose ...
+ * verbatim and unabridged", measured against the only copy that matters once a PR is open.
+ *
+ * Nothing checked this. `packetChecks` diffed `{status/merged, draft, headSha}` and never looked
+ * at body text, so ADR 0004 could add the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` while
+ * ColeMurray/background-agents#1652 was open, the live body could keep the old block, and
+ * `verify-ledger` printed `ledger ok` over a violated MUST on a stranger's repository (issue #38).
+ *
+ * **ADVISORY, and the bucket is the whole argument.** The two buckets ask different questions.
+ * `fatal` is "the published ledger asserts something GitHub contradicts" — a lie this repository
+ * can fix by editing the record. This is not that: the ledger's `prBody` is the body Foundry
+ * *prepared*, never a claim about what is live, so nothing here is contradicted. What is violated
+ * is doctrine, on an artifact this repository cannot reach: only an edit to the upstream PR body
+ * moves it, which is an outward-facing write on someone else's repo needing an operator's explicit
+ * go. Making it fatal would red the default branch until someone performed that write — the exact
+ * "green by any means" pressure issue #49 removed for the re-witness debt, whose shape this
+ * matches precisely: an immutable historical artifact that the current record has moved past.
+ *
+ * So the doctrine is: **enforce at contact, report after it.** `open-draft` and `applyAttachDraft`
+ * refuse an undisclosed body before it ever becomes a pull request; from that moment on the clock
+ * can only name what it finds, every tick, until a human with authorisation fixes it upstream.
+ *
+ * Doctrine, never mechanical: the line names no `sync` command, because running one would make the
+ * divergence look absorbed while the upstream body sat untouched.
+ */
+export function disclosureDivergence(packet: TaskPacket, body: string | undefined): string | undefined {
+  // The at-rest rule the re-witness debt follows. A merged, closed, rejected or parked packet's
+  // body is history that nobody can renegotiate, and re-printing it every tick would train the
+  // operator (and the clock) to ignore the line.
+  if (packet.status !== "submitted" && packet.status !== "followed-up") return undefined;
+  if (typeof body !== "string") {
+    return `${packet.id}: live PR body was not supplied to the reconciliation — the verbatim disclosure (SPEC.md §6) could not be checked; a caller that cannot read the body must say so, not skip the check`;
+  }
+  if (body.includes(DISCLOSURE)) return undefined;
+  // `DISCLOSURE_TAIL.length > 0` is not decoration: `"".includes("")` is true, so a one-line
+  // `DISCLOSURE` would make every body read as "a disclosure that is not the current block",
+  // including a body with nothing in it. The invariant is pinned in ledger-check.test.ts.
+  const shape = DISCLOSURE_TAIL.length > 0 && body.includes(DISCLOSURE_TAIL)
+    ? "carries a Foundry disclosure that is not the current block"
+    : "carries no Foundry disclosure at all";
+  return `${packet.id}: live PR body ${shape} — SPEC.md §6 wants it verbatim and unabridged; an already-open PR is grandfathered against a later change to \`DISCLOSURE\` (factory/neighbor.ts), so this is a doctrine event: resolve by editing the upstream body with an operator's explicit go, never by re-wording the constant to match`;
 }
 
 /**

@@ -50,7 +50,11 @@ public repos is a **classic PAT**. So the moment of contact is machine-enforced 
 - setup is human-only: `scripts/machine-account-wizard.sh` walks account, 2FA, token, and
   verification. No agent creates accounts.
 
-Browser sessions are demoted to emergency-only. No contribution PR opens by hand again.
+Browser sessions are demoted to emergency-only. No contribution PR opens by hand again — and if
+one ever does, `attach-draft` refuses to bind it unless the body carries the verbatim disclosure
+block. That refusal lives in `applyAttachDraft` (`factory/engine.ts`), not in a verb, so both
+create paths run it; until issue #38 it existed only in `open-draft`, which is not the path that
+opened #1652.
 
 ## Secrets
 

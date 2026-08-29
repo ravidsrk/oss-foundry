@@ -847,6 +847,10 @@ async function main() {
         merged: synced.meta.merged,
         draft: synced.meta.draft,
         headSha: synced.meta.headSha,
+        // The live body, for the SPEC.md §6 disclosure MUST (issue #38). The clock's sibling
+        // consumer reads the same split, so both call sites have to supply the same facts or the
+        // two verbs an operator reads disagree about whether the doctrine is checked at all.
+        body: synced.body,
       };
       if (packet.status === "submitted" || packet.status === "followed-up") {
         // Mechanical absorption only: reconcile never attests threads answered, so it can
