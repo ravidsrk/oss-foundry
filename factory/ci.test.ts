@@ -1,0 +1,210 @@
+import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const WORKFLOW_DIR = join(REPO_ROOT, ".github/workflows");
+
+/**
+ * Issue #54: the suite never ran in CI. `docs/SPEC.md` §8 conditions conformance on the
+ * implementation's own evidence and names the test suite as the demonstration, and the
+ * demonstration ran only on the machine of whoever remembered to type `npm test`.
+ *
+ * WHY A TEST AND NOT JUST THE WORKFLOW FILE. Adding `ci.yml` fixes the gap today; it does nothing
+ * about the gap reopening. Deleting the `npm test` step, or adding a `paths:` filter that happens to
+ * exclude `factory/`, would restore the exact original defect and no red mark anywhere would say so
+ * — and a silently-gutted gate is worse than a missing one, because the green check keeps being
+ * cited as evidence. This repository's own argument for machine enforcement (`docs/SPEC.md` §9, via
+ * RepoComplianceBench) applies to its CI configuration too.
+ *
+ * HONEST LIMITATION, STATED RATHER THAN PAPERED OVER. Every other guard of this shape in the repo
+ * is behavioural — `terminal.test.ts` SPAWNS each entry point rather than grepping for a call,
+ * because "round 2 stated this as a regex and a regex that matches inside a comment is not evidence
+ * that anything runs". That is not available here: GitHub Actions cannot be driven locally, so
+ * there is no process to spawn and no bytes to assert over. This is a text-level check on a config
+ * file and is the strongest oracle available for one. Two things keep it from being satisfied by a
+ * comment: YAML comment lines are stripped before matching, and the trigger assertions parse the
+ * `on:` block's own structure instead of searching the whole document for a keyword.
+ */
+
+/** The workflow files, with YAML comments removed so a commented-out step cannot satisfy a check. */
+function workflows(): { name: string; text: string }[] {
+  return readdirSync(WORKFLOW_DIR)
+    .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    .map((name) => {
+      const text = readFileSync(join(WORKFLOW_DIR, name), "utf8")
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+      return { name, text };
+    });
+}
+
+/**
+ * The `on:` block only, so `pull_request` appearing in a step name or an `if:` expression elsewhere
+ * in the file cannot be mistaken for a trigger. Ends at the next top-level key.
+ */
+function triggerBlock(text: string): string {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => /^on:/.test(l));
+  if (start === -1) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^[A-Za-z]/.test(l));
+  return rest.slice(0, end === -1 ? rest.length : end).join("\n");
+}
+
+test("some workflow runs the full test suite on the pull-request path", () => {
+  const gates = workflows().filter((w) => /^\s*pull_request:\s*$/m.test(triggerBlock(w.text)));
+  assert.ok(
+    gates.length > 0,
+    "no workflow triggers on `pull_request` — the suite is not a pull-request gate, which is issue #54 reopened",
+  );
+
+  // `npm test` or the runner directly; either is the whole suite. `node --test` on its own is NOT
+  // accepted: run-tests.ts exists because `node --test` reports a file whose process exits mid-run
+  // as a pass with zero subtests, exit 0.
+  const runsSuite = gates.filter((w) => /run:\s*npm test\b/.test(w.text) || /run-tests\.ts/.test(w.text));
+  assert.ok(
+    runsSuite.length > 0,
+    `workflows trigger on pull_request (${gates.map((g) => g.name).join(", ")}) but none runs the suite`,
+  );
+
+  // The validator too — issue #54's second bullet. It gates `allowlist.yaml` and
+  // `policy-records.json`, and before this it ran only on the six-hour clock.
+  const runsValidator = runsSuite.filter(
+    (w) => /run:\s*npm run validate\b/.test(w.text) || /validate-allowlist\.ts/.test(w.text),
+  );
+  assert.ok(
+    runsValidator.length > 0,
+    `${runsSuite.map((r) => r.name).join(", ")} runs the suite on pull requests but not \`npm run validate\``,
+  );
+});
+
+/**
+ * A `paths:` or `paths-ignore:` filter on the gate's `pull_request` trigger is the quiet version of
+ * deleting the workflow: the check does not fail, it does not run, and a pull request that changes
+ * nothing on the list merges with no suite behind it. This repo has no such filter and should not
+ * acquire one silently — every `*.ts` in `factory/` is load-bearing for every other one.
+ */
+test("the pull-request gate is not narrowed by a path filter", () => {
+  for (const w of workflows()) {
+    const on = triggerBlock(w.text);
+    if (!/^\s*pull_request:\s*$/m.test(on)) continue;
+    if (!/run:\s*npm test\b/.test(w.text) && !/run-tests\.ts/.test(w.text)) continue;
+    const pullRequest = on.slice(on.indexOf("pull_request:"));
+    const next = pullRequest.slice(1).search(/\n\s{2}\w/);
+    const scoped = next === -1 ? pullRequest : pullRequest.slice(0, next + 1);
+    assert.doesNotMatch(
+      scoped,
+      /paths(-ignore)?:/,
+      `${w.name} filters its pull_request trigger by path, so a change outside the filter merges with no suite behind it`,
+    );
+  }
+});
+
+/**
+ * The post-merge half. A merge commit is a state no pull-request run ever tested — the pull request
+ * tests the branch, and with a merge-commit strategy the result is a commit that existed nowhere
+ * until the merge. Issue #54's acceptance asks for both a push and a pull request.
+ */
+test("the suite also runs on push to main, so a merge commit is tested", () => {
+  const pushGates = workflows().filter((w) => {
+    const on = triggerBlock(w.text);
+    if (!/^\s*push:/m.test(on)) return false;
+    return /run:\s*npm test\b/.test(w.text) || /run-tests\.ts/.test(w.text);
+  });
+  assert.ok(
+    pushGates.length > 0,
+    "no workflow runs the suite on push — nothing tests the merge commit that a merge-commit strategy creates",
+  );
+  for (const w of pushGates) {
+    assert.match(
+      triggerBlock(w.text),
+      /branches:\s*\[?\s*["']?main["']?/,
+      `${w.name} runs the suite on push but does not name main, so the post-merge gate may not cover the default branch`,
+    );
+    /**
+     * The validator on the push path, asserted here and not inferred from the pull-request test.
+     * Today both triggers share one job, so removing `npm run validate` reds the pull-request test
+     * too — but that is a property of the current file layout, not of the claim this test makes.
+     * Split the gate into a pull-request workflow and a push workflow, keep the validator only in
+     * the first, and the post-merge path would silently stop checking `allowlist.yaml` and
+     * `policy-records.json` while both tests stayed green.
+     */
+    assert.ok(
+      /run:\s*npm run validate\b/.test(w.text) || /validate-allowlist\.ts/.test(w.text),
+      `${w.name} runs the suite on push but not the validator, so a merge commit is never checked against allowlist.yaml or policy-records.json`,
+    );
+    /**
+     * An unconditional `cancel-in-progress` is the quiet way to lose this gate: two merges landing
+     * close together cancel the earlier run, and the merge commit it was testing keeps a green
+     * check it never earned. Caught in review of this very file, where it was written that way
+     * first. If cancellation is enabled at all it must be conditional on the event.
+     */
+    const concurrency = /^concurrency:$([\s\S]*?)(?=^\S)/m.exec(w.text)?.[1] ?? "";
+    if (/cancel-in-progress:/.test(concurrency)) {
+      assert.match(
+        concurrency,
+        /cancel-in-progress:\s*\$\{\{/,
+        `${w.name} cancels in-progress runs unconditionally, which would cancel a push run and leave a merge commit on main with no suite behind it`,
+      );
+    }
+  }
+});
+
+/**
+ * `verify-ledger.ts` reads live GitHub, so it fails for reasons unrelated to a diff — issue #49 is
+ * the recorded instance where a maintainer moving a PR reddened `main` while every line was
+ * correct. Issue #54 asked for its placement to be "a recorded decision rather than an accident";
+ * this is the decision, enforced. Keeping it off the pull-request path is what makes the gate's red
+ * mean "this diff is wrong" instead of "something moved on github.com".
+ */
+test("the live-GitHub ledger check stays off the pull-request path", () => {
+  for (const w of workflows()) {
+    if (!/^\s*pull_request:\s*$/m.test(triggerBlock(w.text))) continue;
+    assert.doesNotMatch(
+      w.text,
+      /verify-ledger\.ts/,
+      `${w.name} runs verify-ledger.ts on pull requests; it reconciles against live GitHub, so it reddens pull requests for reasons outside the diff (issue #49). It belongs on the clock.`,
+    );
+  }
+});
+
+/**
+ * Every `uses:` in every workflow names an immutable commit, not a moving tag.
+ *
+ * A major tag like `@v4` is a reference the upstream owner can retarget, and these actions run
+ * BEFORE any check in both workflows — so retargeted code could alter the checked-out workspace,
+ * swap the Node toolchain, or change a gate's verdict. Raised by the review of the pull request
+ * that added `ci.yml`, and pinned across BOTH workflows rather than only the new one: `ci.yml` is
+ * read-only and secretless, while `oss-tick.yml` carries `issues: write` and a `GITHUB_TOKEN` and
+ * runs unattended, so it is the higher-value target of the two.
+ *
+ * Stated over every workflow rather than over a list of files, for the reason `run-tests.ts:8`
+ * gives: a hand-maintained roster is the same silent hole. A third workflow added tomorrow with a
+ * mutable ref reds this immediately.
+ *
+ * Issue #85 owns the remaining half — a keep-current mechanism, because a pin nobody updates trades
+ * a small supply-chain risk for certain drift, and that is a policy choice with an ongoing cost.
+ */
+test("every workflow action is pinned to an immutable commit", () => {
+  const seen: string[] = [];
+  for (const w of workflows()) {
+    for (const m of w.text.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)) {
+      const ref = m[1];
+      seen.push(`${w.name}: ${ref}`);
+      const at = ref.lastIndexOf("@");
+      assert.notEqual(at, -1, `${w.name} uses \`${ref}\` with no ref at all, so it floats on the default branch`);
+      assert.match(
+        ref.slice(at + 1),
+        /^[0-9a-f]{40}$/,
+        `${w.name} uses \`${ref}\`, a mutable ref. Pin the 40-character commit SHA with a trailing \`# vX.Y.Z\` comment; the upstream owner can retarget a tag, and this runs before every check in the job.`,
+      );
+    }
+  }
+  // The scan itself is not vacuous: a rename or an indentation change that made the pattern miss
+  // every `uses:` line would otherwise pass this test by finding nothing to check.
+  assert.ok(seen.length >= 4, `action discovery found only ${seen.length} \`uses:\` lines (${seen.join(", ")})`);
+});

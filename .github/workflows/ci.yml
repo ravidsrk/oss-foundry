@@ -1,0 +1,66 @@
+# The suite, machine-enforced. docs/SPEC.md §8 conditions conformance on the implementation's own
+# evidence and names the test suite as the demonstration; until this file existed the demonstration
+# ran only on the machine of whoever remembered to type `npm test` (issue #54).
+#
+# Separate from `oss-tick.yml` on purpose. That workflow is the factory's 6-hour CLOCK: it is
+# `on: schedule`, it reads live GitHub, and it may file a packet issue. This one is a GATE: it is
+# `on: pull_request` / `on: push`, it touches no network, and it never writes anything. Merging the
+# two would put the clock's live-GitHub failure modes on the pull-request path.
+#
+# WHY `verify-ledger.ts` IS NOT HERE. It reconciles the committed ledger against live GitHub, so it
+# fails for reasons that have nothing to do with a diff — a maintainer moving a PR reddens it while
+# every line of the branch is correct, which is exactly what happened in issue #49. Doctrine says a
+# divergence is a real event that should stop the CLOCK; stopping every pull request on it is a
+# different policy, and this is the deliberate choice not to adopt it. It keeps running every 6
+# hours in `oss-tick.yml`, which is where a live-state divergence belongs. Recorded here rather
+# than left as an accident of which file each command landed in.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    # Pull requests already cover their own branches; restricting pushes to `main` makes this the
+    # post-merge gate (a merge commit is a state no pull-request run ever tested) without running
+    # the same commit twice on every feature-branch push.
+    branches: ["main"]
+
+concurrency:
+  # Supersede an outdated pull-request run, but NEVER cancel a push run. A cancelled push run
+  # leaves a merge commit on `main` with no suite behind it — the same hole this file closes,
+  # reintroduced by a convenience setting. The group keys on the event so the two never share one,
+  # and pushes key on the SHA so a later merge cannot evict an earlier merge's run.
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Pinned to immutable commits, not `@v4`. A major tag is a moving reference: whoever controls
+      # the upstream repository can retarget it, and these two run BEFORE every check here, so
+      # retargeted code could alter the workspace, swap the toolchain, or change this gate's
+      # verdict. Both SHAs are what `v4` resolved to when they were pinned (v4.4.0), so nothing
+      # about what executes changed — only whether it can change under us. Issue #85 owns keeping
+      # them current; a pin with no update mechanism trades a small risk for certain drift.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # The floor `package.json` declares (`engines.node: >=22`), and the version the clock
+          # already runs, so CI tests the version the project claims to support rather than
+          # whatever is newest.
+          node-version: "22"
+
+      # No install step: `package.json` declares no dependencies and the repo has no lockfile, so
+      # there is nothing to restore and `npm ci` would fail on the missing lockfile.
+      - name: Test suite
+        run: npm test
+
+      # `run-tests.ts` is the oracle, not `node --test`: it asserts one summary per discovered
+      # `*.test.ts` and refuses a run where any file reported zero tests, so a file whose process
+      # exits mid-run cannot report green. `npm run validate` covers `allowlist.yaml` and
+      # `policy-records.json`, which until now ran only on the clock.
+      - name: Validate allowlist and policy records
+        run: npm run validate
