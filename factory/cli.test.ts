@@ -2321,3 +2321,48 @@ globalThis.fetch = async (url) => {
   // the cap" needs to be told what claim it invalidates.
   assert.match(run.out, /no competing pull request/, run.out);
 });
+
+/**
+ * The same refusal for the OTHER read that feeds the same verdict. Raised by review: the first
+ * version checked the open-pulls read and left the cross-reference timeline unchecked, so a capped
+ * timeline reached `classifyCompetition` and a competing PR past the cap was missed — the issue then
+ * entered the live scouting set, which is the fail-open this unit is about, one read over.
+ *
+ * The open-pulls read answers cleanly here, so the timeline is the only thing capped and this test
+ * is about the timeline rather than a second copy of the one above.
+ */
+test("a capped cross-reference timeline refuses the tick too", () => {
+  const dir = tmp("foundry-cap2-");
+  const preload = join(dir, "preload.mjs");
+  writeFileSync(
+    preload,
+    `const json = (status, body, headers = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+globalThis.fetch = async (url) => {
+  const u = String(url);
+  // A clean, complete open-pulls read: no next page, and nothing matching by closing keyword, so
+  // the timeline read is reached.
+  if (u.includes("/pulls?state=open")) return json(200, []);
+  // The timeline never runs out of pages.
+  if (u.includes("/timeline")) return json(200, [], { link: "<" + u + "&page=2>; rel=" + String.fromCharCode(34) + "next" + String.fromCharCode(34) });
+  if (/\\/issues\\/\\d+$/.test(u)) {
+    return json(200, {
+      number: 71,
+      html_url: "https://github.com/ravidsrk/orca-fleet/issues/71",
+      state: "open",
+      state_reason: null,
+      closed_at: null,
+      closed_by: null,
+    });
+  }
+  return json(404, { message: "unstubbed " + u });
+};
+`,
+  );
+  const path = join(dir, "state.json");
+  writeFileSync(path, JSON.stringify(emptyLedger()));
+
+  const run = runCli(["tick", "--state", path], tmpdir(), { preload });
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /page cap/, run.out);
+});

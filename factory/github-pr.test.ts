@@ -487,6 +487,31 @@ test("syncGithubPr reads the human review split for a terminal PR, and says noth
   });
   assert.equal(unreadable.ok, true);
   if (unreadable.ok) assert.equal(unreadable.meta.humanReview, undefined);
+
+  /**
+   * A CAPPED review read is not observed either, and for the same reason. Raised by review: the
+   * truncation flag was computed and then dropped here, so ten pages of a busy PR's reviews would
+   * have been recorded and published as a complete count — a wrong KPI, which is worse than a
+   * missing one and is the exact failure issue #39 exists to prevent.
+   */
+  const capped = await syncGithubPr({ url: "https://github.com/ravidsrk/orca-fleet/pull/70" }, async (url) => {
+    const u = String(url);
+    if (u.includes("/reviews") || u.includes("/comments")) {
+      return new Response(JSON.stringify([{ user: { login: "a", type: "User" } }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json", link: `<${u}>; rel="next"` },
+      });
+    }
+    return jsonResponse(200, prBody({}));
+  });
+  assert.equal(capped.ok, true, "a capped read is still a successful sync");
+  if (capped.ok) {
+    assert.equal(
+      capped.meta.humanReview,
+      undefined,
+      "a capped review read was recorded as a complete count",
+    );
+  }
 });
 
 test("listCommitsSince returns the base-branch commits after a moment, with their messages", async () => {

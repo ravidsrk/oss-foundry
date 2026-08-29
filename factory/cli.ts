@@ -397,6 +397,11 @@ async function tickWithGithub(state: FactoryState) {
         console.error(crossRefs.error);
         process.exit(1);
       }
+      // Both reads that feed the verdict, not just the pulls one. Raised by review: checking
+      // `pulls` and leaving the timeline unchecked let a capped cross-reference list reach
+      // `classifyCompetition`, so a competing PR past the cap was missed and the issue entered the
+      // live scouting set — the same fail-open, one read over.
+      refuseIfCapped([pulls, crossRefs], key);
       const verdict = classifyCompetition(
         { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
         issue.number,

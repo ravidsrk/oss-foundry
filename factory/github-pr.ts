@@ -688,7 +688,11 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
     // — the consumer must then say it could not compute the metric rather than record a zero.
     if (pr.merged || pr.state === "closed") {
       const review = await fetchHumanReview(parsed.owner + "/" + parsed.repo, parsed.number, fetchImpl);
-      if (review.ok) meta.humanReview = review.humanReview;
+      // A CAPPED read leaves the field absent, exactly like a failed one, and for the same reason:
+      // "we could not read it" and "nobody reviewed it" are different facts and only one is a KPI.
+      // Raised by review — the flag was returned here and then dropped, so a partial count would
+      // have been recorded and published as a complete read.
+      if (review.ok && !review.truncated) meta.humanReview = review.humanReview;
     }
     return { ok: true as const, meta, title: pr.title ?? "", body: pr.body ?? "" };
   } catch (err) {
