@@ -65,7 +65,9 @@ grants the operator any merge authority.
 - A submitted draft MUST be followed until merged, closed, or quiet: review threads answered,
   bots reconciled. Once threads are answered and the PR has been quiet ≥14 days, the in-flight
   slot MAY release while follow-up duties continue; new maintainer activity re-blocks new work
-  until answered. At ≥45 quiet days the operator SHOULD close politely; closing is a human act.
+  until answered — unless a newer packet already holds the in-flight slot, in which case the older
+  packet keeps its follow-up duty and records a reply owed rather than blocking the newer work. At
+  ≥45 quiet days the operator SHOULD close politely; closing is a human act.
 - Per-repo standing MUST be tracked from terminal outcomes (merge rate over terminal outcomes;
   silence alone never halts) and MUST halt a repository on: a maintainer ask (same hour), any
   revert of the operator's patch, or sustained sub-threshold merge rate with terminal outcomes.

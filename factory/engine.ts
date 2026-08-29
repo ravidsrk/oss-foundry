@@ -1066,8 +1066,10 @@ function recordTerminalReview(
  * Apply a live PR sync to a submitted/followed-up packet.
  * merged → terminal + scorecard `merged`. closed unmerged → followed-up + scorecard `closedUnmerged`.
  * open: answered threads + ≥QUIET_RELEASE_DAYS quiet releases the in-flight slot; new maintainer
- * activity on a followed-up packet re-blocks the factory until answered; ≥STALE_INTENT_DAYS quiet
- * records a stale-intent note — closing stays a human act.
+ * activity on a followed-up packet re-blocks the factory until answered — unless a newer packet
+ * already holds the in-flight slot, in which case the older packet stays `followed-up` and records
+ * a `reply-owed:` note rather than doubling the count; ≥STALE_INTENT_DAYS quiet records a
+ * stale-intent note — closing stays a human act.
  */
 export function applyPrSync(
   state: FactoryState,

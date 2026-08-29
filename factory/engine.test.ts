@@ -5296,3 +5296,50 @@ test("classifyCompetition treats a foreign owner's mention as no competitor at a
   );
   assert.equal(ours.kind, "adjacent");
 });
+
+/**
+ * The wake rule is stated in four places and #48 made it conditional in code while updating two of
+ * them. `factory/engine.ts`'s own `applyPrSync` docstring and `docs/SPEC.md` §7 kept asserting the
+ * old unconditional re-block — the engine one being the contract on the very function whose
+ * behaviour changed, and the first thing a reader of `applyPrSync` sees (issue #51).
+ *
+ * A drift check rather than a collapse to one source: the four statements serve different readers
+ * (a reducer's contract, a normative spec, a product narrative, a station walkthrough) and merging
+ * them would cost more than it saves. What must not happen is one of them saying the factory blocks
+ * when it does not.
+ *
+ * The exception is matched by CONCEPT, not by one phrasing, because the four say it differently on
+ * purpose — `repliesOwed`'s docstring says "the slot was held by a newer packet" and reads
+ * perfectly. Requiring a literal would force four documents into one voice to satisfy a test.
+ */
+test("every statement of the wake rule carries the held-slot exception", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const sources = [
+    "factory/engine.ts",
+    "docs/SPEC.md",
+    "docs/PRODUCT.md",
+    "docs/04-stations.md",
+  ];
+  /** The carve-off #48 introduced, in any of the voices the four documents legitimately use. */
+  const EXCEPTION = /newer packet|holds the in-flight slot|slot was held|already holds the slot/i;
+
+  let statements = 0;
+  for (const rel of sources) {
+    const text = readFileSync(join(root, rel), "utf8");
+    for (const match of text.matchAll(/re-block(?:s|ed|ing)?/gi)) {
+      statements += 1;
+      // A window around the claim, not the whole file: a file may state the rule once correctly and
+      // once not, and a file-wide search would let the correct one cover for the stale one.
+      const from = Math.max(0, match.index - 400);
+      const window = text.slice(from, match.index + 400);
+      assert.match(
+        window,
+        EXCEPTION,
+        `${rel} states the wake rule near offset ${match.index} without the held-slot exception, so it claims the factory blocks when it does not:\n${window.replace(/\s+/g, " ").slice(0, 300)}`,
+      );
+    }
+  }
+  // Not vacuous: a rename or a rewording that stopped saying "re-block" would leave this iterating
+  // over nothing. Four statements today across four files.
+  assert.ok(statements >= 4, `only ${statements} wake-rule statement(s) found — the discovery has drifted`);
+});
