@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -783,17 +783,62 @@ const VERBATIM_BODY = `## Summary\n\nFixes the thing.\n\n## Disclosure\n\n${DISC
  * quietly become a third version nobody ships. Issue #38.
  */
 test("every in-repo quotation of the disclosure block is the constant, byte for byte", () => {
-  const quoting = ["../docs/02-good-neighbor.md", "../docs/PRODUCT.md"];
-  for (const rel of quoting) {
-    const doc = readFileSync(new URL(rel, import.meta.url), "utf8");
+  /**
+   * DISCOVERED, not listed. This was `["../docs/02-good-neighbor.md", "../docs/PRODUCT.md"]` with
+   * `assert.equal(quoting.length, 2)` pinning it at exactly two — and there were already THREE
+   * quotations: `docs/evidence/pkt_ravidsrk_orca-fleet_71.md` was covered only incidentally, by a
+   * separate regeneration test. A new doc carrying a stale block shipped green, which is the class
+   * #38(b) was about (issue #68). `run-tests.ts:8` states the convention: "Discovered, not listed.
+   * A hand-maintained roster is the same silent hole this runner exists to close from the other end."
+   *
+   * THE DETECTOR CANNOT BE DERIVED FROM `DISCLOSURE`, and that is the whole difficulty. Matching on
+   * the constant is vacuous — a doc holding a STALE block does not contain it, so the miss defines
+   * itself out of the search. The first attempt used `DISCLOSURE_TAIL`, which review caught: a stale
+   * block whose SECOND or THIRD line drifted is skipped by that too, and the three real quotations
+   * still satisfy the floor, so the suite stays green over it.
+   *
+   * So these are deliberate LITERALS, one per line of the block, and a doc matching ANY of them must
+   * carry the whole current constant. Drift in one line leaves the other two fingerprints matching.
+   * They are asserted against the live constant below, which is what stops them rotting into
+   * something that describes no version at all.
+   */
+  const FINGERPRINTS = [
+    "prepared by Foundry",
+    "reviewed the packet, the diff, and the tests",
+    "The factory does not merge",
+  ];
+  for (const print of FINGERPRINTS) {
     assert.ok(
-      doc.includes(DISCLOSURE),
-      `${rel} quotes a disclosure block that is not \`DISCLOSURE\` — a doc showing maintainers a version this factory does not send`,
+      DISCLOSURE.includes(print),
+      `the fingerprint ${JSON.stringify(print)} no longer appears in DISCLOSURE, so it can only find blocks this factory never sent`,
     );
   }
-  // ...and the list is not empty of its own accord: a rename that moved these files would leave
-  // the loop above iterating over nothing and passing.
-  assert.equal(quoting.length, 2, "both quoting docs must stay in the list");
+
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
+    );
+  const candidates = [...walk(join(root, "docs")).filter((f) => f.endsWith(".md")), join(root, "README.md")];
+
+  const quoting: string[] = [];
+  for (const file of candidates) {
+    const doc = readFileSync(file, "utf8");
+    if (!FINGERPRINTS.some((print) => doc.includes(print))) continue;
+    quoting.push(file.slice(root.length));
+    assert.ok(
+      doc.includes(DISCLOSURE),
+      `${file.slice(root.length)} quotes a disclosure block that is not \`DISCLOSURE\` — a doc showing maintainers a version this factory does not send`,
+    );
+  }
+
+  // ...and the search is not vacuous: a rename, a moved directory, or a detector that stopped
+  // matching would leave the loop above iterating over nothing and passing. Three today, and the
+  // floor is what makes losing one cost a visible edit.
+  assert.ok(
+    quoting.length >= 3,
+    `only ${quoting.length} in-repo quotation(s) found (${quoting.join(", ")}) — the discovery has drifted`,
+  );
 });
 
 test("attach-draft refuses a PR body without the verbatim disclosure block", () => {
