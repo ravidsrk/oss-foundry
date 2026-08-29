@@ -39,7 +39,7 @@ import {
   factoryHalt,
   SECONDARY_LIMIT_BANNER,
 } from "./halt.ts";
-import { packetDivergences, seedDivergences } from "./ledger-check.ts";
+import { packetChecks, seedDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderEvidencePage, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
@@ -704,6 +704,7 @@ async function main() {
   if (cmd === "reconcile") {
     let next = state;
     const doctrine: string[] = [];
+    const owed: string[] = [];
     for (const packet of state.packets) {
       if (!packet.prUrl) continue;
       const synced = await syncGithubPr({ url: packet.prUrl });
@@ -723,11 +724,20 @@ async function main() {
         const applied = applyPrSync(next, packet.id, synced.meta, { threadsAnswered: false });
         if (!applied.error) next = applied.state;
       }
-      doctrine.push(...packetDivergences(next.packets.find((p) => p.id === packet.id)!, live));
+      const checks = packetChecks(next.packets.find((p) => p.id === packet.id)!, live);
+      doctrine.push(...checks.fatal);
+      owed.push(...checks.advisory);
     }
     persist(next);
+    // Same split, same words as the clock (`verify-ledger.ts`): a ledger that contradicts GitHub is
+    // a DIVERGENCE, a debt on a ledger that already reconciles is an ADVISORY. `reconcile` gates on
+    // neither — it reports so the operator can act — but calling a re-witness debt a divergence
+    // here and not there would teach two different meanings for one word.
+    for (const a of owed) console.error(`ADVISORY ${a}`);
     for (const d of doctrine) console.error(`DIVERGENCE ${d}`);
-    console.log(`reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length}`);
+    console.log(
+      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length}`,
+    );
     return;
   }
 

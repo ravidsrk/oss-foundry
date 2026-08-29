@@ -11,8 +11,10 @@
 ## What the clock actually verifies
 
 `factory/verify-ledger.ts` (the 6h job) checks the **committed seed** — `factory/seed.ts`, the
-published ledger — against live GitHub, and fails the run on divergence. It does **not** read
-`.foundry-state.json`: that file is gitignored and absent in CI, so it does not exist to be checked.
+published ledger — against live GitHub. It does **not** read `.foundry-state.json`: that file is
+gitignored and absent in CI, so it does not exist to be checked. It prints two kinds of line and
+fails the run on only one of them — [What stops the clock](#what-stops-the-clock) below says which,
+and why the other never gates.
 
 The guarantee is therefore: *what this repository publishes about its PRs is true.* It is not:
 *what the operator has in flight locally is true.* Two consequences:
@@ -56,11 +58,31 @@ is still a procedure: reject the in-flight packets and stop pressing tick. The G
 
 Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in flight, including `submitted`.
 
-## Current (2026-08-28)
+## Current (2026-08-29)
 
 1. Wave 0 attested 2/2: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72).
 2. [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) merged by `ravidsrk`. Do not repeat operator-merge on a Foundry packet.
-3. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652). Follow up. Do not merge. Do not tick.
+3. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — **ready for review, not draft**, as of the 2026-08-29 sync; marked ready by `ravidsrk` at 2026-08-28T18:09:24Z. Do not repeat ready-for-review on a Foundry packet. Follow up. Do not merge. Do not tick.
+4. #1652's evidence was witnessed at `48c2242`; the branch is at `6b6ff04`. A re-witness is owed — the clock says so every tick and will not stop until someone re-runs it.
+
+## What stops the clock
+
+`verify-ledger` runs on every tick, over the committed seed as above. It reports two different
+things and gates on only one.
+
+- A **divergence** is the published ledger asserting something GitHub contradicts: a draft flag, a
+  recorded head, a merge the ledger has not absorbed. It exits non-zero and **reds the default
+  branch**. That is deliberate — SPEC.md §7 makes divergence a doctrine event, and a red branch is
+  the loudest surface available. It also means one click in a browser this factory does not control
+  can red `main`, and only a human editing the seed can green it again. Know that going in: the
+  clock measures a live system it has no authority over. Resolve a divergence by deciding what is
+  true and syncing the seed, or by changing the live state. Never by relaxing the check.
+- An **advisory** is a debt on a seed that already reconciles. It prints on the same terminal and
+  exits 0. Today there is exactly one: #1652's evidence covers `48c2242` and the branch has moved to
+  `6b6ff04`. No commit to this repository can clear it — only a sandbox re-run against the upstream
+  branch can. Gating CI on that would leave `main` red for days with nothing mergeable that fixes
+  it, which is the precise pressure that gets an evidence SHA re-stamped by someone who never re-ran
+  the tests. The signal is louder when it is honest than when it is fatal.
 
 ## Metrics that matter — operational definitions
 

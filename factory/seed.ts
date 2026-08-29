@@ -211,16 +211,19 @@ export function seedState(): FactoryState {
     prMeta: {
       url: "https://github.com/ColeMurray/background-agents/pull/1652",
       title: "feat: differentiate the right sidebar toggle icon by state",
-      draft: true,
+      // Live as of the 2026-08-29 sync (issue #49). NOT doctrine-correct: draft-only is the
+      // hardest rule this factory has, and #1652 is not a draft. The ledger records what GitHub
+      // says; `docs/12-ledger.md` and PRODUCT.md §8 carry the deviation and who caused it.
+      draft: false,
       state: "open",
       merged: false,
       mergeable: "blocked",
-      commits: 6,
+      commits: 7,
       reviewComments: 0,
       issueComments: 1,
-      headSha: "48c2242683705b00503d3436575bf3c28b1b0c9b",
-      updatedAt: "2026-08-28T16:16:39Z",
-      syncedAt: "2026-08-28T16:16:39Z",
+      headSha: "6b6ff04079a47109263b81726a1c29459b334de5",
+      updatedAt: "2026-08-28T18:09:34Z",
+      syncedAt: "2026-08-29T05:08:48.000Z",
     },
     followUps: [
       {
@@ -244,6 +247,13 @@ export function seedState(): FactoryState {
         body: "Doctrine healed: draft=true live-verified at head 48c2242; verbatim DISCLOSURE confirmed in the body. GitHub's timeline attributes three draft toggles to the operator account: convert_to_draft 13:47Z, ready_for_review 14:16Z, convert_to_draft 16:16Z (final). A parallel session recorded the first conversion as done while the PR sat ready again by 14:16 — Foundry's own attestation trail has no entry for those two events; this record is corrected against the timeline. Slot stays submitted; it releases via the quiet-day rule (sync --threads-answered after >=14 quiet days).",
         url: "https://github.com/ColeMurray/background-agents/pull/1652",
       },
+      {
+        id: "fu_pr1652_ready_for_review",
+        at: "2026-08-28T18:09:24Z",
+        kind: "note",
+        body: "Marked ready for review by ravidsrk at 18:09:24Z, and 6b6ff04 (merge of upstream main) pushed eight seconds later. Doctrine is draft-only — ready-for-review is a human act, and a human did it; this happened and stands. Recorded, not healed: #1652 is live as ready for review, the deviation is disclosed in PRODUCT.md §8 and docs/12-ledger.md, and it does not license a second one. Evidence still covers 48c2242 only — a re-witness at 6b6ff04 is owed and the clock says so every tick.",
+        url: "https://github.com/ColeMurray/background-agents/pull/1652",
+      },
     ],
     evidence: {
       baseSha: "217511d855e58f95cdfff82b05ebd92114fc59e2",
@@ -255,8 +265,9 @@ export function seedState(): FactoryState {
       filesChanged: 3,
       diffLines: 89,
       notes: [
-        "Opened ready, not draft (historical miss; drafted 2026-08-28, live-verified).",
-        "Disclosure verbatim on the live body as of 2026-08-28.",
+        "Opened ready, not draft (historical miss). Converted to draft 2026-08-28T16:16:39Z, then marked ready for review again by the operator at 18:09:24Z — the state it is in.",
+        "Disclosure verbatim on the live body as verified 2026-08-28.",
+        "Covers 48c2242 only. 6b6ff04 landed after the review and was never witnessed; do not read this proof as covering the live head.",
         "Fork PR #1 closed unmerged.",
       ],
     },
@@ -318,6 +329,14 @@ export function seedState(): FactoryState {
     version: 6,
     packets: [sidebar, unreadable, architecture, changelog, matplotlib, openhands],
     events: [
+      {
+        id: "evt_pr1652_ready_for_review",
+        at: "2026-08-28T18:09:24Z",
+        kind: "follow-up",
+        packetId: sidebar.id,
+        message:
+          "ColeMurray/background-agents#1652 marked ready for review by ravidsrk; head moved to 6b6ff04. Draft-only doctrine deviation — recorded, not a pattern. Ledger synced 2026-08-29 (issue #49); evidence still at 48c2242.",
+      },
       {
         id: "evt_pr1652",
         at: "2026-08-28T10:14:03.000Z",

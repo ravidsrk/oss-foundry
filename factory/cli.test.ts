@@ -11,20 +11,41 @@ import type { FactoryState } from "./types.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLI = resolve(REPO_ROOT, "factory/cli.ts");
+/**
+ * The 6-hour clock. A second entry point, not a CLI subcommand: it reads the COMMITTED SEED (no
+ * `--state`), so the only thing a test controls is what GitHub says back — which is exactly the
+ * input its exit code is a function of.
+ */
+const CLOCK = resolve(REPO_ROOT, "factory/verify-ledger.ts");
 
-function runCli(
+interface Spawned {
+  code: number;
+  stdout: string;
+  out: string;
+}
+
+function runNode(
+  script: string,
   args: string[],
   cwd: string,
   opts: { preload?: string; env?: Record<string, string> } = {},
-): { code: number; stdout: string; out: string } {
+): Spawned {
   const nodeArgs = ["--experimental-strip-types"];
   if (opts.preload) nodeArgs.push("--import", pathToFileURL(opts.preload).href);
-  const run = spawnSync(process.execPath, [...nodeArgs, CLI, ...args], {
+  const run = spawnSync(process.execPath, [...nodeArgs, script, ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1", ...opts.env },
   });
   return { code: run.status ?? 1, stdout: run.stdout, out: `${run.stdout}${run.stderr}` };
+}
+
+function runCli(
+  args: string[],
+  cwd: string,
+  opts: { preload?: string; env?: Record<string, string> } = {},
+): Spawned {
+  return runNode(CLI, args, cwd, opts);
 }
 
 function writeState(state: FactoryState): string {
@@ -68,6 +89,81 @@ globalThis.fetch = async (url, init) => {
 `,
   );
   return { preload, log };
+}
+
+/** The live pull-request facts `packetChecks` reconciles a packet against. */
+interface LivePr {
+  draft: boolean;
+  state: "open" | "closed";
+  merged: boolean;
+  headSha: string;
+  updatedAt: string;
+}
+
+/**
+ * GitHub's half of a reconciliation, as a table keyed by the packet's own `prUrl`.
+ *
+ * The default is "GitHub says exactly what the committed ledger says", so a test states only the
+ * ONE fact it makes GitHub disagree about and everything else stays reconciled. That matters for
+ * the clock: a divergence anywhere in the seed would stop it for a reason the test did not set,
+ * and the exit code would stop meaning what the test claims it means.
+ */
+function livePrs(overrides: Record<string, Partial<LivePr>> = {}): Record<string, LivePr> {
+  const table: Record<string, LivePr> = {};
+  for (const packet of seedState().packets) {
+    if (!packet.prUrl || !packet.prMeta) continue;
+    const { draft, state, merged, headSha, updatedAt } = packet.prMeta;
+    table[packet.prUrl] = { draft, state, merged, headSha, updatedAt };
+  }
+  for (const [url, over] of Object.entries(overrides)) {
+    const base = table[url];
+    assert.ok(base, `no committed-seed packet names ${url} — the override would be silently unused`);
+    table[url] = { ...base, ...over };
+  }
+  return table;
+}
+
+/**
+ * A preload that answers `GET /repos/{owner}/{repo}/pulls/{n}` from that table and 404s the rest,
+ * in the shape `syncGithubPr` parses. Same mechanism as `githubStub` above: replace `globalThis
+ * .fetch` before the spawned entry module runs, so no test here can reach the network.
+ */
+function prFactsStub(table: Record<string, LivePr>): string {
+  const preload = join(mkdtempSync(join(tmpdir(), "foundry-prfacts-")), "preload.mjs");
+  writeFileSync(
+    preload,
+    `const facts = ${JSON.stringify(table)};
+const json = (status, body) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+globalThis.fetch = async (url) => {
+  const parts = new URL(String(url)).pathname.split("/").filter(Boolean);
+  const path = parts[0] === "repos" && parts[3] === "pulls"
+    ? parts[1] + "/" + parts[2] + "/pull/" + parts[4]
+    : "";
+  const pr = facts["https://github.com/" + path];
+  if (!pr) return json(404, { message: "unstubbed " + url });
+  return json(200, {
+    html_url: "https://github.com/" + path,
+    title: "stub",
+    body: "",
+    draft: pr.draft,
+    state: pr.state,
+    merged: pr.merged,
+    mergeable_state: "clean",
+    commits: 1,
+    review_comments: 0,
+    comments: 0,
+    head: { sha: pr.headSha },
+    updated_at: pr.updatedAt,
+  });
+};
+`,
+  );
+  return preload;
+}
+
+function runClock(table: Record<string, LivePr>): Spawned {
+  return runNode(CLOCK, [], tmpdir(), { preload: prFactsStub(table) });
 }
 
 /** The seed with its in-flight packet rewound to draft-ready, so `open-draft` is the next step. */
@@ -356,4 +452,115 @@ test("`clear-halt` does not undo `halt`, and --help says so", () => {
   const help = runCli(["--help"], tmpdir());
   assert.match(help.stdout, /halt <repoId>[^\n]*NOT cleared by clear-halt/);
   assert.match(help.stdout, /clear-halt[^\n]*not the halt above/);
+});
+
+/**
+ * The in-flight packet the fatal/advisory split was built around: the committed seed names #1652's
+ * live head (the #49 sync), and the evidence still covers a commit two pushes back — a debt no
+ * commit to THIS repository can clear, only a sandbox re-run upstream. Read off the seed rather
+ * than re-typed: `ledger-check.test.ts` pins the SHAs and the classifier; what the three tests
+ * below pin is what the two consumers that print and exit DO with the split.
+ */
+const INFLIGHT = seedState().packets.find((p) => p.status === "submitted")!;
+/** A head no packet records — GitHub having moved somewhere the committed ledger does not claim. */
+const UNRECORDED_HEAD = "b0a7edc0ffee11223344556677889900aabbccdd";
+
+test("the clock exits 0 on a ledger that reconciles and still names the debt it cannot clear", () => {
+  // The exit-code decision issue #49 exists to change, at the only place it is made. Both halves
+  // are load-bearing and each is trivially satisfiable alone: gating on advisories reds the default
+  // branch for days over a debt no merge can pay, and dropping the print erases the debt instead —
+  // operationally the same act as re-stamping `evidence.reviewedSha`, which is the dishonesty #43
+  // made impossible in the classifier. The clock must say the ledger reconciles AND say the proof
+  // is behind, and mean both.
+  const witnessed = INFLIGHT.evidence!.reviewedSha!;
+  const live = INFLIGHT.prMeta!.headSha;
+  assert.notEqual(
+    witnessed,
+    live,
+    "the committed seed owes no re-witness any more — re-point this test at the packet that does, or retire it; it cannot pass vacuously",
+  );
+
+  const run = runClock(livePrs());
+  assert.equal(run.code, 0, `a ledger GitHub agrees with must not stop the clock:\n${run.out}`);
+  assert.equal(/DIVERGENCE/.test(run.out), false, run.out);
+  assert.match(
+    run.stdout,
+    new RegExp(`ledger ok: ${seedState().packets.filter((p) => p.prUrl).length} packets match GitHub`),
+    run.out,
+  );
+  // The advisory LINE, not the summary's count of it. Deleting the `ADVISORY` print still leaves
+  // `; 1 advisory outstanding (see above)` on stdout pointing at nothing, so a count assertion on
+  // its own stays green over exactly the silence this asserts against.
+  assert.match(
+    run.out,
+    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${witnessed.slice(0, 7)}.*${live.slice(0, 7)}`, "m"),
+    `the clock must name both SHAs of the outstanding re-witness:\n${run.out}`,
+  );
+  assert.match(run.stdout, /1 advisory outstanding/, run.out);
+});
+
+test("the clock exits 1 on a ledger GitHub contradicts, with the advisory printed beside it", () => {
+  // The other direction, and the guard on the demotion: moving evidence staleness to advisory must
+  // not carry the SPEC.md §7 check with it, and the advisory must not mask the divergence it is
+  // printed next to — a clock that prints only the debt it cannot fix, while GitHub contradicts the
+  // published ledger, is worse than one that prints nothing.
+  const run = runClock(livePrs({ [INFLIGHT.prUrl!]: { headSha: UNRECORDED_HEAD } }));
+  assert.equal(run.code, 1, `a live head the ledger does not record must stop the clock:\n${run.out}`);
+  assert.match(
+    run.out,
+    new RegExp(
+      `^DIVERGENCE ${INFLIGHT.id}: recorded head ${INFLIGHT.prMeta!.headSha.slice(0, 7)} but live head ${UNRECORDED_HEAD.slice(0, 7)}`,
+      "m",
+    ),
+    run.out,
+  );
+  assert.equal(/ledger ok/.test(run.stdout), false, `a stopped clock must not also report success:\n${run.out}`);
+  assert.match(
+    run.out,
+    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${INFLIGHT.evidence!.reviewedSha!.slice(0, 7)}`, "m"),
+    `the re-witness debt is still owed and must not be swallowed by the divergence:\n${run.out}`,
+  );
+});
+
+test("reconcile calls a contradiction DIVERGENCE and a re-witness debt ADVISORY, and counts them apart", () => {
+  // The clock's sibling consumer of the same split. It gates on nothing, so the two labels and the
+  // two counters ARE its entire output contract: swap the buckets and a debt no merge can pay reads
+  // as the ledger lying, while a ledger GitHub actually contradicts reads as routine — one word
+  // meaning opposite things in the two places an operator reads it.
+  const seed = seedState();
+  const path = writeState(seed);
+  const claimedMerged = seed.packets.filter((p) => p.status === "merged" && p.prUrl);
+  assert.ok(
+    claimedMerged.length > 1,
+    "more than one, so `divergences=` and `advisories=` differ and the counter line alone tells the buckets apart",
+  );
+
+  const run = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs(
+        Object.fromEntries(
+          claimedMerged.map((p) => [p.prUrl!, { state: "open" as const, merged: false }]),
+        ),
+      ),
+    ),
+  });
+  assert.equal(run.code, 0, run.out);
+
+  for (const packet of claimedMerged) {
+    assert.match(
+      run.out,
+      new RegExp(`^DIVERGENCE ${packet.id}: ledger says merged but the PR is open and unmerged`, "m"),
+      `a ledger GitHub contradicts is a DIVERGENCE, never an advisory:\n${run.out}`,
+    );
+  }
+  assert.match(
+    run.out,
+    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${INFLIGHT.evidence!.reviewedSha!.slice(0, 7)}`, "m"),
+    `a debt on a ledger that already reconciles is an ADVISORY, never a divergence:\n${run.out}`,
+  );
+  assert.match(
+    run.stdout,
+    new RegExp(`divergences=${claimedMerged.length} advisories=1`),
+    `the counters must follow the buckets they count:\n${run.out}`,
+  );
 });

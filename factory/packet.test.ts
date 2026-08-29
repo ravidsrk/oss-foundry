@@ -4,14 +4,20 @@ import { evidenceIsStale, needsRewitness, packetDivergences } from "./ledger-che
 import { renderEvidencePage } from "./packet.ts";
 import { seedState } from "./seed.ts";
 
-const LIVE_HEAD = "6b6ff04c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
+/** Synthetic, and deliberately sharing no abbreviated prefix with any SHA in the seed. */
+const LIVE_HEAD = "facade00c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6";
 
 test("the evidence page says when the PR moved past the witnessed commit", () => {
   const packet = seedState().packets.find((p) => p.status === "submitted")!;
   const witnessed = packet.evidence!.reviewedSha!;
 
-  // Witnessed head === recorded head: nothing to warn about.
-  assert.equal(/moved past/i.test(renderEvidencePage(packet)), false);
+  // Control: witnessed head === recorded head, nothing to warn about. Constructed rather than
+  // taken from the seed, because since #49 the seed's in-flight packet is itself in the moved-past
+  // state — its evidence covers 48c2242 and #1652 has moved to 6b6ff04.
+  const atWitnessed = { ...packet, prMeta: { ...packet.prMeta!, headSha: witnessed } };
+  assert.equal(/moved past/i.test(renderEvidencePage(atWitnessed)), false);
+  // ...and the seed's real packet does warn, because it genuinely is behind.
+  assert.match(renderEvidencePage(packet), /moved past/i);
 
   // A maintainer reading this page after new commits landed must be told the proof is older
   // than the branch — the page is the artifact they trust.
