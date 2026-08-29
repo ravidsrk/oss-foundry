@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { sanitizeTerminalText } from "./terminal.ts";
 import type { EvidenceWitness, SandboxKind, Wave } from "./types.ts";
 
 /**
@@ -104,6 +105,22 @@ export const PREFLIGHT_INVOCATION = "node --experimental-strip-types factory/cli
 export const WITNESS_TAIL_LINES = 40;
 
 /**
+ * The one boundary between third-party bytes and the operator's terminal now lives in
+ * `terminal.ts`, and this module is one of its CALLERS rather than its owner.
+ *
+ * It moved because the name was making the mistake. A sanitiser that lives in `witness.ts` reads as
+ * a witness concern, and issue #78's fix was scoped to witness sinks accordingly — while the freeze
+ * printed a fetched CONTRIBUTING raw, seven `fail()` sites here printed `setupCommand` output raw,
+ * and the class stayed open. The subject was never "the witness"; it is any text a third party
+ * wrote that a human is about to read.
+ *
+ * The two sanitise calls left in this file are the ones whose result is RECORDED, not merely
+ * printed: `runFailureDetail` splits into lines and counts them, so a `\r` must not become a
+ * "line"; `resolveToolchain` stores `path`/`raw` on the witness, which the evidence page renders
+ * from disk. The stream boundary cannot do either of those — it sees the finished string.
+ */
+
+/**
  * The diagnostic block every run-failure refusal ends with.
  *
  * Before this, `tests are red at head d91fe2f (exit 1) — nothing to witness` was the entire
@@ -115,7 +132,17 @@ export const WITNESS_TAIL_LINES = 40;
 export function runFailureDetail(command: string, output: string, toolchain?: string): string {
   const detail = [`  command: ${command}`];
   if (toolchain) detail.push(`  toolchain: ${toolchain}`);
-  const body = output.replace(/\s+$/, "");
+  // Sanitised BEFORE the trim and the line split, so a `\r` cannot survive into a "line" that the
+  // terminal then repaints, and so the line count the block reports is the count of lines a human
+  // will actually see. `command` and `toolchain` are ours — `allowlist.yaml`'s testCommand and a
+  // tool name plus a digits-only version — so the repository's output is the only untrusted input.
+  const scrubbed = sanitizeTerminalText(output);
+  const body = scrubbed.text.replace(/\s+$/, "");
+  if (scrubbed.removed > 0) {
+    detail.push(
+      `  ${scrubbed.removed} byte(s) of terminal control sequence removed from this repository's output before printing it — a witnessed repo does not get to move your cursor. The persisted run log keeps the original bytes.`,
+    );
+  }
   if (body.length === 0) {
     // The single most misleading case, so it gets a sentence rather than an empty block: a command
     // that dies before printing anything is usually the environment, not the patch.
@@ -202,7 +229,12 @@ export async function resolveToolchain(
       [`command -v ${tool} && ${tool} --version 2>&1 | head -n 1`],
       cwd ? { cwd } : undefined,
     );
-    const lines = probe.output.split("\n").map((l) => l.trim()).filter(Boolean);
+    // The SECOND repository-controlled sink (issue #78). Inside `witnessEvidence` this probe runs
+    // with `cwd` set to the clone, and `TOOL_TOKEN` admits a path — so a repo whose `testCommand`
+    // names something it ships (`./scripts/test.sh`) writes every byte of both lines below. `path`
+    // is printed verbatim by `witness-check`, so it is an operator surface exactly like the failure
+    // detail is. Sanitised before the split for the same reason: a `\r` must not become a "line".
+    const lines = sanitizeTerminalText(probe.output).text.split("\n").map((l) => l.trim()).filter(Boolean);
     const path = probe.exit === 0 ? lines[0] : undefined;
     if (!path) {
       resolved.push({ tool });
@@ -318,6 +350,17 @@ export async function witnessEvidence(
 
   const dir = join(tmpdir(), `foundry-witness-${input.repoId.replace("/", "_")}-${Date.now()}`);
   const url = `https://github.com/${input.repoId}.git`;
+  // Every refusal below interpolates a step's raw output, and that output is REPOSITORY-CONTROLLED:
+  // `allowlist.yaml` carries `setupCommand: npm ci`, run with `cwd` set to this clone, so the
+  // repository's own lifecycle scripts author every byte of "setup command failed (exit 1) — …".
+  //
+  // Not sanitised here, and that is deliberate rather than an oversight. Issue #78's round-1 fix was
+  // a sanitise call at each sink, and the list came up seven short — precisely these. The boundary
+  // is now on the operator's terminal streams (`terminal.ts`, installed by every entry point), which
+  // is the one place that cannot be short. Adding calls back here would trade a complete rule for a
+  // list that has to stay complete, and the list is what failed. `runFailureDetail` keeps its own
+  // call because it SPLITS the output into lines and counts them — a `\r` must not become a "line" —
+  // which the stream boundary cannot do; it sees the finished string.
   const fail = async (error: string): Promise<WitnessOutcome> => {
     await runner("cleanup", [dir]);
     return { ok: false, error };

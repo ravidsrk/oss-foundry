@@ -112,6 +112,14 @@ export function buildPacket(input: {
 }
 
 /**
+ * How many characters the scanner read that the freeze will NOT show (issue #77). Derived from the
+ * two fields `policyDocSource` already carries, so there is one number and no new stored state.
+ */
+function withheldChars(docs: PolicyDocSource[]): number {
+  return docs.reduce((n, d) => n + Math.max(0, d.chars - d.excerpt.length), 0);
+}
+
+/**
  * What the operator reads at the freeze, before the attest is taken.
  *
  * The freeze is the documented second layer over a scanner whose miss mode is known and named
@@ -128,6 +136,24 @@ export function buildPacket(input: {
  * `CONTRIBUTING` — a repository with the file present and empty, a truncated response — produces a
  * `policyDocs` entry, so a document-counted branch would take the scanned path and print the exact
  * sentence the branch exists to prevent: "no ban statement matched in 0 chars from CONTRIBUTING".
+ *
+ * PARTIAL absence is the same defect one step in, and it is issue #77. The scanner reads the whole
+ * fetched document; the packet keeps `POLICY_DOC_EXCERPT_LIMIT` characters of it. So this surface
+ * could print 4,000 characters and then close with "no ban statement matched in 5234 chars from
+ * CONTRIBUTING" — a claim of coverage over the 1,234 characters the reader had not been given,
+ * phrased as reassurance, immediately above the attest. Those two numbers are the fixture in
+ * `packet.test.ts` ("the freeze never claims a clean scan over characters it did not show"), so the
+ * example is re-derivable rather than illustrative. Combined with the scanner's known-and-parked
+ * miss mode (#37) that is an operator approving a contribution to a repository that said in words
+ * not to.
+ *
+ * The fix is loudness, not more text, and the reason is that the excerpt limit is a LEDGER bound:
+ * `policyDocs` is stored state, the full document is never kept, and re-fetching at freeze time
+ * would show text the gate never parsed — which is the opposite of what this function promises. So
+ * what is shown cannot grow; what can change is that the omission is impossible to miss and the
+ * scan claim can no longer overstate itself. `withheldChars` is computed ONCE, from `chars` and
+ * `excerpt.length` the record already carries — no new stored field, and the three places that
+ * mention the omission render one value rather than each deriving it.
  */
 export function renderFreezeEvidence(packet: TaskPacket): string {
   const docs = packet.policyDocs ?? [];
@@ -138,10 +164,20 @@ export function renderFreezeEvidence(packet: TaskPacket): string {
   ];
 
   for (const doc of docs) {
+    const missing = Math.max(0, doc.chars - doc.excerpt.length);
     lines.push(
-      `  ${doc.name} — ${doc.chars} chars${doc.truncated ? ` (first ${doc.excerpt.length} shown)` : ""}`,
+      `  ${doc.name} — ${doc.chars} chars${missing > 0 ? ` (first ${doc.excerpt.length} shown, ${missing} NOT shown)` : ""}`,
     );
     for (const line of doc.excerpt.split("\n")) lines.push(`  | ${line}`);
+    // Where the text stops, because that is where a scrolling reader's eye lands. The header above
+    // carries the same number, but 4,000 characters of quoted prose renders as 63 quoted lines —
+    // one to three screens back, depending on the terminal — and a disclosure the operator has to
+    // remember having read is not one they have at the decision.
+    if (missing > 0) {
+      lines.push(
+        `  ⟪ ${missing} more characters of ${doc.name} are NOT shown above. The scanner read them; you have not. ⟫`,
+      );
+    }
     lines.push("");
   }
   for (const name of ["AGENTS.md", "CONTRIBUTING"]) {
@@ -165,6 +201,7 @@ export function renderFreezeEvidence(packet: TaskPacket): string {
 
   lines.push("");
   const total = docs.reduce((n, d) => n + d.chars, 0);
+  const withheld = withheldChars(docs);
   if (total === 0) {
     lines.push(
       docs.length === 0
@@ -175,6 +212,17 @@ export function renderFreezeEvidence(packet: TaskPacket): string {
   } else if (packet.policy.matchedPhrases.length > 0) {
     lines.push("  Scanner matched — confirm these are the maintainer's words and mean what the verdict says:");
     for (const phrase of packet.policy.matchedPhrases) lines.push(`    · ${phrase}`);
+  } else if (withheld > 0) {
+    // The sentence issue #77 is about. `no ban statement matched in ${total} chars` is true of the
+    // SCANNER and false of the reader, and printed unqualified directly above the attest it read as
+    // a clean bill of health over text nobody had seen. Split, so the two subjects stay separate:
+    // what the scanner covered, and what the operator was actually shown.
+    lines.push(
+      `  Scanner: no ban statement matched in ${total} chars from ${docs.map((d) => d.name).join(" + ")} —`,
+      `  BUT ${withheld} of those ${total} characters are not shown above. The scanner read them; you have not,`,
+      "  and the scanner's miss mode is exactly what your reading is here to cover. Treat this as unread policy",
+      "  text: open the document upstream and check the rest, or do not attest.",
+    );
   } else {
     lines.push(`  Scanner: no ban statement matched in ${total} chars from ${docs.map((d) => d.name).join(" + ")}.`);
   }

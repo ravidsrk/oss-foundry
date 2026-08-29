@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { assertDisjointCounts } from "./fixture-counts.ts";
 import { evidenceIsStale, needsRewitness, packetDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket, POLICY_DOC_EXCERPT_LIMIT, renderEvidencePage, renderFreezeEvidence } from "./packet.ts";
@@ -149,12 +150,172 @@ test("the freeze prints the words the scanner read, not a boolean", () => {
   assert.match(out, /AGENTS\.md.*not fetched/i);
 });
 
+/**
+ * Issue #77, and the reason it is a P1 rather than a rendering nit.
+ *
+ * #37 legs 2–3 exist because "the human freeze is blind — fetched docs are discarded". #70 fixed
+ * that by printing the parsed text, and then capped the print at 4,000 characters — so for the one
+ * case the whole mechanism is for, the human was still blind. The scanner reads the WHOLE document;
+ * the freeze showed a prefix. And #37's scanner leg is parked, so "the scanner misses a realistic
+ * ban" is a live condition on this tree, not a hypothesis.
+ *
+ * The specific sentence that made it dangerous is the closing one. After 4,000 characters of quoted
+ * text the surface said `no ban statement matched in 5234 chars from CONTRIBUTING` — a claim of
+ * coverage over 1,234 characters the operator had not been shown, phrased as reassurance, sitting
+ * directly above the attest. The `(first 4000 shown)` marker was real but was 63 quoted lines
+ * further up — one to three screens — which is not a disclosure at the moment of the decision.
+ *
+ * INVARIANT: an operator must never be able to approve while text the scanner read is hidden from
+ * them without their knowing it. So the withheld amount is stated where the text stops AND in the
+ * scan claim itself, and the scan claim may never assert coverage over characters it did not show.
+ *
+ * THE COUNT IS THE ACCEPTANCE, AND IT IS PINNED THREE TIMES. `N characters not shown — the scanner
+ * read them, you have not` protects nobody if N can be wrong: `0 characters not shown` printed above
+ * a hidden ban is affirmative false reassurance, which is worse than the silence #77 replaced. The
+ * three renderings (header, end-of-excerpt marker, closing claim) are therefore asserted separately,
+ * each against the literal number, with a mutant per rendering in `scripts/mutation-audit.ts`.
+ *
+ * THE FIXTURE'S OWN SHAPE IS PART OF THE TEST. Round 1 of this fix used a document of 4883
+ * characters withholding 883 of them — and `"883"` is a suffix of `"4883"`, so every one of the
+ * three assertions matched inside the TOTAL and pinned nothing at all. All four count mutants
+ * survived a green suite. The offset below is chosen so the withheld count carries into the
+ * thousands digit (1234 withheld of 5234 total) and `assertDisjointCounts` — one rule in
+ * `fixture-counts.ts`, shared with `cli.test.ts`, which used to hold a second hand-written copy of
+ * it — refuses the fixture if a later edit reintroduces the overlap.
+ */
+const withheldFixture = (banAt: number, ban: string) => {
+  const filler = "Please read the guidelines below before opening a pull request.\n".repeat(200);
+  return `${filler.slice(0, banAt)}\n${ban}\n`;
+};
+
+test("the freeze never claims a clean scan over characters it did not show", () => {
+  // A ban the scanner MISSES, past the excerpt limit: the exact composition issue #77 describes.
+  const missedBan = "Kindly refrain from opening pull requests that were authored by an AI assistant.";
+  const doc = withheldFixture(POLICY_DOC_EXCERPT_LIMIT + 1152, missedBan);
+  const packet = freezePacket({ contributing: doc });
+  const total = doc.length;
+  const withheld = total - POLICY_DOC_EXCERPT_LIMIT;
+
+  // Preconditions — if any of these stops holding, the test below is measuring something else.
+  assert.equal(packet.policy.code, "ALLOW", "the scanner must MISS this ban for the test to bite");
+  assert.ok(doc.length > POLICY_DOC_EXCERPT_LIMIT, "the document must exceed the excerpt limit");
+  assert.equal(packet.policyDocs![0].truncated, true);
+  assert.deepEqual([total, withheld], [5234, 1234], "the numbers the module comment cites");
+  assertDisjointCounts(total, withheld);
+
+  const out = renderFreezeEvidence(packet);
+  const lines = out.split("\n");
+
+  // 1. THE HEADER. Named source, true size, and how much of it is missing — the whole line, anchored,
+  //    so neither the count nor the clause around it can quietly go.
+  const headerLine = `  CONTRIBUTING — ${total} chars (first ${POLICY_DOC_EXCERPT_LIMIT} shown, ${withheld} NOT shown)`;
+  assert.ok(lines.includes(headerLine), `expected exactly:\n${headerLine}\ngot:\n${lines.slice(0, 4).join("\n")}`);
+
+  // 2. THE MARKER, stated WHERE THE TEXT STOPS rather than only in a header 63 quoted lines earlier.
+  //    The line after the last quoted line must be the notice — that is the position an operator
+  //    scrolling to the end of the quote actually lands on.
+  //    Located from the DOCUMENT's own header, not from the last `| ` line in the render: the
+  //    committed policy record and `policyNotes` are quoted the same way further down, so a
+  //    whole-output search would land on those and pass over a marker that was never emitted.
+  const header = lines.indexOf(headerLine);
+  let end = header + 1;
+  while (lines[end]?.startsWith("  | ")) end += 1;
+  assert.equal(end - header - 1, 63, "the excerpt is 63 quoted lines — one to three screens, not dozens");
+  const marker = lines[end] ?? "";
+  assert.match(
+    marker,
+    new RegExp(`⟪ ${withheld} more characters of CONTRIBUTING are NOT shown above`),
+    `the line where the document's text stops must say so, with the count:\n${lines.slice(end - 1, end + 2).join("\n")}`,
+  );
+  // …and it must be the WITHHELD count there, not the total borrowed from the header.
+  assert.equal(marker.includes(String(total)), false, marker);
+
+  // 3. THE CLOSING CLAIM — the sentence directly above the attest — may not stand as a clean bill of
+  //    health over the full character count. The shipped line was exactly
+  //    `Scanner: no ban statement matched in 5234 chars from CONTRIBUTING.`: a complete sentence,
+  //    terminated, unqualified. The count may still be reported (it is a true fact about the
+  //    scanner) but it may not be the last word, so the FULL STOP is what must be gone.
+  assert.equal(
+    out.includes(`no ban statement matched in ${total} chars from CONTRIBUTING.`),
+    false,
+    `the scan claim must not close over unshown text:\n${out.slice(-900)}`,
+  );
+  // …and the qualification is in the closing block, where the decision is made, not only upstream,
+  //    and it names BOTH numbers in their own roles: withheld of total, in that order.
+  const closing = out.slice(out.lastIndexOf("  Scanner:"));
+  assert.match(
+    closing,
+    new RegExp(`BUT ${withheld} of those ${total} characters are not shown above`),
+    closing,
+  );
+  assert.match(closing, /The scanner read them; you have not/, closing);
+
+  // 4. And the ban itself is genuinely absent from the render — this is the harm, restated as a
+  //    fact rather than assumed. The operator's protection is that they are TOLD it is absent.
+  assert.equal(out.includes(missedBan), false, "precondition: the ban really is past the limit");
+});
+
+test("a fully shown document carries no withheld notice at all", () => {
+  // The negative half. A guard that fires on every document teaches the operator to skip it, and
+  // "N characters not shown" over a document that was shown whole is a false statement in its own
+  // right. Most CONTRIBUTINGs fit, and those freezes must read exactly as they did.
+  const out = renderFreezeEvidence(freezePacket({ contributing: CLEAN_CONTRIBUTING }));
+  assert.equal(/not shown|withheld/i.test(out), false, out);
+  assert.match(out, new RegExp(`no ban statement matched in ${CLEAN_CONTRIBUTING.length} chars`, "i"));
+});
+
 test("the freeze prints the ban statement the scanner did match", () => {
   const packet = freezePacket({ agentsMd: BAN_AGENTS_MD });
   assert.equal(packet.policy.code, "DENY_FORBIDDEN");
   const out = renderFreezeEvidence(packet);
   assert.match(out, /are not welcome/i);
   assert.equal(/no ban statement matched/i.test(out), false);
+});
+
+/**
+ * THE PRECEDENCE BETWEEN THE TWO CLOSING BRANCHES, which nothing chose between.
+ *
+ * `renderFreezeEvidence` closes with matched phrases if there are any, and otherwise with the
+ * withheld-characters warning. A document can be BOTH — a ban inside the excerpt and 1,000
+ * characters past it — and every fixture so far was one or the other, so
+ * `matchedPhrases.length > 0` → `matchedPhrases.length > 0 && withheld === 0` survived: the matched
+ * ban silently disappears from the block an operator reads immediately above the attest, replaced by
+ * a warning about text they were not shown. The strictly worse of the two orderings, because the
+ * phrases are the reason the verdict is DENY.
+ *
+ * So the ordering is asserted, and so is the fact that choosing it costs the withholding nothing:
+ * the header and the end-of-excerpt marker still say how much was held back.
+ */
+test("a truncated document that DID match a ban still shows the phrases", () => {
+  const doc = `${BAN_AGENTS_MD}\n${"Please read the guidelines below before opening a pull request.\n".repeat(200)}`;
+  const packet = freezePacket({ agentsMd: doc });
+  const total = doc.length;
+  const withheld = total - POLICY_DOC_EXCERPT_LIMIT;
+
+  // Preconditions: both conditions genuinely hold at once, which is the composition nothing covered.
+  assert.equal(packet.policy.code, "DENY_FORBIDDEN", "the scanner must MATCH for this test to bite");
+  assert.ok(packet.policy.matchedPhrases.length > 0);
+  assert.equal(packet.policyDocs![0].truncated, true, "the document must also exceed the excerpt limit");
+  assert.ok(withheld > 0);
+  assertDisjointCounts(total, withheld);
+
+  const out = renderFreezeEvidence(packet);
+  const lines = out.split("\n");
+  assert.ok(
+    lines.includes("  Scanner matched — confirm these are the maintainer's words and mean what the verdict says:"),
+    `the matched-phrase block is the reason the verdict is DENY and it is gone:\n${out.slice(-700)}`,
+  );
+  for (const phrase of packet.policy.matchedPhrases) {
+    assert.ok(lines.includes(`    · ${phrase}`), `the matched phrase is not quoted:\n${out.slice(-700)}`);
+  }
+
+  // …and the withholding is still disclosed where the text stops, so taking the phrase branch does
+  // not cost the operator the other fact.
+  assert.ok(
+    lines.includes(`  AGENTS.md — ${total} chars (first ${POLICY_DOC_EXCERPT_LIMIT} shown, ${withheld} NOT shown)`),
+    lines.slice(0, 5).join("\n"),
+  );
+  assert.match(out, new RegExp(`⟪ ${withheld} more characters of AGENTS\\.md are NOT shown above`), out.slice(0, 900));
 });
 
 test("a freeze with nothing fetched says so instead of reporting a clean scan", () => {

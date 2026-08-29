@@ -53,6 +53,7 @@ import { health, scorecardRow } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
+import { installTerminalBoundary } from "./terminal.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
 import {
   hostRunner,
@@ -68,12 +69,34 @@ import {
  * The sha256 on the evidence page is only proof if the maintainer can recompute it. Write the two
  * run logs at the repo-root-relative paths the witness names, so the digest is checkable on disk.
  * `root` exists so this is drivable against a scratch tree instead of the operator's checkout.
+ *
+ * The default is `LOGS_ROOT`, not `"."` (issue #80). A cwd default made this the WRITE half of the
+ * same mismatch `readIfPresent` had on the read half: run the verb from outside the checkout and
+ * the logs land beside the operator's shell while the evidence page keeps naming
+ * `docs/evidence/logs/...` inside the repository — a recompute offer pointing at files that are not
+ * there. Read and write anchor to the same value, because they name the same two files.
  */
 export function persistWitnessLogs(
   witness: EvidenceWitness,
   logs: WitnessLogs,
-  root = ".",
+  root = LOGS_ROOT,
 ): void {
+  // The other half of anchoring, exactly as `persist` is for the ledger.
+  //
+  // Before this, a spawned-CLI test was isolated by its temp `cwd` for free. Anchoring `LOGS_ROOT`
+  // to the repo root takes that away, so a test that forgets `--logs-root` writes two run logs into
+  // the developer's real checkout — which is not hypothetical: an intermediate state of issue #80's
+  // own fix did precisely that, and the files were sitting in `docs/evidence/logs/` afterwards.
+  // Refused at the write and not at the resolve, because resolving the default path is a legitimate
+  // thing for a test to assert — that is how the anchoring itself is proven; it is the mutation that
+  // leaks. `NODE_TEST_CONTEXT` is set by `node --test` and inherited by spawned children, so this is
+  // inert for a real operator. An explicit `root` argument is a caller who has said where they mean.
+  if (root === LOGS_ROOT && !LOGS_ROOT_FLAG && process.env.NODE_TEST_CONTEXT) {
+    console.error(
+      `refusing to write the repo-root run logs under ${LOGS_ROOT} from a test run — pass \`--logs-root <tmpdir>\` to every spawned CLI so the test cannot write into the real checkout.`,
+    );
+    process.exit(1);
+  }
   for (const [path, text] of [
     [witness.testLogPath, logs.test],
     [witness.revertLogPath, logs.revert],
@@ -84,9 +107,37 @@ export function persistWitnessLogs(
   }
 }
 
-function readIfPresent(path: string): string | undefined {
+/**
+ * Read a path the OPERATOR typed on the command line. Cwd-relative, and that is correct: when
+ * someone types `--manifest ./witness.json`, the `./` is theirs and means their shell's directory.
+ *
+ * Deliberately NOT the reader for anything the ledger or a manifest names — see `readRepoRelative`.
+ * The two are separate functions with the anchor in the name because they were one function with
+ * two call sites and one right answer between them (issue #80), and a single `readIfPresent` is an
+ * invitation for the next call site to pick the wrong anchor silently.
+ */
+function readOperatorPath(path: string): string | undefined {
   try {
     return readFileSync(resolve(path), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read a path that is RELATIVE TO THE REPOSITORY, not to the operator (issue #80).
+ *
+ * Witness log paths are of this kind: `witnessLogPathViolation` refuses anything that is not
+ * exactly `docs/evidence/logs/<packetId>/{test,revert}.log`, and its refusal message says in so
+ * many words that "run logs are repo-root-relative". Resolving them with a bare `resolve()` made
+ * the schema's claim false from any directory but one, so `attach-witness` reported a perfectly
+ * good witness as a missing log — the same class #43 fixed for `STATE_FILE` and left in this
+ * sibling. `LOGS_ROOT` is the anchor, `--logs-root` is the override, exactly as `STATE_FILE` and
+ * `--state` are.
+ */
+function readRepoRelative(path: string): string | undefined {
+  try {
+    return readFileSync(resolve(LOGS_ROOT, path), "utf8");
   } catch {
     return undefined;
   }
@@ -98,6 +149,29 @@ function flag(args: string[], name: string): string | undefined {
   return args[i + 1];
 }
 
+/**
+ * A flag written LAST, with nothing after it, refused instead of read as absent.
+ *
+ * `flag()` cannot tell `--at` at the end of argv from no `--at` at all: both are `undefined`. That
+ * is harmless for a flag whose absence is already an error — `revert requires --reason <text>`
+ * fires either way — and it is a silent wrong answer for a flag whose absence MEANS something.
+ *
+ * NOT GENERALISED into `flag()` itself, deliberately. `--state` and `--logs-root` have the same
+ * "absence means something" shape, but they are read during MODULE EVALUATION, so a refusal inside
+ * `flag()` would `process.exit` or throw inside whatever imported `cli.ts` — `engine.test.ts` does —
+ * rather than in front of the operator who mistyped. Applied at the one call site where a silent
+ * default is a safety verdict, and stated here so the next one is a decision rather than an
+ * oversight.
+ */
+function refuseValuelessFlag(args: string[], name: string, absenceMeans: string): void {
+  if (args.includes(name) && flag(args, name) === undefined) {
+    console.error(
+      `${name} was given no value. Pass one, or omit ${name} entirely — omitting it means ${absenceMeans}, and a trailing ${name} is not the same thing.`,
+    );
+    process.exit(1);
+  }
+}
+
 const ARGV = process.argv.slice(2);
 // The ledger belongs to the repository, not to whatever directory the operator happened to be in.
 // A cwd-relative path silently served the committed seed as live truth from anywhere else, and a
@@ -105,6 +179,31 @@ const ARGV = process.argv.slice(2);
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const STATE_FILE_FLAG = flag(ARGV, "--state");
 const STATE_FILE = resolve(STATE_FILE_FLAG ?? resolve(REPO_ROOT, ".foundry-state.json"));
+
+/**
+ * Where `docs/evidence/logs/<packetId>/{test,revert}.log` is rooted (issue #80).
+ *
+ * The witness log paths are repo-root-relative by schema, so the tree they resolve against is a
+ * property of the CHECKOUT, not of the operator's shell — the identical argument #43 made for the
+ * ledger, and the identical shape of fix: an anchor plus one explicit override. Exported as a
+ * function of `argv` rather than read off the constant so a test can assert the DEFAULT, which is
+ * the half an override can hide and the half the bug was in.
+ *
+ * One value for both directions on purpose. A separate read root and write root would be two places
+ * that have to agree about where two named files are, and this issue is what disagreement looks
+ * like: the reader hunting one tree while the evidence page promises another.
+ */
+export function witnessLogRootFor(argv: string[]): string {
+  const override = flag(argv, "--logs-root");
+  // Both branches go through `resolve()`, and the default branch needs it as much as the override:
+  // `REPO_ROOT` comes from `new URL("..", …)` and therefore carries a trailing slash, which `--help`
+  // printed straight into `…/oss-foundry//docs/evidence/logs/…`. `STATE_FILE` already normalises for
+  // the same reason one line up; a doubled slash in the one line that tells the operator where the
+  // logs are is a small thing that makes the reader doubt the rest of the sentence.
+  return resolve(override ?? REPO_ROOT);
+}
+const LOGS_ROOT_FLAG = flag(ARGV, "--logs-root");
+const LOGS_ROOT = witnessLogRootFor(ARGV);
 
 /**
  * Every ledger write goes through here so a test can never make one to the repo root.
@@ -215,6 +314,19 @@ async function closingRefFor(
 
 async function tickWithGithub(state: FactoryState) {
   if (hasInflight(state.packets)) return applyTick(state);
+  // Before the first request, not after the last one (issue #79).
+  //
+  // SPEC.md §6: "a platform secondary rate limit MUST halt the factory, never retry." The halt was
+  // already consulted — inside `applyTick` → `maySelectRepo`, at the bottom of this function, after
+  // the loop below had spent a `pulls`, an `AGENTS.md`, a `CONTRIBUTING`, an issue read and a
+  // timeline read for every named row on the roster. Issuing those and then refusing IS the retry
+  // the rule forbids, and it aggravates the exact limit that wrote the halt; #43 made the halt
+  // durable so a re-run could not retry, and this ordering meant every re-run retried anyway.
+  //
+  // Two gates, and both earn their place: this one decides whether to spend requests, `applyTick`'s
+  // decides what the tick's verdict is. They cannot drift, because there is one `factoryHalt` and
+  // they both call it — and `applyTick` is left to phrase the outcome so this line never has to.
+  if (factoryHalt(state)) return applyTick(state);
   const competingKeys: string[] = [];
   const adjacentKeys: string[] = [];
   const closedIssues: { key: string; reason: string }[] = [];
@@ -312,7 +424,7 @@ function usage(): void {
   approve <packetId> --note <text> [--by <name>]   (identity also via FOUNDRY_OPERATOR)
   reject <packetId> --reason <text>
   halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
-  revert <packetId> --reason <text>   (a maintainer-stated rollback naming the PR — SPEC.md §7 stop; an explicit git revert of our merge commit is found by reconcile on its own)
+  revert <packetId> --reason <text> [--at <iso>]   (a maintainer-stated rollback naming the PR — SPEC.md §7 stop; an explicit git revert of our merge commit is found by reconcile on its own. --at is WHEN THE ROLLBACK HAPPENED, which is what the 30-day window is measured from; it defaults to now)
   advance <packetId>
   evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
   witness-check [repoId]   (pre-flight: resolve the interpreter each allowlisted testCommand would really use here, before a packet is in flight)
@@ -327,7 +439,9 @@ function usage(): void {
   clear-halt --by <name> --note <text>   (a human lifts the factory-wide rate-limit halt — not the halt above)
 
 Any command takes --state <path> to point at a different ledger.
+Any command takes --logs-root <path> to root the witness run logs somewhere other than the checkout.
 State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry never merges.
+Witness logs: ${LOGS_ROOT}/docs/evidence/logs/<packetId>/ (read and written there, whatever your cwd).
 Disclosure:
 ${DISCLOSURE}
 `);
@@ -383,6 +497,21 @@ async function main() {
     // the one thing the human is here to read.
     if (packetForFreeze) console.log(renderFreezeEvidence(packetForFreeze));
     if (packetForFreeze && (packetForFreeze.status === "gated" || packetForFreeze.status === "frozen")) {
+      // The selection gate, moved ahead of the network reads (issue #79). `applyApprove` runs the
+      // identical `maySelectRepo` at the bottom of this verb, so the VERDICT is unchanged — what
+      // changes is that a halted or scorecard-stopped repository stops costing GitHub requests to
+      // discover. SPEC.md §6 says never retry; three reads and then a refusal is a retry. Same
+      // pre-flight, same wording, as `open-draft` below.
+      //
+      // Deliberately AFTER the freeze evidence above and INSIDE the status guard: the render is
+      // local, and it is the one thing the human came here to read (issue #37), so a refusal must
+      // not swallow it. Inside the guard, a wrong-status packet still gets `applyApprove`'s own
+      // "cannot approve … from status …" rather than being told about a halt it never reached.
+      const gate = maySelectRepo(state, packetForFreeze.repoId);
+      if (!gate.ok) {
+        console.error(`cannot approve ${id}: ${gate.reason}`);
+        process.exit(1);
+      }
       // SPEC.md §4: the approval step re-checks for competing upstream work and stands down rather
       // than proceed. An issue closed since gating is the strongest form of that — the work is
       // already done or explicitly unwanted — and it is invisible to the open-PR half of the
@@ -504,7 +633,32 @@ async function main() {
       );
       process.exit(1);
     }
-    const result = applyRevert(state, id, { source: "operator", why: reason });
+    // WHEN THE ROLLBACK HAPPENED, not when the operator typed (issue #81, round 2).
+    //
+    // `applyRevert` and `classifyRevert` share one 30-day predicate so the two halves of
+    // docs/08-operations.md's single definition cannot disagree — but they were handing it two
+    // different SUBJECTS. `classifyRevert` passes the commit's `committedAt`; this verb passed
+    // nothing, so `applyRevert` defaulted to `now()`. A maintainer who rolled our merge back on
+    // day 10 and an operator who wrote it down on day 35 therefore produced OPPOSITE verdicts from
+    // the same predicate over the same rollback: the mechanical path recorded it and halted the
+    // repo, the operator's path refused it as out of window and left `health()` reading `good`.
+    // Opposite answers in the safety-relevant direction, with no operator path to the SPEC.md §7
+    // MUST at all. The window dates from the EVENT on both paths now; the default is still now,
+    // which is the right reading of an operator who does not say otherwise.
+    //
+    // …and a trailing `--at` with no value after it is not "now". `flag` returns `undefined` for
+    // both "no flag" and "flag at the end of argv", so `revert pkt --reason r --at` dated the
+    // window from the moment of typing — the exact failure this flag closes, reached in silence and
+    // by the operator who was trying hardest to avoid it.
+    refuseValuelessFlag(rest, "--at", "the rollback is dated now");
+    const at = flag(rest, "--at");
+    if (at !== undefined && !Number.isFinite(Date.parse(at))) {
+      console.error(
+        `revert --at ${at} is not a date this can parse — pass the rollback's own timestamp as ISO-8601 (e.g. 2026-08-19T14:00:00Z). Omit --at to date it now.`,
+      );
+      process.exit(1);
+    }
+    const result = applyRevert(state, id, { source: "operator", why: reason, at });
     if (result.error) {
       console.error(result.error);
       process.exit(1);
@@ -694,7 +848,8 @@ async function main() {
       console.error("no testCommand for this repo");
       process.exit(1);
     }
-    const raw = readIfPresent(manifestPath);
+    // Operator-typed, so operator-anchored: `--manifest ./witness.json` means their directory.
+    const raw = readOperatorPath(manifestPath);
     if (raw === undefined) {
       console.error(`cannot read witness manifest ${manifestPath}`);
       process.exit(1);
@@ -712,7 +867,8 @@ async function main() {
       process.exit(1);
     }
     // The hashes must cover logs that exist here, or the digest on the evidence page proves nothing.
-    const logs = verifyWitnessLogs(witness, readIfPresent);
+    // Repo-root-anchored, because these are the schema's paths and not the operator's (issue #80).
+    const logs = verifyWitnessLogs(witness, readRepoRelative);
     if (!logs.ok) {
       console.error(logs.error);
       process.exit(1);
@@ -972,7 +1128,6 @@ async function main() {
         revert: reverted?.ok ? reverted.verdict : undefined,
         // Same fact the clock reads (issue #39 round 2): a page-capped commit read is not a clean
         // one, and both consumers must say so or the two verbs disagree about what was checked.
-        revertTruncated: reverted?.ok ? reverted.truncated : undefined,
       });
       doctrine.push(...checks.fatal);
       owed.push(...checks.advisory);
@@ -1175,5 +1330,16 @@ function isProcessEntryPoint(): boolean {
 // Guarded so the module can be imported (by a test, or another verb) without the whole CLI running
 // and calling `process.exit`. Spawning `cli.ts` as the entry point still runs `main()` unchanged.
 if (isProcessEntryPoint()) {
+  // BEFORE `main()`, and inside this guard rather than at module scope, because the boundary is a
+  // property of *being the process*: an importer (a test, another verb) owns its own streams and
+  // must not have them rewritten underneath it.
+  //
+  // Every verb below prints third-party text somewhere — a fetched CONTRIBUTING at the freeze, a
+  // phrase quoted out of one, an issue title, a witnessed repository's stdout, a `setupCommand`'s
+  // output from inside the untrusted clone. Sanitising those at each `console.*` is a list that has
+  // to stay complete, and issue #78 shipped an incomplete one: two sinks closed, nine open. This is
+  // the same fix applied where it cannot be forgotten — a `console.log` added tomorrow, in any verb,
+  // is already behind it.
+  installTerminalBoundary();
   await main();
 }

@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { ALLOWLIST } from "./allowlist.ts";
+import { assertDisjointCounts } from "./fixture-counts.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
 import { packetChecks } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
@@ -1043,6 +1044,90 @@ function gatedOn71(): FactoryState {
   };
 }
 
+/**
+ * Issue #79 — SPEC.md §6 is "a platform secondary rate limit MUST halt the factory, never retry",
+ * and requesting-then-refusing IS the retry.
+ *
+ * `open-draft` got this gate (`refusing to open a draft on …`, pinned above); `tick` and `approve`
+ * are its siblings and did not. With a persisted halt on disk, `tickWithGithub` walked the whole
+ * roster — open pulls, AGENTS.md, CONTRIBUTING, issue state, timeline — and only discovered the
+ * halt afterwards, inside `applyTick` → `maySelectRepo`. Measured on this tree before the fix: 24
+ * requests for `tick` — six per named roster row (open pulls, AGENTS.md, CONTRIBUTING.md,
+ * .github/CONTRIBUTING.md, the issue, its timeline) across the four rows — and 3 for `approve`,
+ * every one of them against the very limit that caused the halt, and every re-run of the halted CLI
+ * spends them again. (The `20` this comment carried through round 1 was never reproducible here; it
+ * is reachable only against live GitHub, where a row can answer in fewer requests.)
+ *
+ * The assertion is therefore a COUNT, not a verdict. A refused verdict is exactly what the broken
+ * code already produced — it refused after spending the requests — so asserting on the refusal
+ * alone would have been green before the fix and green after it, and would have pinned nothing.
+ */
+test("a persisted halt stops tick and approve before a single GitHub request", () => {
+  const halt = (state: FactoryState) =>
+    applySecondaryLimitHalt(state, { repoId: DRAFT_READY_REPO, at: "2026-08-29T09:00:00.000Z" });
+  const requests = (log: string) =>
+    (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").filter(Boolean);
+
+  // tick: the read-only path, and the one that spends the most — every named row on the roster.
+  const tickStub = githubStub("record");
+  const tickPath = writeState(halt(emptyLedger()));
+  const ticked = runCli(["tick", "--state", tickPath], tmpdir(), { preload: tickStub.preload });
+  assert.equal(ticked.code, 1, `a halted tick must not report success:\n${ticked.out}`);
+  assert.deepEqual(
+    requests(tickStub.log),
+    [],
+    `a halted tick must contact GitHub zero times; it made:\n${requests(tickStub.log).join("\n")}`,
+  );
+  // …and says which halt, so the operator is not left reading `idle` on a bricked factory. `idle`
+  // is the specific wrong answer here: with the halt refusing every repo inside `pickCandidate`,
+  // a gate that merely returned no candidate would print "no named candidate" and exit 0.
+  assert.match(ticked.out, /Factory halted 2026-08-29T09:00:00\.000Z/, ticked.out);
+  assert.equal(/no named candidate/.test(ticked.stdout), false, ticked.out);
+  const tickLedger = JSON.parse(readFileSync(tickPath, "utf8")) as FactoryState;
+  assert.deepEqual(tickLedger.packets.map((p) => p.id), [], "a halted tick must scout nothing");
+  // …and the refusal is IN THE LEDGER, not only on the terminal. `applyTick`'s halt branch calls
+  // `appendEvent` before returning, and dropping that call leaves a tick that refused with no
+  // record it ever ran: the console line evaporates with the exit, and the next reader of the
+  // ledger sees a six-hour gap with no cause. Every other refusal in this file writes one.
+  assert.equal(
+    tickLedger.events.some(
+      (e) => e.kind === "tick" && /Tick refused — factory halted 2026-08-29T09:00:00\.000Z/.test(e.message),
+    ),
+    true,
+    `a halted tick must leave a ledger event: ${JSON.stringify(tickLedger.events)}`,
+  );
+
+  // approve: the freeze. The evidence render is local and must still print — the human's read is
+  // the point of the verb — but nothing may go out over the wire.
+  const approveStub = githubStub("record");
+  const approvePath = writeState(halt(gatedOn71()));
+  const approved = runCli(
+    ["approve", "pkt_ravidsrk_orca-fleet_71", "--note", "looks fine", "--by", "ravidsrk", "--state", approvePath],
+    tmpdir(),
+    { preload: approveStub.preload },
+  );
+  assert.equal(approved.code, 1, approved.out);
+  assert.deepEqual(
+    requests(approveStub.log),
+    [],
+    `a halted approve must contact GitHub zero times; it made:\n${requests(approveStub.log).join("\n")}`,
+  );
+  assert.match(approved.out, /Factory halted 2026-08-29T09:00:00\.000Z/, approved.out);
+  // The freeze evidence is not network work and is not skipped by the gate.
+  assert.match(approved.stdout, /Policy text the gate parsed/, approved.stdout);
+  const approveDisk = JSON.parse(readFileSync(approvePath, "utf8")) as FactoryState;
+  assert.equal(approveDisk.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_71")?.humanAttest, undefined);
+
+  // The control: without the halt, both verbs DO reach GitHub. Otherwise "zero requests" would be
+  // satisfied by a CLI that had simply stopped working.
+  const liveStub = githubStub("record");
+  const liveTick = runCli(["tick", "--state", writeState(emptyLedger())], tmpdir(), { preload: liveStub.preload });
+  assert.ok(
+    requests(liveStub.log).length > 0,
+    `an unhalted tick must still contact GitHub, or the assertion above is vacuous:\n${liveTick.out}`,
+  );
+});
+
 test("tick stands down on a named first issue GitHub has already closed", () => {
   // The live case, not a hypothetical: `allowlist.yaml`'s first named row IS
   // ravidsrk/orca-fleet#71, and GitHub closed it (state_reason completed) on 2026-08-27. Before
@@ -1283,6 +1368,158 @@ test("approve shows the operator the policy text the gate parsed", () => {
   );
 });
 
+test("approve tells the operator, on the terminal, how much policy text it is not showing them", () => {
+  // The consumer half of issue #77. `renderFreezeEvidence` is pinned in `packet.test.ts`; this
+  // exists because a rendering nobody prints protects nobody, and the freeze reaches the human
+  // through exactly one call site. The scenario is the issue's: a >4,000-char CONTRIBUTING whose
+  // only ban sits past the excerpt limit and which the scanner misses, so the verdict is ALLOW and
+  // the operator is one keystroke from attesting over text they were never shown.
+  //
+  // The fixture is 5234 characters withholding 1234, matching `packet.test.ts`, and for the reason
+  // stated there: the previous 4883/883 pair made `883` a substring of `4883`, so every assertion
+  // below matched inside the total and the number an operator's decision rests on was pinned
+  // nowhere. All three renderings are asserted here too, on the real terminal, because this is the
+  // surface — `renderFreezeEvidence` being right does not mean `approve` printed it.
+  const missedBan = "Kindly refrain from opening pull requests that were authored by an AI assistant.";
+  const long = `${"Please read the guidelines below before opening a pull request.\n".repeat(200).slice(0, 5152)}\n${missedBan}\n`;
+  const state = gatedState({ contributing: long });
+  assert.equal(state.packets[0].policy.code, "ALLOW", "the scanner must miss this ban");
+  const total = long.length;
+  const withheld = total - 4000;
+  assert.deepEqual([total, withheld], [5234, 1234]);
+  // The same rule `packet.test.ts` states, from the same place. It used to be written out again
+  // here, which is two copies of one precondition and therefore two things that can drift apart.
+  assertDisjointCounts(total, withheld);
+  const path = writeState(state);
+  const stub = githubStub("record");
+  const run = runCli(
+    ["approve", state.packets[0].id, "--note", "read it", "--by", "ravidsrk", "--state", path],
+    tmpdir(),
+    { preload: stub.preload },
+  );
+  assert.equal(run.code, 0, run.out);
+  // 1. the header, 2. the marker where the text stops, 3. the closing claim above the attest.
+  assert.match(
+    run.stdout,
+    new RegExp(`CONTRIBUTING — ${total} chars \\(first 4000 shown, ${withheld} NOT shown\\)`),
+    run.stdout,
+  );
+  assert.match(
+    run.stdout,
+    new RegExp(`⟪ ${withheld} more characters of CONTRIBUTING are NOT shown above`),
+    run.stdout,
+  );
+  assert.match(
+    run.stdout,
+    new RegExp(`BUT ${withheld} of those ${total} characters are not shown above`),
+    run.stdout,
+  );
+  assert.match(run.stdout, /The scanner read them; you have not/, run.stdout);
+  // The ban really is invisible — that is the harm the notice exists to disclose, not to remove.
+  assert.equal(run.stdout.includes(missedBan), false, "precondition: the ban is past the limit");
+  // And the closing claim above the attest is qualified rather than a clean bill of health.
+  assert.equal(
+    run.stdout.includes(`no ban statement matched in ${total} chars from CONTRIBUTING.`),
+    false,
+    run.stdout.slice(-600),
+  );
+});
+
+/**
+ * ISSUE #78, AS A CLASS — the assertion round 1 of this sweep did not have.
+ *
+ * Round 1 closed two sinks (`runFailureDetail`, `resolveToolchain`) and its tests named those two
+ * sinks. A test that names call sites cannot see a third, and there were at least nine more: seven
+ * raw `fail()` sites in `witness.ts` interpolating a `setupCommand`'s output from inside the
+ * untrusted clone, the freeze excerpt (the target repository's own CONTRIBUTING/AGENTS.md, third
+ * -party text with LESS containment than witnessed stdout — nothing sandboxes a fetched document),
+ * and `policy.matchedPhrases`, which are substrings of that same text.
+ *
+ * The freeze one defeated the fix landed beside it. A hostile `CONTRIBUTING.md` placing `\x1b[8m`
+ * (SGR conceal, never reset) early in its text hides every line a terminal paints after it — which
+ * is every disclosure issue #77 added. On this tree before the boundary, with the conceal at index
+ * 178, the end-of-excerpt marker, the "scanner read them; you have not" line, the verdict and the
+ * "high-recall suggester, not the arbiter" line ALL fell after it. The only surviving disclosure was
+ * the header, which `packet.ts`'s own comment calls inadequate. A repository that did not want to be
+ * read could suppress the notice telling the operator it had not been read.
+ *
+ * So this asserts over the CLASS, not over sinks: whatever the verb, whatever the route the bytes
+ * took in, nothing a terminal ACTS on reaches the operator. The boundary is on the process's own
+ * streams (`terminal.ts`), so a tenth sink is behind it the day it is written; `terminal.test.ts`
+ * holds the other half — that every entry point installs it.
+ */
+const ACTIONABLE_BYTE = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/;
+/** OSC 52 (clipboard write), SGR conceal, CR repaint, screen clear, and both 8-bit introducers. */
+const HOSTILE_BYTES = "\x1b]52;c;cm0gLXJmIH4=\x07\x1b[8m\r\x1b[2J\x9b31m\x9d0;pwned\x07";
+
+function hostilePacketState(): FactoryState {
+  const seed = seedState();
+  // Four independent third-party routes into the render, in one packet.
+  const packet = buildPacket({
+    repoId: "mcp-use/mcp-use",
+    issueNumber: 999,
+    // 1. the issue title — GitHub's bytes, rendered by `body`, `evidence-page`, `status`, `ledger`.
+    issueTitle: `docs typo ${HOSTILE_BYTES}`,
+    issueUrl: "https://github.com/mcp-use/mcp-use/issues/999",
+    // 2. the freeze excerpt, with the conceal placed early enough to hide every #77 disclosure, and
+    //    3. a document long enough that there IS something withheld to disclose.
+    contributing: `Thanks for contributing!${HOSTILE_BYTES}\n${"Please read the guidelines below before opening a pull request.\n".repeat(200).slice(0, 5000)}`,
+    // 4. a matched phrase — the scanner quotes the repository's own words back at the operator.
+    agentsMd: `AI-generated pull requests ${HOSTILE_BYTES} are not welcome in this repository.`,
+  });
+  assert.equal(packet.policy.code, "DENY_FORBIDDEN", "the fixture must reach the matched-phrase branch");
+  assert.ok(
+    packet.policy.matchedPhrases.some((q) => q.includes("52;c;")),
+    "precondition: the hostile bytes really are inside a quoted phrase",
+  );
+  return { ...seed, packets: [packet, ...seed.packets.filter((p) => p.status !== "submitted")] };
+}
+
+test("no byte a terminal acts on reaches the operator, whatever the verb and whatever the route", () => {
+  const state = hostilePacketState();
+  const id = state.packets[0].id;
+  const path = writeState(state);
+
+  // Every verb that renders a packet. `approve` refuses this one (the scanner matched a ban) but
+  // still prints the freeze first, which is the surface under test.
+  for (const args of [
+    ["approve", id, "--note", "n", "--by", "ravidsrk"],
+    ["body", id],
+    ["evidence-page", id],
+    ["status"],
+    ["ledger"],
+  ]) {
+    const stub = githubStub("record");
+    const run = runCli([...args, "--state", path], tmpdir(), { preload: stub.preload });
+    assert.equal(
+      ACTIONABLE_BYTE.test(run.out),
+      false,
+      `\`${args[0]}\` put a control byte on the operator's terminal: ${JSON.stringify(run.out.slice(0, 400))}`,
+    );
+    assert.equal(run.out.includes("52;c;"), false, `\`${args[0]}\` left an OSC 52 body one concatenation from working`);
+  }
+});
+
+test("a hostile CONTRIBUTING cannot conceal the disclosure that it was not fully shown", () => {
+  // The composed attack, named as its own test because it is the one that defeats issue #77 rather
+  // than merely being ugly: strip the conceal and every #77 disclosure is on the screen again.
+  const state = hostilePacketState();
+  const path = writeState(state);
+  const stub = githubStub("record");
+  const run = runCli(["approve", state.packets[0].id, "--note", "n", "--state", path], tmpdir(), {
+    preload: stub.preload,
+  });
+  assert.equal(run.code, 1, "a matched ban must still refuse the approval");
+
+  assert.equal(run.stdout.includes("\x1b[8m"), false, "the conceal must not reach the terminal");
+  for (const disclosure of [/NOT shown/, /The scanner read them; you have not/, /Verdict: DENY_FORBIDDEN/, /high-recall suggester/]) {
+    assert.match(run.stdout, disclosure, run.stdout.slice(0, 600));
+  }
+  // The removal is stated rather than tidied away in silence: a sanitiser that hands the operator a
+  // coherent transcript with no sign that the coherence was ours is itself a concealment channel.
+  assert.match(run.stdout, /byte\(s\) of terminal control sequence removed/, run.stdout.slice(-800));
+});
+
 test("approve prints the policy text before the competing-work reads, not after them", () => {
   // Ordering is the whole point of where the call sits. The competing-work check is a network read
   // that can fail and `process.exit(1)` — if the evidence printed after it, an operator hitting a
@@ -1512,6 +1749,142 @@ test("the revert verb records a maintainer-stated rollback, halts the repo, and 
   const refused = runCli(["revert", inflight.id, "--reason", reason, "--state", path], tmpdir());
   assert.equal(refused.code, 1, refused.out);
   assert.match(refused.out, /never merged/);
+});
+
+/**
+ * The `revert` VERB's half of issue #81 — named separately from the `applyRevert` unit on purpose.
+ *
+ * This repository's most-repeated defect is a well-tested function behind untested wiring, and a
+ * window enforced in the engine with a CLI that swallowed the refusal would be exactly that again:
+ * `revert` reads `result.error`, and a verb that printed the refusal but still persisted, or exited
+ * 0, or reported `reverts=1` from a state it never wrote, would keep the engine test green while the
+ * operator was told the repository had been halted when it had not.
+ */
+test("the revert verb refuses a rollback past the 30-day window and writes nothing", () => {
+  const seed = seedState();
+  const id = "pkt_ravidsrk_frontguard_195";
+  const packet = seed.packets.find((p) => p.id === id)!;
+  const repoId = packet.repoId;
+  // Age the merge past the deadline. Only this one fact changes, so the refusal can only come from
+  // the window: everything else is the state the in-window test above records against successfully.
+  const stale: FactoryState = {
+    ...seed,
+    packets: seed.packets.map((p) =>
+      p.id === id ? { ...p, prMeta: { ...p.prMeta!, mergedAt: "2025-06-01T00:00:00Z" } } : p,
+    ),
+  };
+  const path = writeState(stale);
+  const reason = "maintainer mentioned rolling it back in a thread from last year";
+
+  const run = runCli(["revert", id, "--reason", reason, "--state", path], tmpdir());
+  assert.equal(run.code, 1, `an out-of-window revert must refuse:\n${run.out}`);
+  assert.match(run.out, /30-day window/, run.out);
+  assert.match(run.out, /docs\/08-operations\.md/, run.out);
+
+  // The ledger is the assertion, not the exit code: a refusal that still wrote the counter would
+  // halt the repository behind a message saying it had not.
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(after.scorecard.find((r) => r.repoId === repoId)!.reverts, 0);
+  assert.equal(after.packets.find((p) => p.id === id)!.followUps?.some((f) => f.body.startsWith("revert:")) ?? false, false);
+
+  // And the repository stays selectable — the whole cost of the bug was a permanent stop.
+  const status = runCli(["status", "--state", path], tmpdir());
+  assert.doesNotMatch(
+    status.stdout,
+    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    `an out-of-window revert must not stop the repo:\n${status.stdout}`,
+  );
+});
+
+/**
+ * The operator's path to the SPEC.md §7 MUST, which round 1 of #81 closed off (round 2).
+ *
+ * The window predicate was shared; the SUBJECT was not. `classifyRevert` passes the reverting
+ * commit's `committedAt`. `applyRevert` takes `at` — and this verb never supplied one, so it
+ * defaulted to `now()`, the moment the operator typed. There was no `--at`, and therefore no way at
+ * all to record a rollback that happened before today.
+ *
+ * The scenario below is the one that made it a defect rather than an inconvenience: a maintainer
+ * rolls our merge back on day 10 and says so in a thread; the operator reads the thread on day 35.
+ * `reconcile` would have recorded that rollback and stopped the repository. The verb refused it —
+ * "35 days after the merge" — and left `health()` reading `good`. Same rollback, opposite answers,
+ * in the safety-relevant direction, with the operator holding no verb that could satisfy the MUST.
+ */
+test("revert dates the window from the rollback the operator names, not from when they typed", () => {
+  const seed = seedState();
+  const id = "pkt_ravidsrk_frontguard_195";
+  const packet = seed.packets.find((p) => p.id === id)!;
+  const repoId = packet.repoId;
+  // Merged 35 days ago, so "now" — the default — is outside the window and the day-10 rollback is
+  // inside it. Anchored to the clock rather than to a literal, because the default IS the clock.
+  const mergedMs = Date.now() - 35 * 86_400_000;
+  const mergedAt = new Date(mergedMs).toISOString();
+  const rollbackAt = new Date(mergedMs + 10 * 86_400_000).toISOString();
+  const aged = (): FactoryState => ({
+    ...seed,
+    packets: seed.packets.map((p) => (p.id === id ? { ...p, prMeta: { ...p.prMeta!, mergedAt } } : p)),
+  });
+  const reason = "maintainer rolled it back on day 10 and said so in the thread";
+  const rowOf = (path: string) =>
+    (JSON.parse(readFileSync(path, "utf8")) as FactoryState).scorecard.find((r) => r.repoId === repoId)!;
+
+  // Undated: the operator is recording as of now, and now is out of window. Refused, nothing
+  // written — and the refusal names the flag that fixes it, which is the whole of issue #35's rule.
+  const undatedPath = writeState(aged());
+  const undated = runCli(["revert", id, "--reason", reason, "--state", undatedPath], tmpdir());
+  assert.equal(undated.code, 1, undated.out);
+  assert.match(undated.out, /30-day window/, undated.out);
+  assert.match(undated.out, /--at <iso>/, undated.out);
+  assert.equal(rowOf(undatedPath).reverts, 0);
+
+  // Dated by the event: recorded, and the repository is stopped — which is what `reconcile` would
+  // have done with the same rollback, and the disagreement this closes.
+  const datedPath = writeState(aged());
+  const dated = runCli(
+    ["revert", id, "--reason", reason, "--at", rollbackAt, "--state", datedPath],
+    tmpdir(),
+  );
+  assert.equal(dated.code, 0, dated.out);
+  assert.match(dated.stdout, /revert recorded on/, dated.stdout);
+  assert.equal(rowOf(datedPath).reverts, 1);
+  const status = runCli(["status", "--state", datedPath], tmpdir());
+  assert.match(
+    status.stdout,
+    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    status.stdout,
+  );
+
+  // A date the CLI cannot parse is refused BEFORE anything is written — an unparseable `--at`
+  // silently falling back to now would be the original bug with a flag in front of it.
+  const badPath = writeState(aged());
+  const bad = runCli(["revert", id, "--reason", reason, "--at", "last Tuesday", "--state", badPath], tmpdir());
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /not a date this can parse/, bad.out);
+  assert.equal(rowOf(badPath).reverts, 0);
+
+  // A TRAILING `--at`, with nothing after it, is not "now". `flag()` answers `undefined` for both
+  // "no flag" and "flag at the end of argv", so this typed the flag, got the default, and dated the
+  // window from the typing — the failure the flag exists to close, reached silently and by the
+  // operator who was trying hardest to avoid it. Refused, and the refusal says what omitting it
+  // would have meant.
+  const trailingPath = writeState(aged());
+  const trailing = runCli(["revert", id, "--reason", reason, "--state", trailingPath, "--at"], tmpdir());
+  assert.equal(trailing.code, 1, trailing.out);
+  assert.match(trailing.out, /--at was given no value/, trailing.out);
+  assert.match(trailing.out, /omitting it means the rollback is dated now/, trailing.out);
+  assert.equal(rowOf(trailingPath).reverts, 0);
+
+  // …and a `--at` whose "value" is the next FLAG is a different mistake with the same cause. It is
+  // caught by the parse check rather than by the guard above, and both must stay: neither one on
+  // its own covers the other.
+  const swallowedPath = writeState(aged());
+  const swallowed = runCli(["revert", id, "--reason", reason, "--at", "--state", swallowedPath], tmpdir());
+  assert.equal(swallowed.code, 1, swallowed.out);
+  assert.match(swallowed.out, /not a date this can parse/, swallowed.out);
+
+  // And the flag is in `--help`: a verb whose behaviour depends on a flag nobody is told about is
+  // the same defect as a refusal naming a command that does not exist.
+  assert.match(runCli(["--help"], tmpdir()).stdout, /revert <packetId> --reason <text> \[--at <iso>\]/);
 });
 
 test("sync folds the human review split into the scorecard when the PR reaches a terminal state", () => {

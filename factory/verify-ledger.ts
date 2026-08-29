@@ -1,6 +1,7 @@
 import { packetChecks } from "./ledger-check.ts";
 import { revertCheck, syncGithubPr } from "./github-pr.ts";
 import { seedState } from "./seed.ts";
+import { installTerminalBoundary } from "./terminal.ts";
 
 // Clock-side, read-only: the committed seed ledger must match GitHub. A divergence — the published
 // ledger asserting something GitHub contradicts — fails the run visibly, so drift is caught within
@@ -12,6 +13,11 @@ import { seedState } from "./seed.ts";
 // Failing CI on them would leave the default branch red for days with nothing to merge that fixes
 // it, which is the pressure that gets a SHA re-stamped by someone who wants green. Issue #49: the
 // clock says the ledger reconciles AND says the proof is behind, and means both.
+// The clock renders third-party text too: a pull request body, a divergence quoting one, an error
+// string GitHub wrote. Same boundary as `cli.ts`, installed before the first line is printed —
+// this runs unattended every six hours and its output is read as the record of what was checked.
+installTerminalBoundary();
+
 const state = seedState();
 const withPr = state.packets.filter((p) => p.prUrl);
 const fatal: string[] = [];

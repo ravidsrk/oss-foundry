@@ -232,6 +232,434 @@ const MUTANTS: Mutant[] = [
     why: "a shipped verb goes missing from the only list of them",
   },
 
+  // ---- SWEEP 2 (#77–#82): six review comments a prior sweep merged past without reading ----
+  // Each of these is one call site of a fix, on purpose. The recurring defect in this repository is
+  // a well-tested function behind untested wiring — a fix applied to one consumer and not its
+  // sibling, eight times — so a mutant per FUNCTION would keep reporting a clean sheet over exactly
+  // the gap that keeps shipping. Where a fix touched two consumers, both are listed separately.
+
+  // #77 — the freeze showed 4,000 characters and then claimed a clean scan over the whole document.
+  {
+    label: "i77-claim",
+    file: "factory/packet.ts",
+    from: "  } else if (withheld > 0) {",
+    to: "  } else if (false) {",
+    why: "the freeze closes with `no ban statement matched in N chars` over text the operator was never shown — the sentence directly above the attest, and #37's parked scanner leg is what makes the missed ban real",
+  },
+  {
+    label: "i77-marker",
+    file: "factory/packet.ts",
+    from:
+      "        `  ⟪ ${missing} more characters of ${doc.name} are NOT shown above. The scanner read them; you have not. ⟫`,\n",
+    to: '        "",\n',
+    why: "the omission is announced only in a header 4,000 characters up, so the operator scrolling to where the text stops sees nothing marking the end",
+  },
+  {
+    label: "i77-consumer",
+    file: "factory/cli.ts",
+    from: "    if (packetForFreeze) console.log(renderFreezeEvidence(packetForFreeze));",
+    to: "    if (packetForFreeze) console.log(renderFreezeEvidence(packetForFreeze).split(\"\\n\")[0]);",
+    why: "the render is correct and the verb prints one line of it — the exact untested-wiring shape this audit exists for",
+  },
+
+  // #78 — a witnessed third-party repo could write raw control sequences to the operator's console.
+  {
+    label: "i78-sanitizer",
+    file: "factory/terminal.ts",
+    from: '  const stripped = text.replace(TERMINAL_SEQUENCE, "").replace(CONTROL_CHAR, "");',
+    to: "  const stripped = text;",
+    why: "a sandboxed repo repaints the one surface whose job is to say what happened: `\\r` plus a cursor move turns a red witness green, and OSC 52 reaches the clipboard",
+  },
+  {
+    label: "i78-probe-sink",
+    file: "factory/witness.ts",
+    from: '    const lines = sanitizeTerminalText(probe.output).text.split("\\n")',
+    to: '    const lines = probe.output.split("\\n")',
+    why: "the failure detail is clean and the SECOND repo-controlled sink is not — `witness-check` prints the probe's `path` verbatim",
+  },
+
+  // #79 — the halt gate ran after the platform requests it exists to prevent.
+  {
+    label: "i79-tick-preflight",
+    file: "factory/cli.ts",
+    from: "  if (factoryHalt(state)) return applyTick(state);\n",
+    to: "",
+    why: "a halted factory spends 24 GitHub requests per tick before refusing (6 per roster row x 4 rows, re-measured on this tree) — the retry SPEC.md §6 forbids, against the very limit that wrote the halt",
+  },
+  {
+    label: "i79-approve-preflight",
+    file: "factory/cli.ts",
+    from: "      const gate = maySelectRepo(state, packetForFreeze.repoId);\n      if (!gate.ok) {\n        console.error(`cannot approve ${id}: ${gate.reason}`);\n        process.exit(1);\n      }\n",
+    to: "",
+    why: "same rule, the approve sibling: three reads go out under a halt and are then thrown away",
+  },
+  {
+    label: "i79-tick-verdict",
+    file: "factory/engine.ts",
+    from: "  const halted = factoryHalt(state);\n  if (halted) {\n    const next = appendEvent(\n      state,\n      ev(\"tick\", `Tick refused — factory halted ${halted.at}: ${halted.reason}`),\n    );\n    return { state: next, packet: null, reason: `Factory halted ${halted.at}: ${halted.reason}` };\n  }\n",
+    to: "",
+    why: "a halted tick reports `idle` and exits 0 — the per-repo gate refuses every candidate and the absence of candidates reads as a quiet roster",
+  },
+
+  // #80 — witness log paths resolved against cwd; the class #43 fixed for STATE_FILE, left in a sibling.
+  {
+    label: "i80-read-anchor",
+    file: "factory/cli.ts",
+    from: "    return readFileSync(resolve(LOGS_ROOT, path), \"utf8\");",
+    to: '    return readFileSync(resolve(path), "utf8");',
+    why: "`attach-witness` run from anywhere but the repo root rejects a perfectly good witness as a missing log",
+  },
+  {
+    label: "i80-write-anchor",
+    file: "factory/cli.ts",
+    from: "  root = LOGS_ROOT,",
+    to: '  root = ".",',
+    why: "the write sibling: run logs land beside the operator's shell while the evidence page keeps promising them inside the checkout",
+  },
+  {
+    label: "i80-default",
+    file: "factory/cli.ts",
+    from: "  return resolve(override ?? REPO_ROOT);",
+    to: "  return override ? resolve(override) : resolve(\".\");",
+    why: "the override still works, so every test that passes `--logs-root` stays green while the DEFAULT — the half the bug was in — is back",
+  },
+
+  {
+    label: "i80-test-guard",
+    file: "factory/cli.ts",
+    from: "  if (root === LOGS_ROOT && !LOGS_ROOT_FLAG && process.env.NODE_TEST_CONTEXT) {",
+    to: "  if (false) {",
+    why: "anchoring took away the temp-cwd isolation spawned-CLI tests had for free, so a test that forgets `--logs-root` writes two run logs into the developer's real checkout — which this change already did once before the guard existed",
+  },
+
+  // #81 — the operator revert verb bypassed the deadline the classifier enforces.
+  {
+    label: "i81-gate",
+    file: "factory/engine.ts",
+    from: "  if (window.known && !window.within) {",
+    to: "  if (false) {",
+    why: "a rollback of a merge from a year ago increments `reverts`, and `health()` makes that an unconditional permanent stop only a seed edit lifts",
+  },
+  {
+    label: "i81-predicate",
+    file: "factory/scorecard.ts",
+    from: "    within: atMs <= deadlineMs,",
+    to: "    within: true,",
+    why: "the shared window always says yes — both halves of one documented definition stop enforcing it together, which is the point of sharing it",
+  },
+  {
+    label: "i81-consumer",
+    file: "factory/cli.ts",
+    from: "    const result = applyRevert(state, id, { source: \"operator\", why: reason, at });\n    if (result.error) {\n      console.error(result.error);\n      process.exit(1);\n    }",
+    to: "    const result = applyRevert(state, id, { source: \"operator\", why: reason, at });\n    if (result.error) {\n      console.error(result.error);\n    }",
+    why: "the engine refuses and the verb carries on — the operator is told the repo was halted by a run that exited 0 having written nothing",
+  },
+
+  // #82 — the derived-figure guard failed permissively AND strictly.
+  {
+    label: "i82-case",
+    file: "factory/policy-records.ts",
+    from: "const RATIO_IN_WORDS = /\\b\\d[\\d,]*\\s*of\\s*\\d[\\d,]*\\b/i;",
+    to: "const RATIO_IN_WORDS = /\\b\\d[\\d,]*\\s*of\\s*\\d[\\d,]*\\b/;",
+    why: "`141 Of 272 external PRs merged` renders as a maintainer's own words again — the exact defect #44 added the guard to stop, one shift key away",
+  },
+  {
+    label: "i82-path",
+    file: "factory/policy-records.ts",
+    from: "const RATIO_AS_SLASH = /(?<![/\\w])\\b\\d[\\d,]*\\s*\\/\\s*\\d[\\d,]*\\b(?![/\\w])/;",
+    to: "const RATIO_AS_SLASH = /\\b\\d[\\d,]*\\s*\\/\\s*\\d[\\d,]*\\b/;",
+    why: "a numeric path segment reads as a ratio, so a valid silent-absence note throws out of a lazy cache and takes `validate` and every packet build with it",
+  },
+
+
+  // ---- SWEEP 2, ROUND 2: the three Requireds a review found in the round-1 fixes themselves ----
+  // The through-line of both rounds is ONE defect: a fix applied to a consumer and not its siblings.
+  // These mutants are therefore written against the CLASS wherever the fix is class-level, and
+  // against each RENDERING wherever a number is shown more than once.
+
+  // REQUIRED 1 — issue #78 was closed at two sinks and left at least nine open (seven raw `fail()`
+  // sites in witness.ts, the freeze excerpt, and policy.matchedPhrases). It is now closed at the
+  // process's terminal streams, so a tenth sink is behind it the day it is written.
+  {
+    label: "r1-boundary-cli",
+    file: "factory/cli.ts",
+    from: "  installTerminalBoundary();\n  await main();",
+    to: "  await main();",
+    why: "every verb prints third-party bytes raw again: a hostile CONTRIBUTING's `\\x1b[8m` hides every disclosure #77 added, and an OSC 52 out of a setupCommand reaches the clipboard",
+  },
+  {
+    label: "r1-boundary-inert",
+    file: "factory/terminal.ts",
+    from: "  for (const stream of streams) {",
+    to: "  for (const stream of [] as TerminalStream[]) {",
+    why: "the boundary is installed by every entry point and wraps nothing — the shape a class-level fix fails in, which a per-sink test would never see",
+  },
+  {
+    label: "r1-boundary-silent",
+    file: "factory/terminal.ts",
+    from: "        scrubbed.removed === 0",
+    to: "        true",
+    why: "the strip happens and is never disclosed — a sanitiser that hands the operator a coherent transcript with no sign the coherence was ours is itself a concealment channel",
+  },
+  {
+    label: "r1-boundary-verify-ledger",
+    file: "factory/verify-ledger.ts",
+    from: "installTerminalBoundary();\n\n",
+    to: "",
+    why: "the unattended 6-hour clock is back outside the boundary — the entry-point invariant is the only thing standing between a new entry point and a tenth sink",
+  },
+
+  // REQUIRED 2 — #77's acceptance is "N characters not shown"; N was pinned nowhere. The round-1
+  // fixture made 883 a substring of 4883, so every assertion matched inside the TOTAL and all four
+  // of these survived a green suite. `0 characters not shown` above a hidden ban is affirmative
+  // false reassurance: worse than the silence #77 replaced.
+  {
+    label: "r2-count-header",
+    file: "factory/packet.ts",
+    from: "(first ${doc.excerpt.length} shown, ${missing} NOT shown)",
+    to: "(first ${doc.excerpt.length} shown, 0 NOT shown)",
+    why: "the header reports 0 characters withheld over a document that withheld 1,234 of them",
+  },
+  {
+    label: "r2-header-clause",
+    file: "factory/packet.ts",
+    from: "${missing > 0 ? ` (first ${doc.excerpt.length} shown, ${missing} NOT shown)` : \"\"}",
+    to: "\"\"",
+    why: "the whole header clause reverts to base — source and size, with the omission gone",
+  },
+  {
+    label: "r2-count-marker",
+    file: "factory/packet.ts",
+    from: "`  ⟪ ${missing} more characters of ${doc.name}",
+    to: "`  ⟪ 0 more characters of ${doc.name}",
+    why: "the marker at the exact place a scrolling reader stops says 0 characters are missing",
+  },
+  {
+    label: "r2-count-closing",
+    file: "factory/packet.ts",
+    from: "      `  BUT ${withheld} of those ${total} characters are not shown above.",
+    to: "      `  BUT 0 of those ${total} characters are not shown above.",
+    why: "the sentence directly above the attest — the one #77 exists for — reads `BUT 0 of those 5234 characters are not shown`",
+  },
+
+  // REQUIRED 3 — the shared window predicate was handed two different SUBJECTS: the classifier the
+  // event's date, the operator's verb the moment they typed. Same rollback, opposite verdicts, in
+  // the safety-relevant direction.
+  {
+    label: "r3-at-dropped",
+    file: "factory/cli.ts",
+    from: "    const result = applyRevert(state, id, { source: \"operator\", why: reason, at });",
+    to: "    const result = applyRevert(state, id, { source: \"operator\", why: reason });",
+    why: "`--at` is parsed, validated, and then not passed — the round-1 shape exactly: a flag the help text promises and the engine never sees, so the window dates from the typing again",
+  },
+  {
+    label: "r3-at-unparseable",
+    file: "factory/cli.ts",
+    from: "    if (at !== undefined && !Number.isFinite(Date.parse(at))) {",
+    to: "    if (false) {",
+    why: "`--at \"last Tuesday\"` reaches `revertWindow` as an unparseable date, which returns `known: false` — so a typo in the flag silently skips the window check entirely",
+  },
+  {
+    label: "r3-refusal-verb",
+    file: "factory/engine.ts",
+    from: "are only writing it down now, re-run with \\`--at <iso>\\` naming the day THEY did it",
+    to: "are only writing it down now, record it as a follow-up note instead",
+    why: "the refusal names a verb that does not exist — 18 verbs in `--help`, none records a note — which is the defect issue #35 was filed against, restored inside the message that fixed it",
+  },
+
+  // ---- ROUND 2 MINORS ----
+  {
+    label: "min-osc-newline",
+    file: "factory/terminal.ts",
+    from: "[^\\\\x07\\\\x1b\\\\x9c\\\\n]*",
+    to: "[^\\\\x07\\\\x1b\\\\x9c]*",
+    why: "the sanitiser swallows the diagnostic it exists to preserve: a run whose output contains a bare `\\x1b]0;t` loses every line after it, including the real failure — #78's own harm, achieved through the sanitiser",
+  },
+  {
+    label: "min-removed-guard",
+    file: "factory/witness.ts",
+    from: "  if (scrubbed.removed > 0) {",
+    to: "  if (scrubbed.removed >= 0) {",
+    why: "every witness failure prints `0 byte(s) of terminal control sequence removed`; a notice that fires every run is one the operator learns to skip",
+  },
+  {
+    label: "min-removed-count",
+    file: "factory/witness.ts",
+    from: "      `  ${scrubbed.removed} byte(s) of terminal control sequence removed",
+    to: "      `  0 byte(s) of terminal control sequence removed",
+    why: "the count is always zero — an affirmative false statement about output that WAS tampered with",
+  },
+  {
+    label: "review-premerge-window",
+    file: "factory/scorecard.ts",
+    from: "    within: atMs >= mergedMs && atMs <= deadlineMs,",
+    to: "    within: atMs <= deadlineMs,",
+    why: "an upper-bound-only window accepts a rollback dated BEFORE the merge: reverts is incremented on an impossible date and health() retires the repository permanently",
+  },
+  {
+    label: "review-premerge-refusal",
+    file: "factory/engine.ts",
+    from: "  if (window.known && !window.within && window.days < 0) {",
+    to: "  if (false && window.known && !window.within && window.days < 0) {",
+    why: "the late-rollback paragraph would tell an operator a pre-merge date is `past the window that closed` and advise re-dating it EARLIER — a refusal that misdescribes what it refused",
+  },
+  {
+    label: "min-window-deadline",
+    file: "factory/scorecard.ts",
+    from: "    deadline: new Date(deadlineMs).toISOString(),\n",
+    to: "",
+    why: "strip-types erases the field without checking: the refusal reads `past the 30-day window that closed undefined`",
+  },
+  {
+    label: "min-window-days",
+    file: "factory/scorecard.ts",
+    from: "    days: Math.floor((atMs - mergedMs) / 86_400_000),\n",
+    to: "",
+    why: "same, one field over: `undefined days after the merge`, in the message that has to justify a permanent repository stop",
+  },
+  {
+    label: "min-classify-days",
+    file: "factory/scorecard.ts",
+    from: "    const days = window.known ? window.days : 0;",
+    to: "    const days = 0;",
+    why: "the classifier's own late-rollback explanation says a commit landed 0 days after the merge while discarding it for being late",
+  },
+  {
+    label: "min-manifest-anchor",
+    file: "factory/cli.ts",
+    from: "    return readFileSync(resolve(path), \"utf8\");",
+    to: "    return readFileSync(resolve(LOGS_ROOT, path), \"utf8\");",
+    why: "the operator/repo-relative split #80 turns on collapses back: `--manifest ./witness.json` stops meaning the operator's shell. Every fixture passed an ABSOLUTE path, so this survived round 1",
+  },
+  {
+    label: "min-halt-event",
+    file: "factory/engine.ts",
+    from: "    const next = appendEvent(\n      state,\n      ev(\"tick\", `Tick refused — factory halted ${halted.at}: ${halted.reason}`),\n    );\n    return { state: next, packet: null,",
+    to: "    return { state, packet: null,",
+    why: "a halted tick refuses on the terminal and writes nothing to the ledger — the console line evaporates with the exit and the next reader sees a six-hour gap with no cause",
+  },
+  {
+    label: "min-ratio-lookahead",
+    file: "factory/policy-records.ts",
+    from: "const RATIO_AS_SLASH = /(?<![/\\w])\\b\\d[\\d,]*\\s*\\/\\s*\\d[\\d,]*\\b(?![/\\w])/;",
+    to: "const RATIO_AS_SLASH = /(?<![/\\w])\\b\\d[\\d,]*\\s*\\/\\s*\\d[\\d,]*\\b/;",
+    why: "the RIGHT half of the path exclusion: `2026/08/28` at the start of a note reads as a ratio again, and every fixture in round 1 put the numeric segment after a `/`, exercising only the lookbehind",
+  },
+  {
+    label: "min-logs-root-slash",
+    file: "factory/cli.ts",
+    from: "  return resolve(override ?? REPO_ROOT);",
+    to: "  return override ? resolve(override) : REPO_ROOT;",
+    why: "the default branch stops normalising, so `--help` prints `…/oss-foundry//docs/evidence/logs/<packetId>/` — a doubled slash in the one line that says where the run logs are",
+  },
+
+  // ---- SWEEP 2, ROUND 3: the boundary was thoroughly tested and its SHIPPED CONFIGURATION was not
+  // Every round-2 test handed the mechanism an explicit argument — an explicit stream list, an
+  // explicit `--logs-root`, an explicit C1 byte that was also a sequence introducer — so nothing
+  // bound the defaults an operator actually runs. These are those defaults, one mutant per way each
+  // of the round-3 Requireds could go, including the two that SHIPPED green.
+
+  {
+    label: "r3-default-stderr",
+    file: "factory/terminal.ts",
+    from: "  streams: TerminalStream[] = [process.stdout, process.stderr],",
+    to: "  streams: TerminalStream[] = [process.stdout],",
+    why: "the boundary's stderr half is gone and stderr is issue #78's named sink: a `setupCommand` running inside the untrusted clone authors `setup.output`, witness.ts puts 200 characters of it in a `fail()`, and cli.ts prints that with `console.error`. This SHIPPED green — every boundary test passed its own stream list",
+  },
+  {
+    label: "r3-default-stdout",
+    file: "factory/terminal.ts",
+    from: "  streams: TerminalStream[] = [process.stdout, process.stderr],",
+    to: "  streams: TerminalStream[] = [process.stderr],",
+    why: "the other half of the same default: every freeze excerpt, matched phrase and issue title reaches the operator raw",
+  },
+  {
+    label: "r3-entry-istty",
+    file: "factory/verify-ledger.ts",
+    from: "installTerminalBoundary();",
+    to: "if (process.stdout.isTTY) installTerminalBoundary();",
+    why: "the boundary is off in exactly the place nobody is watching: `isTTY` is false in the Actions runner where the unattended six-hour clock runs, and true on the developer's terminal where it is read",
+  },
+  {
+    label: "r3-entry-validate",
+    file: "factory/validate-allowlist.ts",
+    from: "installTerminalBoundary();",
+    to: "// installTerminalBoundary();",
+    why: "one of the two entry points with no behavioural backup at all. A COMMENTED-OUT call still satisfies a source grep for `installTerminalBoundary()`, which is what round 2 asserted",
+  },
+  {
+    label: "r3-entry-discovery",
+    file: "factory/terminal.test.ts",
+    from: "  const ENTRY_POINT = /factory\\/([A-Za-z0-9_.-]+(?:\\/[A-Za-z0-9_.-]+)*\\.ts)/g;",
+    to: "  const ENTRY_POINT = /factory\\/([A-Za-z0-9-]+\\.ts)/g;",
+    why: "the guard's own discovery, narrowed back: `factory/rogue_verb.ts`, `factory/rogue.verb.ts` and `factory/tools/deep.ts` become invisible to it, so three uninstalled entry points would pass green. A mutant against the guard rather than against production, because the guard IS the production control here",
+  },
+  {
+    label: "r3-sweep-c1",
+    file: "factory/terminal.ts",
+    from: "const CONTROL_CHAR = /[\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]/g;",
+    to: "const CONTROL_CHAR = /[\\x00-\\x08\\x0b-\\x1f]/g;",
+    why: "`\\x8d` (RI) scrolls the screen with no `\\x1b` in it — the repaint-a-red-witness-green primitive — and `\\x85` (NEL) and `\\x7f` (DEL) go with it. Every C1 byte the round-2 fixtures carried was ALSO a sequence introducer, so the sweep itself was never the thing under test",
+  },
+  {
+    label: "r3-logs-operator",
+    file: "factory/cli.ts",
+    from: "  if (root === LOGS_ROOT && !LOGS_ROOT_FLAG && process.env.NODE_TEST_CONTEXT) {",
+    to: "  if (root === LOGS_ROOT && !LOGS_ROOT_FLAG) {",
+    why: "the conjunct that makes the write guard \"inert for a real operator\": without it, `evidence <id> --base <sha> --head <sha>` with no `--logs-root` — the only documented spelling — is refused as a test run and the witness is thrown away. Every test passes `--logs-root`, so the conjunction short-circuited before the environment was ever read",
+  },
+  {
+    label: "r3-at-trailing",
+    file: "factory/cli.ts",
+    from: '    refuseValuelessFlag(rest, "--at", "the rollback is dated now");\n',
+    to: "",
+    why: "`revert pkt --reason r --at` reads as no `--at` at all and dates the 30-day window from the typing — the exact failure the flag closes, reached silently by the operator who was trying hardest to avoid it",
+  },
+
+  // ---- ROUND 3: advisories the round-2 review left open, now closed ----
+  {
+    label: "r3-wrapped-weakset",
+    file: "factory/terminal.ts",
+    from: "    if (WRAPPED.has(stream)) continue;\n    WRAPPED.add(stream);\n",
+    to: "",
+    why: "a second install nests a second wrapper. The round-2 test for this was SPURIOUS — it asserted the disclosure does not double, which is true without the WeakSet because sanitising is idempotent — so the guard's own effect, the wrapper count, was pinned by nothing",
+  },
+  {
+    label: "r3-write-passthrough",
+    file: "factory/terminal.ts",
+    from: '      return inner(typeof chunk === "string" ? out : Buffer.from(out, "utf8"), encoding, callback);',
+    to: '      inner(typeof chunk === "string" ? out : Buffer.from(out, "utf8"));\n      return true;',
+    why: "the boundary's own comment promises that \"back-pressure, `drain`, and write callbacks behave exactly as before\": this drops the callback, stranding every `write(chunk, cb)` caller, and reports a full pipe as an empty one",
+  },
+  {
+    label: "r3-csi-final-byte",
+    file: "factory/terminal.ts",
+    from: '    "(?:\\\\x1b\\\\[|\\\\x9b)[0-?]*[ -/]*[@-~]?",',
+    to: '    "(?:\\\\x1b\\\\[|\\\\x9b)[0-?]*[ -/]*[@-~]",',
+    why: "the final byte stops being optional, so a CSI cut by a chunk boundary or by a tail slice keeps its introducer: `write(\"a\\x1b[\")` then `write(\"31mb\")` leaves a live introducer on the terminal, one concatenation from a working sequence",
+  },
+  {
+    label: "r3-write-typedarray",
+    file: "factory/terminal.ts",
+    from: "      if (text === undefined) return inner(chunk, encoding, callback);",
+    to: "      if (text === undefined) return inner(Buffer.from(String(chunk)), encoding, callback);",
+    why: "a non-Buffer typed array is re-encoded through `String()` instead of passed through — raw bytes turned into `[object Uint8Array]` on the way to the stream",
+  },
+  {
+    label: "r3-phrase-precedence",
+    file: "factory/packet.ts",
+    from: "  } else if (packet.policy.matchedPhrases.length > 0) {",
+    to: "  } else if (packet.policy.matchedPhrases.length > 0 && withheld === 0) {",
+    why: "a document that both matched a ban and was truncated loses the matched phrases from the block directly above the attest, replaced by a warning about unshown text — the strictly worse of the two orderings, since the phrases are the reason the verdict is DENY",
+  },
+  {
+    label: "r3-ratio-spaces",
+    file: "factory/policy-records.ts",
+    from: "const RATIO_AS_SLASH = /(?<![/\\w])\\b\\d[\\d,]*\\s*\\/\\s*\\d[\\d,]*\\b(?![/\\w])/;",
+    to: "const RATIO_AS_SLASH = /(?<![/\\w])\\b\\d[\\d,]*\\/\\d[\\d,]*\\b(?![/\\w])/;",
+    why: "`141 / 272` walks through the derived-figure guard: every fixture wrote the ratio tight, so the whitespace either side of the slash was pinned by nothing and a spaced ratio goes into a maintainer's mouth on the evidence page",
+  },
+
   // ---- NEGATIVE CONTROL ----
   // The clock's own copy of the line REQUIRED 2 is about. It was already killed before this round,
   // and it must still be — a harness that reported everything as killed would prove nothing, and one
@@ -267,8 +695,22 @@ function runSuite(): { ok: boolean; firstFailure: string } {
 const wanted = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const selected = wanted.length > 0 ? MUTANTS.filter((m) => wanted.includes(m.label)) : MUTANTS;
 
+/**
+ * The tally, printed by the table rather than quoted in prose anywhere.
+ *
+ * docs/12-ledger.md used to state a figure ("27 single-line mutations … 26 must die and one must
+ * survive") in the same paragraph that says a mutation score quoted in prose is not evidence. It
+ * had drifted to less than half the real count by the next round, which is what a hand-copied
+ * number does. The count now has exactly one source — this array — and one way to read it.
+ */
+function tally(): string {
+  const controls = MUTANTS.filter((m) => m.expect === "survives").length;
+  return `${MUTANTS.length} mutants: ${MUTANTS.length - controls} expected killed, ${controls} control(s) expected to survive`;
+}
+
 if (process.argv.includes("--list")) {
   for (const m of MUTANTS) console.log(`${m.label.padEnd(24)} ${m.file}\n${" ".repeat(25)}${m.why}`);
+  console.log(`\n${tally()}`);
   process.exit(0);
 }
 
@@ -282,7 +724,7 @@ if (!baseline.ok) {
   console.error("baseline is not green — a mutation audit over a red suite means nothing");
   process.exit(2);
 }
-console.log(`baseline green; ${selected.length} mutant(s)\n`);
+console.log(`baseline green; ${tally()}; running ${selected.length}\n`);
 
 const survived: Mutant[] = [];
 const stale: Mutant[] = [];
