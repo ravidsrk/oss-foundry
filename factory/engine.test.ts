@@ -4888,11 +4888,13 @@ test("revertNote reads notes only — a followUp of another kind cannot masquera
 });
 
 test("applyReviewToScorecard writes exactly one row, and counts rather than clamps", () => {
-  // The repo guard is the difference between a KPI and a headline. `factoryKpis()` sums `noReview`
-  // across every allowlist row, so a fold that forgot which row it was writing would multiply the
-  // published number by the size of the roster — eight rows today. The identical guard in
-  // `applyPacketToScorecard` is pinned; this one was not, so writing the WRONG row was caught and
-  // writing EVERY row was not.
+  // The repo guard is the difference between a KPI and a headline: a fold that forgot which row it
+  // was writing would multiply any factory-wide sum of `noReview` by the size of the roster — eight
+  // rows today. The identical guard in `applyPacketToScorecard` is pinned; this one was not, so
+  // writing the WRONG row was caught and writing EVERY row was not.
+  //
+  // This used to name `factoryKpis()` as that sum. It was deleted in this change as an orphan
+  // (issue #75), so the comment names the hazard rather than a function that no longer exists.
   const repo = "ravidsrk/orca-fleet";
   const rows = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 0, comments: 0 });
   assert.equal(rows.filter((r) => r.noReview > 0).length, 1, "exactly one row may move");
