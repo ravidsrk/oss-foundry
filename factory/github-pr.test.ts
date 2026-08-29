@@ -511,6 +511,13 @@ test("syncGithubPr reads the human review split for a terminal PR, and says noth
       undefined,
       "a capped review read was recorded as a complete count",
     );
+    // ...and it is distinguishable from an endpoint FAILURE, because the operator's next move
+    // differs: a failed endpoint is worth retrying, a capped one will cap again. Round 1 of this fix
+    // made both of them a bare absent field, which is two facts wearing one face.
+    assert.equal(capped.reviewTruncated, true, "a capped review read is indistinguishable from an outage");
+  }
+  if (unreadable.ok) {
+    assert.equal(unreadable.reviewTruncated, false, "an outage must not report itself as a capped read");
   }
 });
 

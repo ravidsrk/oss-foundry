@@ -686,15 +686,20 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
     // `fetchHumanReview` for why re-reading an already-terminal PR is wanted rather than tolerated.
     // An open PR costs exactly the one request it always did. A failure leaves `humanReview` ABSENT
     // — the consumer must then say it could not compute the metric rather than record a zero.
+    let reviewTruncated = false;
     if (pr.merged || pr.state === "closed") {
       const review = await fetchHumanReview(parsed.owner + "/" + parsed.repo, parsed.number, fetchImpl);
       // A CAPPED read leaves the field absent, exactly like a failed one, and for the same reason:
       // "we could not read it" and "nobody reviewed it" are different facts and only one is a KPI.
-      // Raised by review — the flag was returned here and then dropped, so a partial count would
-      // have been recorded and published as a complete read.
+      //
+      // But it is REPORTED separately, because the operator's next move differs. A failed endpoint
+      // is worth retrying; a capped one will cap again, and the advice is to look at the PR by hand
+      // or raise the cap deliberately. Round 1 of this fix stored neither and said neither, which
+      // left "absent" meaning two different things — raised by review.
+      reviewTruncated = review.ok && review.truncated;
       if (review.ok && !review.truncated) meta.humanReview = review.humanReview;
     }
-    return { ok: true as const, meta, title: pr.title ?? "", body: pr.body ?? "" };
+    return { ok: true as const, meta, title: pr.title ?? "", body: pr.body ?? "", reviewTruncated };
   } catch (err) {
     return {
       ok: false as const,

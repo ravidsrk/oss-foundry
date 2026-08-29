@@ -178,6 +178,12 @@ interface LivePr {
    * reviewed it" — the distinction the two review KPIs are built on (issue #39).
    */
   reviewsUnreadable?: boolean;
+  /**
+   * The review endpoints answering with a cursor that never ends, so the paginated read stops at its
+   * page cap. Distinct from `reviewsUnreadable` because the operator's next move differs: an outage
+   * is worth retrying, a capped read will cap again (issue #69).
+   */
+  reviewsTruncated?: boolean;
 }
 
 /** What `GET /repos/{owner}/{repo}/commits?since=…` answers, keyed by repo id. */
@@ -277,7 +283,15 @@ globalThis.fetch = async (url) => {
   // pull, so they are matched before the pull itself.
   if (parts[5] === "reviews" || parts[5] === "comments") {
     if (pr.reviewsUnreadable) return json(500, { message: "review endpoints unavailable" });
-    return json(200, actors(parts[5] === "reviews" ? pr.reviews : pr.reviewComments));
+    const reviewBody = actors(parts[5] === "reviews" ? pr.reviews : pr.reviewComments);
+    if (pr.reviewsTruncated) {
+      // Same shape as the commit cursor above: points back at this path, so every page answers and
+      // only the page cap ever stops the read.
+      const rp = Number(new URL(u).searchParams.get("page") ?? "1") + 1;
+      const rnext = "https://api.github.com/repos/" + parts[1] + "/" + parts[2] + "/pulls/" + parts[4] + "/" + parts[5] + "?page=" + rp;
+      return json(200, reviewBody, { link: '<' + rnext + '>; rel="next"' });
+    }
+    return json(200, reviewBody);
   }
   return json(200, {
     html_url: "https://github.com/" + path,
@@ -2365,4 +2379,45 @@ globalThis.fetch = async (url) => {
   const run = runCli(["tick", "--state", path], tmpdir(), { preload });
   assert.equal(run.code, 1, run.out);
   assert.match(run.out, /page cap/, run.out);
+});
+
+/**
+ * Issue #69: a CAPPED review read is neither a failure nor an observation, and reconcile has to say
+ * which.
+ *
+ * Round 1 of this fix stopped storing the partial count — correct, since a wrong KPI is worse than a
+ * missing one — but left the field simply absent, which is what an OUTAGE also leaves. So the
+ * operator got retry guidance for a condition that will reproduce on every re-run. Raised by review.
+ *
+ * The two conditions are driven side by side, because the claim is that they are distinguishable and
+ * a single-condition test cannot see that.
+ */
+test("reconcile tells a capped review read apart from an outage", () => {
+  const BLIND = "pkt_ravidsrk_frontguard_195";
+  const blind = reviewBlindState(BLIND);
+  const stranded = blind.packets.find((p) => p.id === BLIND)!;
+
+  const capped = runCli(["reconcile", "--state", writeState(blind)], tmpdir(), {
+    preload: prFactsStub(livePrs({ [stranded.prUrl!]: { reviewsTruncated: true } })),
+  });
+  assert.equal(capped.code, 0, capped.out);
+  assert.match(
+    capped.out,
+    new RegExp(`^ADVISORY ${BLIND}: the human-review read on .* stopped at the \\d+-page cap`, "m"),
+    `a capped review read must name the cap:\n${capped.out}`,
+  );
+  // The advice has to be actionable and true: a re-run caps again, so it must not say "retry".
+  assert.match(capped.out, /re-run will cap again/, capped.out);
+  assert.match(capped.out, /NOT recorded/, capped.out);
+
+  // The outage, for contrast — same packet, same verb, different message.
+  const outage = runCli(["reconcile", "--state", writeState(blind)], tmpdir(), {
+    preload: prFactsStub(livePrs({ [stranded.prUrl!]: { reviewsUnreadable: true } })),
+  });
+  assert.equal(outage.code, 0, outage.out);
+  assert.equal(
+    /stopped at the \d+-page cap/.test(outage.out),
+    false,
+    `an outage must not report itself as a capped read:\n${outage.out}`,
+  );
 });

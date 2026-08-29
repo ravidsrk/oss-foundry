@@ -1115,6 +1115,14 @@ async function main() {
       // one: `syncGithubPr` populates `humanReview` for terminal PRs alone, so an open packet costs
       // nothing here. An error is still reported rather than swallowed, because a writer that
       // starts refusing for a new reason should be visible rather than silently skipped.
+      // A capped review read is not a failure and not an observation: say so, on the same advisory
+      // path the commit read below uses, so it cannot read as "nobody reviewed it" or as a retryable
+      // outage. Reported before the writer, because there is nothing to write.
+      if (synced.reviewTruncated) {
+        owed.push(
+          `${packet.id}: the human-review read on ${packet.repoId} stopped at the ${MAX_LIST_PAGES}-page cap — noReview/reviewCommentsAvg are NOT recorded for this PR, and a re-run will cap again. Read the PR by hand or raise the cap deliberately.`,
+        );
+      }
       if (synced.meta.humanReview) {
         const observed = synced.meta.humanReview;
         const recovered = applyReviewObservation(next, packet.id, observed);
