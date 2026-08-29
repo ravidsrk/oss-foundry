@@ -393,8 +393,7 @@ async function tickWithGithub(state: FactoryState) {
         console.error(crossRefs.error);
         process.exit(1);
       }
-      // BOTH reads that feed the verdict. Checking `pulls` alone let a capped timeline reach
-      // `classifyCompetition`, so a competing PR past the cap was missed — the same fail-open.
+      // BOTH reads feeding the verdict: `pulls` alone let a capped timeline through (same fail-open).
       refuseIfCapped([pulls, crossRefs], key);
       const verdict = classifyCompetition(
         { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },

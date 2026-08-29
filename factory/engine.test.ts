@@ -4461,6 +4461,10 @@ test("a terminal transition with no observed review split records nothing and sa
     false,
     `\`sync\` refuses a terminal packet, so naming it is advice that cannot be followed:\n${gap}`,
   );
+  // ...and the OTHER reason: this reducer cannot tell an outage from a page cap (issue #69), and a
+  // line offering only the retry was misleading for half the cases it fires on.
+  assert.match(gap, /PAGE CAP/, `the advice must cover a capped read as well as an outage:\n${gap}`);
+  assert.match(gap, /cap again/, gap);
   // Not a claim about the wording — a claim about the verb. `sync` really does refuse this packet.
   const refused = applyPrSync(
     merged.state,

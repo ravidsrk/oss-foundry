@@ -838,12 +838,8 @@ test("fetchHumanReview fails closed on a thrown fetch, a bad status, and a non-l
   if (!badComments.ok) assert.match(badComments.error, /503 on review comments/);
 
   // A 200 whose body is not a list. Without the guard `.filter` throws and the failure arrives as
-  // "fetch failed", which is a different and untrue account of what happened.
-  //
-  // Now asserted PER ENDPOINT rather than against one combined "the review endpoints" message.
-  // Paginating both reads through one helper (issue #69) made the message name which endpoint
-  // returned the non-list, so this tightened rather than moved: the old assertion passed whichever
-  // of the two had failed, and these two cannot.
+  // "fetch failed", an untrue account. Asserted PER ENDPOINT now: paginating both through one helper
+  // made the message name which one, so this tightened — the old assertion passed for either.
   const notListComments = await fetchHumanReview("ravidsrk/orca-fleet", 70, async (url) =>
     String(url).includes("/comments") ? jsonResponse(200, { message: "Not Found" }) : jsonResponse(200, []),
   );

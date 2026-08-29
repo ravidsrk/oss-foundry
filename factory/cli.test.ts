@@ -178,8 +178,8 @@ interface LivePr {
    * reviewed it" — the distinction the two review KPIs are built on (issue #39).
    */
   reviewsUnreadable?: boolean;
-  /** A never-ending review cursor, so the read stops at its cap. Distinct from `reviewsUnreadable`:
-   * an outage is worth retrying and a capped read is not (issue #69). */
+  /** A never-ending review cursor, so the read caps. Unlike `reviewsUnreadable`, retrying will not
+   * help (issue #69). */
   reviewsTruncated?: boolean;
 }
 
@@ -2361,15 +2361,14 @@ globalThis.fetch = async (url) => {
 });
 
 /**
- * A CAPPED review read is neither a failure nor an observation. Not storing the partial count was
- * right — a wrong KPI is worse than none — but leaving the field simply absent is what an OUTAGE
- * leaves too, so the operator got retry advice for a condition that reproduces every run. Driven
- * side by side, because "distinguishable" is a claim one condition cannot show.
+ * A CAPPED review read is neither a failure nor an observation. Not storing the partial count is
+ * right, but leaving the field simply absent is what an OUTAGE leaves too, so the operator got retry
+ * advice for a condition that reproduces every run. Driven side by side, because "distinguishable"
+ * is a claim one condition cannot show.
  */
 test("a capped review read is told apart from an outage, in BOTH verbs", () => {
-  // The cap advisory once lived in `reconcile` alone, beside `packetChecks`'s generic "re-run when
-  // GitHub answers" line — so one run said both re-run and do-not-re-run about one PR, and the clock
-  // said neither. The fact now rides `LivePrLite`, which both verbs already build.
+  // The cap advisory once lived in `reconcile` alone, beside the generic "re-run when GitHub
+  // answers" line, so one run said both re-run and do-not-re-run. It now rides `LivePrLite`.
   const BLIND = "pkt_ravidsrk_frontguard_195";
   const blind = reviewBlindState(BLIND);
   const stranded = blind.packets.find((p) => p.id === BLIND)!;

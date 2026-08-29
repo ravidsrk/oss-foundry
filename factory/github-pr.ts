@@ -672,9 +672,8 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
     let reviewTruncated = false;
     if (pr.merged || pr.state === "closed") {
       const review = await fetchHumanReview(parsed.owner + "/" + parsed.repo, parsed.number, fetchImpl);
-      // A CAPPED read leaves the field absent like a failed one — "we could not read it" and
-      // "nobody reviewed it" are different facts and only one is a KPI — but is REPORTED separately,
-      // because a failed endpoint is worth retrying and a capped one will cap again.
+      // A CAPPED read leaves the field absent like a failed one, but is REPORTED separately: an
+      // endpoint outage is worth retrying and a capped read is not.
       reviewTruncated = review.ok && review.truncated;
       if (review.ok && !review.truncated) meta.humanReview = review.humanReview;
     }
