@@ -4893,8 +4893,8 @@ test("applyReviewToScorecard writes exactly one row, and counts rather than clam
   // rows today. The identical guard in `applyPacketToScorecard` is pinned; this one was not, so
   // writing the WRONG row was caught and writing EVERY row was not.
   //
-  // This used to name `factoryKpis()` as that sum. It was deleted in this change as an orphan
-  // (issue #75), so the comment names the hazard rather than a function that no longer exists.
+  // The orphaned aggregator that used to compute that sum is deleted in this change (issue #75), so
+  // the comment names the hazard rather than a function no longer in the tree.
   const repo = "ravidsrk/orca-fleet";
   const rows = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 0, comments: 0 });
   assert.equal(rows.filter((r) => r.noReview > 0).length, 1, "exactly one row may move");
