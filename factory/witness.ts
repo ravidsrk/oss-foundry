@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { sanitizeTerminalText } from "./terminal.ts";
@@ -7,9 +8,17 @@ import type { EvidenceWitness, SandboxKind, Wave } from "./types.ts";
 
 /**
  * A witness step is one of: "git" (args passed to git), "run-setup" / "run-tests@head" /
- * "run-tests@revert" / "probe" (args[0] is a shell command line the runner executes), "cleanup"
+ * "run-tests@revert" / "probe" (args[0] is a shell command line the runner executes), "mkdtemp"
+ * (args[0] is a filename prefix; returns the created scratch dir as its `output`), "cleanup"
  * (args[0] is a scratch dir). The runner seam is what makes the protocol testable without a
  * network or a shell.
+ *
+ * "mkdtemp" is a step rather than a `mkdtempSync` call inside the protocol on purpose. Creating the
+ * directory is a filesystem effect, and every other filesystem effect here already crosses this
+ * seam — `cleanup` is `rm -rf` behind it. Calling `mkdtempSync` directly would make each of the
+ * protocol's stubbed tests create a real directory it has no way to remove, which is issue #64's
+ * defect, and would put an unfakeable effect inside the one function this seam exists to keep
+ * fakeable.
  */
 export type WitnessStep =
   | "git"
@@ -17,6 +26,7 @@ export type WitnessStep =
   | "run-tests@head"
   | "run-tests@revert"
   | "probe"
+  | "mkdtemp"
   | "cleanup";
 export type WitnessRunner = (
   step: WitnessStep,
@@ -53,19 +63,46 @@ export type WitnessRunner = (
  * A repo needing anything more than this declares it as `setupCommand` in `allowlist.yaml`, where
  * it is visible, rather than relying on a profile nobody reads.
  */
-export const hostRunner: WitnessRunner = (step, args, opts) =>
-  new Promise((resolveRun) => {
-    const [cmd, cmdArgs] =
-      step === "git"
-        ? ["git", args]
-        : step === "cleanup"
-          ? ["rm", ["-rf", ...args]]
-          : ["bash", ["-c", args[0] ?? "false"]]; // run-setup, probe and both run-tests phases execute the repo's own commands
-    execFile(cmd, cmdArgs, { cwd: opts?.cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      const exit = err && typeof (err as { code?: unknown }).code === "number" ? ((err as { code: number }).code) : err ? 1 : 0;
-      resolveRun({ exit, output: `${stdout}${stderr}` });
-    });
+export const hostRunner: WitnessRunner = (step, args, opts) => {
+  /**
+   * Handled before the `execFile` shapes below because it is the one step with no command: the OS
+   * allocates the name, which is the entire point. `mkdtempSync` appends its own random suffix to
+   * the prefix and fails if the result already exists, so two witness runs starting in the same
+   * millisecond cannot collide — the defect in issue #56, where the directory was named from
+   * `Date.now()` alone and the suite went red once in seventeen runs.
+   *
+   * The prefix is refused if it contains a path separator. It is derived from `repoId`, which comes
+   * from `allowlist.yaml`, and a prefix carrying a `/` would place the scratch directory outside
+   * `tmpdir()` — the same class of path-resolution defect as issue #80, guarded here rather than
+   * trusted to the caller.
+   */
+  if (step === "mkdtemp") {
+    const prefix = args[0] ?? "foundry-witness-";
+    if (prefix.includes("/") || prefix.includes("\\") || prefix.includes("\0")) {
+      return Promise.resolve({ exit: 1, output: `refusing a scratch-directory prefix containing a path separator: ${prefix}` });
+    }
+    try {
+      return Promise.resolve({ exit: 0, output: mkdtempSync(join(tmpdir(), prefix)) });
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      return Promise.resolve({ exit: 1, output: `cannot create a scratch directory: ${why}` });
+    }
+  }
+  const { promise, resolve: resolveRun } = Promise.withResolvers<{ exit: number; output: string }>();
+  const [cmd, cmdArgs] =
+    step === "git"
+      ? ["git", args]
+      : step === "cleanup"
+        ? ["rm", ["-rf", ...args]]
+        : ["bash", ["-c", args[0] ?? "false"]]; // run-setup, probe and both run-tests phases execute the repo's own commands
+  execFile(cmd, cmdArgs, { cwd: opts?.cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    // `ExecException.code` is already typed `number | undefined`, so the shape needs narrowing, not
+    // an assertion: a signal-killed child reports `signal` with no numeric code and must read as 1.
+    const exit = !err ? 0 : typeof err.code === "number" ? err.code : 1;
+    resolveRun({ exit, output: `${stdout}${stderr}` });
   });
+  return promise;
+};
 
 /** The two run logs, returned so the caller can persist them at the paths the witness declares. */
 export interface WitnessLogs {
@@ -348,7 +385,25 @@ export async function witnessEvidence(
     };
   }
 
-  const dir = join(tmpdir(), `foundry-witness-${input.repoId.replace("/", "_")}-${Date.now()}`);
+  /**
+   * The OS allocates this name, not the wall clock. It used to be
+   * `foundry-witness-${repoId}-${Date.now()}`, which collides when two witness runs for the same
+   * repository start in the same millisecond — observed as a red suite once in seventeen runs
+   * (issue #56). The suite is fast and now drives real clones end to end, so two runs landing in
+   * the same millisecond is ordinary rather than exotic, and the failure landed on the one surface
+   * whose whole job is to be reproducible.
+   *
+   * `replaceAll` because `replace` with a string pattern substitutes only the FIRST match, so a
+   * repoId with two separators would have left one in the prefix and put the clone somewhere other
+   * than `tmpdir()`. The runner refuses such a prefix outright; both halves are needed, since the
+   * caller must not depend on the runner's guard to be correct.
+   */
+  const scratch = await runner("mkdtemp", [`foundry-witness-${input.repoId.replaceAll("/", "_")}-`]);
+  const dir = scratch.output.trim();
+  if (scratch.exit !== 0 || dir === "") {
+    // Fail closed. Cloning into an empty path would clone into the process's working directory.
+    return { ok: false, error: `cannot create a scratch directory for the witness: ${scratch.output.slice(0, 200) || "no path returned"}` };
+  }
   const url = `https://github.com/${input.repoId}.git`;
   // Every refusal below interpolates a step's raw output, and that output is REPOSITORY-CONTROLLED:
   // `allowlist.yaml` carries `setupCommand: npm ci`, run with `cwd` set to this clone, so the
