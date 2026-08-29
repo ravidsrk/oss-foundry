@@ -767,7 +767,6 @@ test("tick stands down on a named first issue GitHub has already closed", () => 
     `a closed issue must not become a packet:\n${ticked.out}`,
   );
   assert.match(ticked.out, /stand down: ravidsrk\/orca-fleet#71 is closed/, ticked.out);
-  assert.match(ticked.out, /closed/, ticked.out);
   // Who resolved it, so the operator can go look rather than guess.
   assert.match(ticked.out, /pull\/72/, ticked.out);
   assert.match(ticked.out, /github\/awesome-copilot#2684 is a pull request, not an issue/, ticked.out);
@@ -822,6 +821,11 @@ test("approve refuses the freeze when the issue closed since gating", () => {
   assert.match(refused.out, /ravidsrk\/orca-fleet#71/, refused.out);
   assert.match(refused.out, /closed/, refused.out);
   assert.equal(/^approved /m.test(refused.stdout), false, "the freeze must not be reported as done");
+  // The instruction, not just the reason: it names the operator's real verb and the do-nothing,
+  // and deliberately differs per gate (open-draft says `draft-ready`). There is no `park` command
+  // for a human to type — issue #62 — so a refusal must never send one looking for it.
+  assert.match(refused.out, /Reject or leave it gated — do not approve\./, refused.out);
+  assert.equal(/\bpark\b/.test(refused.out), false, `no refusal may name a verb the CLI lacks:\n${refused.out}`);
 
   // The refusal writes nothing: no attest, no status change. `reject` stays the operator's verb.
   const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
@@ -861,6 +865,10 @@ test("open-draft refuses a closed issue before any write reaches GitHub", () => 
   assert.match(refused.out, /stand down/, refused.out);
   assert.match(refused.out, /ColeMurray\/background-agents#1476/, refused.out);
   assert.match(refused.out, /not planned/i, refused.out);
+  // Same doctrine as the freeze-time refusal, different do-nothing: the packet is `draft-ready`
+  // here, not `gated`. `park` is a status the engine writes, never a command (issue #62).
+  assert.match(refused.out, /Reject or leave it draft-ready — do not open\./, refused.out);
+  assert.equal(/\bpark\b/.test(refused.out), false, `no refusal may name a verb the CLI lacks:\n${refused.out}`);
 
   // Proof, not a proxy: the stub logs every call, and no create may appear in it.
   const calls = existsSync(stub.log) ? readFileSync(stub.log, "utf8") : "";
@@ -873,18 +881,51 @@ test("open-draft refuses a closed issue before any write reaches GitHub", () => 
   assert.equal(packet?.prUrl, undefined);
 });
 
-test("an unreadable issue refuses open-draft rather than proceeding blind", () => {
-  // Fail closed, like every other read on this path. "GitHub would not tell us" is not "the issue
-  // is open" — proceeding on a 500 opens exactly the PR the gate exists to stop.
-  const stub = githubStub("record", { "ColeMurray/background-agents#1476": "unreadable" });
+test("an unreadable issue refuses at all three gates rather than proceeding blind", () => {
+  // Fail closed, like every other read on these paths. "GitHub would not tell us" is not "the
+  // issue is open" — proceeding on a 500 opens exactly the PR the gate exists to stop. All three
+  // call sites implement this identically, so all three are pinned: an untested guard is a guard
+  // that can be deleted, and only the write gate has a second line of defence in the fetcher.
+  const openDraftStub = githubStub("record", { "ColeMurray/background-agents#1476": "unreadable" });
   const path = writeState(draftReadyState());
   const refused = runCli(
     ["open-draft", DRAFT_READY_ID, "--head", "ravidsrk:foundry/issue-1476", "--state", path],
     tmpdir(),
-    { preload: stub.preload, env: { FOUNDRY_PAT: "test-pat" } },
+    { preload: openDraftStub.preload, env: { FOUNDRY_PAT: "test-pat" } },
   );
   assert.equal(refused.code, 1, refused.out);
   assert.match(refused.out, /GitHub 500 reading ColeMurray\/background-agents#1476/, refused.out);
-  const calls = existsSync(stub.log) ? readFileSync(stub.log, "utf8") : "";
+  const calls = existsSync(openDraftStub.log) ? readFileSync(openDraftStub.log, "utf8") : "";
   assert.equal(/^POST /m.test(calls), false, `no draft may be created:\n${calls}`);
+
+  // tick: the read-only gate, and the one that decides what gets scouted at all. A 500 must abort
+  // the tick, not fall through to the competing-work check with an unread issue — `clear` there
+  // would gate a packet on an issue nobody can confirm is open.
+  const tickStub = githubStub("record", { "ravidsrk/orca-fleet#71": "unreadable" });
+  const tickPath = writeState(emptyLedger());
+  const ticked = runCli(["tick", "--state", tickPath], tmpdir(), { preload: tickStub.preload });
+  assert.equal(ticked.code, 1, `an unreadable issue must abort the tick:\n${ticked.out}`);
+  assert.match(ticked.out, /GitHub 500 reading ravidsrk\/orca-fleet#71/, ticked.out);
+  const tickDisk = JSON.parse(readFileSync(tickPath, "utf8")) as FactoryState;
+  assert.deepEqual(
+    tickDisk.packets.map((p) => `${p.repoId}#${p.issueNumber}`),
+    [],
+    `a tick that could not read the issue must scout nothing:\n${ticked.out}`,
+  );
+
+  // approve: the freeze. A 500 must refuse the attestation, not stamp one on an issue whose state
+  // GitHub declined to report.
+  const approveStub = githubStub("record", { "ravidsrk/orca-fleet#71": "unreadable" });
+  const approvePath = writeState(gatedOn71());
+  const approved = runCli(
+    ["approve", "pkt_ravidsrk_orca-fleet_71", "--note", "looks fine", "--by", "ravidsrk", "--state", approvePath],
+    tmpdir(),
+    { preload: approveStub.preload },
+  );
+  assert.equal(approved.code, 1, `an unreadable issue must refuse the freeze:\n${approved.out}`);
+  assert.match(approved.out, /GitHub 500 reading ravidsrk\/orca-fleet#71/, approved.out);
+  const approveDisk = JSON.parse(readFileSync(approvePath, "utf8")) as FactoryState;
+  const packet = approveDisk.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_71");
+  assert.equal(packet?.status, "gated", "an unreadable issue must not move the packet");
+  assert.equal(packet?.humanAttest, undefined, "an unreadable issue must not stamp an attestation");
 });

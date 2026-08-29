@@ -9,20 +9,24 @@ Input: allowlist + open issues + open PRs (both denominators).
 Does:
 
 - Drop denylist, RFC/meta/tracking, issues with an in-flight maintainer PR.
-- **Is the target still open?** (`fetchIssueState` → `issueStandDownReason`.) Read first, because it
-  is the more decisive fact and refusing on it skips the per-issue timeline call. Competing-work
-  detection sees only OPEN pull requests, so once someone else's fix merges the PR closes, the issue
-  closes, and the verdict returns to `clear` — indistinguishable from an issue nobody has touched. A
-  closed issue is **skipped, never consumed**: nothing is written against it, the ledger records the
-  reason, and a reopen makes the row selectable again with no hand edit. The same check re-runs at
-  `approve` and at `open-draft`; a number that turns out to name a pull request is refused there too.
-  A read that does not answer fails closed. (issue #40)
+- **Is the target still open?** (`fetchIssueState` → `issueStandDownReason`.) Read first because it
+  is the more decisive fact — *not* to save requests. Refusing on it does skip the competing-work
+  timeline call, but the refusal message then spends the identical timeline GET, so the saving is
+  zero: the check costs **+1 GET per named `firstIssues` row, unconditionally**, closed rows
+  included (measured live over the four named rows: a full tick went 15 requests → 19).
+  Competing-work detection sees only OPEN pull requests, so once someone else's fix merges the PR
+  closes, the issue closes, and the verdict returns to `clear` — indistinguishable from an issue
+  nobody has touched. A closed issue is **skipped, never consumed**: nothing is written against it,
+  the ledger records the reason, and a reopen makes the row selectable again with no hand edit. The
+  same check re-runs at `approve` and at `open-draft`; a number that turns out to name a pull
+  request is refused there too. A read that does not answer fails closed. (issue #40)
 - Competing-work verdict is two-tier (`classifyCompetition`): **competing** = a closing-keyword PR
   or an open PR the issue's GitHub timeline cross-references → stand down; **adjacent** = a plain
   textual mention or an issue-numbered head branch → taste gate, held for human triage, never
-  silently scouted. The same check re-runs at `approve` (freeze) and at `attach-draft` — a
-  competitor that appeared since gating refuses the approval or the attach; an adjacent mention at
-  freeze is surfaced to the human doing the freezing, who is the taste gate.
+  silently scouted. The same check re-runs at `approve` (freeze), at `open-draft` and at
+  `attach-draft` — a competitor that appeared since gating refuses the approval, the open or the
+  attach; an adjacent mention at freeze is surfaced to the human doing the freezing, who is the
+  taste gate.
 - Heuristic score: wave, labels, size, freshness.
 - Never invent issue numbers. If every named `firstIssues` row is consumed or blocked, the tick **idles**.
 
@@ -102,6 +106,11 @@ Opens a **draft** PR from the operator fork to upstream default. Body is generat
 stale: an issue can close while a packet is in flight, and this is the last moment the contact can
 still be called off. `attach-draft` deliberately does **not** gate on it — the pull request already
 exists there, and refusing to record it would leave a live PR the ledger has never heard of.
+
+That sits in tension with the competing-work check, which *does* refuse at `attach-draft` (§1) and
+so creates exactly the orphan described above. The resolution is not to copy it: the orphan is the
+older bug — it is the abandoned-live-PR hole `packetChecks` exists to surface (issue #34) — and a
+second path into it is not worth adding for a fact that changes nothing now the PR exists.
 
 ## 7. Follow-up / scorecard
 

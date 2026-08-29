@@ -195,9 +195,12 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
  *
  * Calling `fetchIssueClosingRef` unconditionally would spend a timeline request on every open issue
  * at every gate, which is the opposite of the point: the reference exists for the refusal message,
- * and an open issue has no refusal message. On the path where it IS spent, the issue was already
- * refused and the timeline call the tick would have made for competing work is skipped — so the
- * closed case costs no more requests than the open one.
+ * and an open issue has no refusal message. It is not free on the path where it IS spent, and the
+ * ordering does not pay for it: this is the identical `issues/{n}/timeline?per_page=100` GET the
+ * competing-work check below would have made, spent on the refusal instead. So a closed row costs
+ * exactly what an open row that reaches the timeline costs, and one request MORE than an open row
+ * a closing-keyword hit settles from the already-fetched pulls — live, that last case is
+ * ColeMurray/background-agents#1476, which spends one request here and spent none before.
  */
 async function closingRefFor(
   issue: IssueLiveState,
@@ -226,11 +229,14 @@ async function tickWithGithub(state: FactoryState) {
       (await fetchRepoFile(repo.id, ".github/CONTRIBUTING.md"));
     for (const issue of repo.firstIssues) {
       const key = `${repo.id}#${issue.number}`;
-      // Is the target still open at all? First, ahead of the competing-work classification, for
-      // two reasons: it is the more decisive fact (a closed issue needs no competitor to be
-      // unscoutable), and refusing here short-circuits the per-issue timeline call below — so a
-      // closed row costs FEWER requests than it does today, not more. The added cost is one GET
-      // per named `firstIssues` row on the rows that are still open; `allowlist.yaml` names four.
+      // Is the target still open at all? First, ahead of the competing-work classification,
+      // because it is the more decisive fact: a closed issue needs no competitor to be
+      // unscoutable. The ordering buys no requests. Refusing here does short-circuit the
+      // competing-work timeline call below, but `closingRefFor` then makes the identical
+      // `issues/{n}/timeline?per_page=100` GET for the refusal message, so the saving is exactly
+      // zero. Measured live over the four rows `allowlist.yaml` names, two of them closed: a full
+      // tick went 15 requests → 19. The cost is +1 GET per named row, unconditionally — closed
+      // rows are not cheaper, they cost the same +1 as every other row.
       const liveIssue = await fetchIssueState(repo.id, issue.number);
       if (!liveIssue.ok) {
         // Fail closed, exactly like the two reads either side of it: "GitHub would not say" is not
@@ -755,7 +761,10 @@ async function main() {
     }
     const issueStandDown = issueStandDownReason(packet, liveIssue.issue, await closingRefFor(liveIssue.issue, packet));
     if (issueStandDown) {
-      console.error(`stand down: ${issueStandDown} Reject or park — do not open.`);
+      // Names `reject` and the do-nothing, exactly like the freeze-time refusal above. There is no
+      // `park` verb for an operator to type (issue #62): `parked` is a status the engine writes,
+      // and the packet is `draft-ready` here — leaving it there is the second real option.
+      console.error(`stand down: ${issueStandDown} Reject or leave it draft-ready — do not open.`);
       process.exit(1);
     }
     const pulls = await listOpenPulls(packet.repoId);

@@ -252,6 +252,27 @@ test("fetchIssueState reports the issue's own state, reason and closer", async (
     assert.equal(open.issue.state, "open");
     assert.equal(open.issue.stateReason, undefined);
   }
+
+  // The defensive half of the normalisation, which only the literal "open" survives: a 200 whose
+  // `state` is missing, null, or a value this code does not know reads as CLOSED. An unrecognised
+  // value is not a licence to contact a maintainer — and a 200 never reaches the fail-closed path,
+  // so this ternary is the only thing standing between a schema surprise and an unwanted PR.
+  for (const body of [
+    { number: 81, html_url: "u" },
+    { number: 81, html_url: "u", state: null },
+    { number: 81, html_url: "u", state: "OPEN" },
+    { number: 81, html_url: "u", state: "locked" },
+  ]) {
+    const odd = await fetchIssueState("ravidsrk/orca-fleet", 81, async () => jsonResponse(200, body));
+    assert.equal(odd.ok, true);
+    if (odd.ok) {
+      assert.equal(
+        odd.issue.state,
+        "closed",
+        `an unrecognised state must not read as open: ${JSON.stringify(body)}`,
+      );
+    }
+  }
 });
 
 test("fetchIssueState marks a number that names a pull request, and fails closed on an error", async () => {
