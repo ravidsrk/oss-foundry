@@ -208,7 +208,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   tick
   approve <packetId> --note <text> [--by <name>]   (identity also via FOUNDRY_OPERATOR)
   reject <packetId> --reason <text>
-  halt <repoId> --reason <text>
+  halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
   advance <packetId>
   evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested)
   body <packetId>
@@ -218,7 +218,7 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   reconcile
   ledger
   evidence-page <packetId>   (maintainer-facing audit page, markdown to stdout)
-  clear-halt --by <name> --note <text>   (a human lifts a persisted factory halt)
+  clear-halt --by <name> --note <text>   (a human lifts the factory-wide rate-limit halt — not the halt above)
 
 Any command takes --state <path> to point at a different ledger.
 State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry never merges.

@@ -40,12 +40,17 @@ included — until a human runs `clear-halt --by <name> --note <text>`. It is no
 stop. Nothing sets this halt by hand; only the rate-limit path writes it.
 
 **2. Scorecard stop (durable, per repo).** A repo with scorecard health `stop` cannot be queued or
-approved. Every other allowlisted repo keeps running.
+approved. Every other allowlisted repo keeps running. This is the one an operator writes by hand:
+`halt <repoId> --reason <text>` is the same-hour stop for "a maintainer said stop". It sets that
+repo's scorecard tone to `banned` (`applyHalt`), counts a ban, and parks that repo's in-flight
+packet. `clear-halt` does **not** undo it — that lifts the §1 factory halt only, and no command
+lifts a `banned` tone. Denylist the repo in `allowlist.yaml` the same hour, per the incident drill
+below.
 
-**3. Operator stand-down (procedural, factory-wide).** There is no command that writes a halt by
-hand, so a deliberate full stop is still a procedure: reject the in-flight packets and stop
-pressing tick. The GHA default is dry (`FOUNDRY_LIVE` unset), so the 6-hour clock does not open
-PRs on its own.
+**3. Operator stand-down (procedural, factory-wide).** Nothing writes the §1 *factory* halt by
+hand, and §2's `halt` stops one repo per invocation, so a deliberate full stop across the factory
+is still a procedure: reject the in-flight packets and stop pressing tick. The GHA default is dry
+(`FOUNDRY_LIVE` unset), so the 6-hour clock does not open PRs on its own.
 
 ## Tick cadence
 
@@ -56,7 +61,6 @@ Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in fli
 1. Wave 0 attested 2/2: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72).
 2. [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) merged by `ravidsrk`. Do not repeat operator-merge on a Foundry packet.
 3. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652). Follow up. Do not merge. Do not tick.
-
 
 ## Metrics that matter — operational definitions
 

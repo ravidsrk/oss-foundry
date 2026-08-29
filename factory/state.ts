@@ -283,7 +283,6 @@ export function isFactoryState(value: unknown): value is FactoryState {
   const o = value as Record<string, unknown>;
   return (
     o.version === 6 &&
-    optional(o.halt, isHalt) &&
     Array.isArray(o.packets) &&
     o.packets.every(isPacket) &&
     Array.isArray(o.events) &&
@@ -294,7 +293,8 @@ export function isFactoryState(value: unknown): value is FactoryState {
     typeof o.mergedTotal === "number" &&
     typeof o.bans === "number" &&
     typeof o.humanApprovalsRemaining === "number" &&
-    (o.lastTickAt === null || typeof o.lastTickAt === "string")
+    (o.lastTickAt === null || typeof o.lastTickAt === "string") &&
+    optional(o.halt, isHalt)
   );
 }
 

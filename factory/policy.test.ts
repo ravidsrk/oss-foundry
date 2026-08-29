@@ -243,6 +243,30 @@ const REINFORCEMENTS = [
   `There is no way to skip the DCO.`,
 ];
 
+// A document is free to waive one artefact and impose another. The waiver clears the acronym in
+// the first sentence — correctly — so the hold has to come from the second sentence's own
+// vocabulary. When that vocabulary was missing, all three of these reached ALLOW: a maintainer
+// would have received a patch from a repo that demands a signature, with no needs-human park.
+const WAIVES_THEN_REQUIRES = [
+  `We do not require a DCO. Instead, please sign our Contributor Agreement at cla.example.com before your first PR.`,
+  `No DCO is required. However, every commit must carry a Signed-off-by trailer.`,
+  `A DCO is not required.\nAll commits must be signed off by their author.`,
+];
+
+// The same signature vocabulary standing on its own, with no waiver anywhere in the document.
+const SIGNATURE_REQUIREMENTS = [
+  `All contributors must sign our Contributor Agreement.`,
+  `Commits require a Signed-off-by trailer.`,
+  `Every commit must carry a DCO sign-off.`,
+];
+
+// The sign-off matcher is word-anchored at the front so it cannot fire inside de/sign or re/sign,
+// and "agreement" must not be read out of ordinary prose.
+const SIGNOFF_LOOKALIKES = [
+  `We design offline-first tools; please sign up for the newsletter.`,
+  `Redesign proposals are welcome. Resign yourself to a slow review.`,
+];
+
 // The waiver must not reach across a clause that is still asserting the requirement.
 const REQUIRES_CLA_MIXED_CLAUSE = `The CLA is required, though a separate review sign-off is not required.`;
 
@@ -322,9 +346,9 @@ test("negation handling does not weaken a real CLA/DCO requirement", () => {
     });
     assert.equal(v.code, "HOLD_CLA", `expected HOLD_CLA for: ${contributing}`);
   }
-  // A negation word inside a sentence that still asserts the requirement is not a waiver.
-  // (This phrasing parks as HOLD_HUMAN rather than HOLD_CLA today — a separate classification
-  // gap tracked in issue #50; what matters here is that the hold survives.)
+  // A negation word inside a sentence that still asserts the requirement is not a waiver. The
+  // spelled-out phrase contains none of `cla`, `dco` or `certificate`, so it reaches HOLD_CLA
+  // only because the family is read off `agreement` as well.
   const refusal = evaluatePolicy({
     repoId: "ColeMurray/background-agents",
     agentsMd: "Agent PRs are welcome with tests and a disclosure.",
@@ -332,7 +356,45 @@ test("negation handling does not weaken a real CLA/DCO requirement", () => {
     issueTitle: "icon tweak",
   });
   assert.equal(refusal.allow, false);
-  assert.match(refusal.code, /^HOLD_/);
+  assert.equal(refusal.code, "HOLD_CLA");
+});
+
+test("waiving one artefact does not waive a different signature requirement", () => {
+  for (const contributing of WAIVES_THEN_REQUIRES) {
+    const v = evaluatePolicy({
+      repoId: "ColeMurray/background-agents",
+      agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+      contributing,
+      issueTitle: "icon tweak",
+    });
+    assert.equal(v.allow, false, `a waived DCO must not waive the document: ${contributing}`);
+    // HOLD_CLA, not HOLD_HUMAN: the operator must be told never to forge the signature.
+    assert.equal(v.code, "HOLD_CLA", `expected HOLD_CLA for: ${contributing}`);
+  }
+});
+
+test("a signature requirement holds on its own vocabulary, with no acronym present", () => {
+  for (const contributing of SIGNATURE_REQUIREMENTS) {
+    const v = evaluatePolicy({
+      repoId: "ColeMurray/background-agents",
+      agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+      contributing,
+      issueTitle: "icon tweak",
+    });
+    assert.equal(v.code, "HOLD_CLA", `expected HOLD_CLA for: ${contributing}`);
+  }
+});
+
+test("the sign-off vocabulary does not fire inside ordinary words", () => {
+  for (const contributing of SIGNOFF_LOOKALIKES) {
+    const v = evaluatePolicy({
+      repoId: "ColeMurray/background-agents",
+      agentsMd: "Agent PRs are welcome with tests and a disclosure.",
+      contributing,
+      issueTitle: "icon tweak",
+    });
+    assert.equal(v.code, "ALLOW", `expected ALLOW for: ${contributing}`);
+  }
 });
 
 test("the seeded Wave-1 packet is buildable, not parked needs-human", () => {

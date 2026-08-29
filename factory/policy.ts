@@ -27,6 +27,17 @@ const FORBIDDEN_STATEMENTS: RegExp[] = [
   /autonomous\s+agents?\s+(?:are\s+)?not\s+(?:allowed|welcome|permitted)/i,
 ];
 
+/**
+ * Every phrasing that parks a packet for a human.
+ *
+ * The CLA/DCO half must name the *artefact* a human signs, not only the acronyms. A document is
+ * free to waive one artefact and impose another — "We do not require a DCO. Instead, please sign
+ * our Contributor Agreement." — and the waiver below correctly clears the `\bdco\b` hit in the
+ * first sentence. If nothing in this list then matches the second, the document ships as ALLOW.
+ * So `signed-off-by`, `sign-off` and `contributor agreement` are load-bearing, not spelling
+ * variants: they are the fallback vocabulary that keeps a waived acronym from waiving the
+ * document. (Before they were here, all three of those documents reached ALLOW.)
+ */
 const HUMAN_STATEMENTS: RegExp[] = [
   /human:/i,
   /\bhuman\s+(?:review\s+)?required\b/i,
@@ -36,7 +47,11 @@ const HUMAN_STATEMENTS: RegExp[] = [
   /developer\s+certificate\s+of\s+origin/i,
   /sign(?:ing)?\s+the\s+cla/i,
   /\bcla\s+(?:is\s+)?required\b/i,
-  /contributor\s+license\s+agreement/i,
+  // "Contributor License Agreement" and the bare "Contributor Agreement" are the same artefact.
+  /contributor\s+(?:license\s+)?agreement/i,
+  // "Signed-off-by", "signed off by", "sign-off", "signoff" — the DCO trailer under any spelling.
+  // Word-anchored at the front so it cannot fire inside de/sign, as/sign, re/sign.
+  /\bsign(?:ed)?[- ]?off(?:[- ]by)?\b/i,
 ];
 
 /**
@@ -50,10 +65,25 @@ const HUMAN_STATEMENTS: RegExp[] = [
  * bypass") all keep the hold: the gate cannot evaluate a scope, and reading any of them as a
  * waiver is fail-open on a hard constraint.
  */
-const NEG_DETERMINER =
-  /\b(?:no|without)\s+(?:(?:a|an|any|the|signed|separate|explicit|formal)\s+)*$/i;
-const NEG_VERB =
-  /\b(?:don['’]t|do(?:es)?\s+not|never)\s+(?:require|need|ask\s+for)\w*\s+(?:(?:a|an|any|the|signed|separate|explicit|formal)\s+)*$/i;
+
+/**
+ * Filler the negation may cross on its way to the artefact it waives.
+ *
+ * Determiners and adjectives are the obvious ones. `cla`/`dco` are here because the acronym is
+ * routinely a *modifier* of the artefact — "no DCO sign-off", "we don't require a DCO sign-off" —
+ * and the negation governs the whole noun phrase, not only its first word. Without them the
+ * acronym waives but the sign-off it modifies does not, and one sentence both allows and holds.
+ *
+ * Deliberately a short closed list: a general "a few words" filler would let a waiver reach into
+ * the next clause, which is the fail-open direction. A comma stops it too — each item must be
+ * followed by whitespace — so "No DCO, contributor agreement required." keeps its hold.
+ */
+const NEG_FILLER = String.raw`(?:(?:a|an|any|the|signed|separate|explicit|formal|cla|dco)\s+)*`;
+const NEG_DETERMINER = new RegExp(String.raw`\b(?:no|without)\s+${NEG_FILLER}$`, "i");
+const NEG_VERB = new RegExp(
+  String.raw`\b(?:don['’]t|do(?:es)?\s+not|never)\s+(?:require|need|ask\s+for)\w*\s+${NEG_FILLER}$`,
+  "i",
+);
 // One filler word only ("DCO sign-off is not required"), so the waiver cannot jump into the next
 // clause of a sentence that is still asserting the requirement.
 const NOT_REQUIRED_AFTER =
@@ -137,6 +167,25 @@ function isWaived(text: string, index: number, length: number): boolean {
 
 function quoteOf(match: RegExpExecArray): string {
   return match[0].replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+/**
+ * Which hold a matched human statement earns.
+ *
+ * HOLD_CLA and HOLD_HUMAN are not interchangeable: HOLD_CLA carries "never forge" — the operator
+ * must not sign anything on the project's behalf — while HOLD_HUMAN only asks for a review. So the
+ * signature artefacts belong in this family however they are spelled: a Contributor Agreement and
+ * a `Signed-off-by` trailer are exactly the things a human must sign in person.
+ *
+ * `agreement` (not `cla`) is the token that catches the spelled-out phrase: "contributor license
+ * agreement" contains no `cla`, `dco` or `certificate` substring at all. A bare `agreement` is
+ * safe here because the input is never free text — only quotes that HUMAN_STATEMENTS already
+ * matched, and the sole pattern that can produce that word is the contributor-agreement one.
+ */
+const CLA_FAMILY_PHRASE = /\bcla\b|\bdco\b|certificate|agreement|\bsign(?:ed)?[- ]?off/i;
+
+function needsSignature(phrases: string[]): boolean {
+  return phrases.some((p) => CLA_FAMILY_PHRASE.test(p));
 }
 
 /** First hit of `re` in `text` that the surrounding sentence does not waive. */
@@ -249,11 +298,7 @@ export function evaluatePolicy(
   }
 
   if (record?.stance === "conditional") {
-    const scannedCla = scanned.human.some((p) => {
-      const lower = p.toLowerCase();
-      return lower.includes("cla") || lower.includes("dco") || lower.includes("certificate");
-    });
-    if (scannedCla) {
+    if (needsSignature(scanned.human)) {
       return {
         allow: false,
         code: "HOLD_CLA",
@@ -288,10 +333,7 @@ export function evaluatePolicy(
   const matched = [...scanned.human];
 
   if (repo.aiPolicy === "human-required" || scanned.human.length > 0) {
-    const cla = scanned.human.some((p) => {
-      const lower = p.toLowerCase();
-      return lower.includes("cla") || lower.includes("dco") || lower.includes("certificate");
-    });
+    const cla = needsSignature(scanned.human);
     return {
       allow: false,
       code: cla ? "HOLD_CLA" : "HOLD_HUMAN",

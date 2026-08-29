@@ -227,3 +227,63 @@ test("clear-halt lifts the durable halt so the factory can run again", () => {
   assert.equal(again.code, 1);
   assert.match(again.out, /not halted/);
 });
+
+test("clear-halt attributes the lift to FOUNDRY_OPERATOR when --by is omitted", () => {
+  // The ledger event names the human who lifted the halt, so the environment fallback is an
+  // attribution guarantee, not a convenience: without it the record reads "operator" and the
+  // audit loses the name. Same fallback `approve` advertises in --help.
+  const path = writeState(
+    applySecondaryLimitHalt(seedState(), {
+      repoId: DRAFT_READY_REPO,
+      at: "2026-08-29T09:00:00.000Z",
+    }),
+  );
+  const cleared = runCli(["clear-halt", "--note", "window elapsed", "--state", path], tmpdir(), {
+    env: { FOUNDRY_OPERATOR: "ravidsrk" },
+  });
+  assert.equal(cleared.code, 0, cleared.out);
+  assert.match(cleared.out, /cleared by ravidsrk/);
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(
+    onDisk.events.some((e) => /cleared by ravidsrk/.test(e.message)),
+    true,
+    'the ledger records the environment-supplied identity, not the literal "operator"',
+  );
+});
+
+test("`clear-halt` does not undo `halt`, and --help says so", () => {
+  // The two sit next to each other in --help and read as a pair. They are not one: `halt` writes
+  // a per-repo scorecard ban a maintainer asked for, `clear-halt` deletes the factory-wide
+  // rate-limit halt, and neither touches the other's record. An operator who infers otherwise
+  // resumes work on a repo whose maintainer said stop.
+  const path = writeState(seedState());
+  const banned = runCli(
+    ["halt", DRAFT_READY_REPO, "--reason", "maintainer asked the factory to stop", "--state", path],
+    tmpdir(),
+  );
+  assert.equal(banned.code, 0, banned.out);
+  const tone = (s: FactoryState) => s.scorecard.find((r) => r.repoId === DRAFT_READY_REPO)?.maintainerTone;
+  const read = () => JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(tone(read()), "banned");
+
+  writeFileSync(
+    path,
+    JSON.stringify(
+      applySecondaryLimitHalt(read(), { repoId: DRAFT_READY_REPO, at: "2026-08-29T09:00:00.000Z" }),
+      null,
+      2,
+    ),
+  );
+  const cleared = runCli(["clear-halt", "--by", "ravidsrk", "--note", "window elapsed", "--state", path], tmpdir());
+  assert.equal(cleared.code, 0, cleared.out);
+
+  const onDisk = read();
+  assert.equal(onDisk.halt, undefined, "clear-halt lifts the factory halt");
+  assert.equal(tone(onDisk), "banned", "clear-halt must NOT lift the per-repo ban `halt` wrote");
+
+  // The help block is where an operator meets both commands first, so the disambiguation lives
+  // there and not only in CONTEXT.md's definitions (docs/adr/0004-naming.md).
+  const help = runCli(["--help"], tmpdir());
+  assert.match(help.stdout, /halt <repoId>[^\n]*NOT cleared by clear-halt/);
+  assert.match(help.stdout, /clear-halt[^\n]*not the halt above/);
+});
