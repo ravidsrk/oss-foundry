@@ -403,13 +403,13 @@ test("deny-by-default covers the no-evidence case, not the missed-ban case", () 
  * which is what happened to the previous attempt.
  *
  * Two more holes the same measurement found, neither in the issue: "All commits must carry a
- * Signed-off-by line." reached ALLOW matching NOTHING, and the short form `contributor agreement`
- * was unmatched, so "No DCO, contributor agreement required." also held only by the accident.
+ * Signed-off-by line." reached ALLOW matching NOTHING, and the short `contributor agreement` was
+ * unmatched, so "No DCO, contributor agreement required." also held only by the accident.
  *
- * CORPUS PROVENANCE — the part #37's park note says to settle before touching a regex. No row below
- * is derived from a constant in `policy.ts`. They come from the documents quoted in #52 and #50,
- * ordinary CONTRIBUTING.md phrasing, and paraphrase into shapes the implementation does not name. A
- * corpus drawn from the code under test only measures that the code does what it does.
+ * CORPUS PROVENANCE — what #37's park note says to settle before touching a regex. No row below is
+ * derived from a constant in `policy.ts`; they come from the documents quoted in #52 and #50,
+ * ordinary CONTRIBUTING.md phrasing, and paraphrase. A corpus drawn from the code under test only
+ * measures that the code does what it does.
  */
 type Polarity = "required" | "waived" | "silent";
 
@@ -425,11 +425,8 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No DCO, contributor agreement required.", want: "required", why: "#52: the comma case a code comment claimed and no test asserted" },
   { doc: "No CLA, DCO sign-off required.", want: "required", why: "the same shape with the families swapped" },
   { doc: "CLA required, DCO not required.", want: "required", why: "requirement first, waiver second" },
-  // TWO TOKENS OF ONE FAMILY, waiver first. This is the row that pins the comma in `clausesOf`:
-  // without the split the whole sentence is one clause, the first CLA match is the one inside
-  // "No CLA", its waiver fires, and the requirement later in the sentence is never evaluated —
-  // a fail-open. Every other corpus row survives losing the comma, because the waiver patterns are
-  // token-anchored; this one does not.
+  // Two tokens of one family, waiver first: without the comma split the first CLA match is inside
+  // "No CLA", its waiver fires, and the later requirement is never evaluated — a fail-open.
   { doc: "No CLA, a contributor license agreement is required.", want: "required", why: "same family twice, waiver first — pins the comma split" },
 
   // --- Blanket waivers. These must NOT hold: over-blocking parks a legitimate packet. ---
@@ -458,24 +455,21 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // --- Scoped waivers: it is required somewhere, so it holds. ---
   { doc: "A CLA is not required except for new dependencies.", want: "required", why: "#50 comment: scoped waiver" },
   { doc: "No DCO is needed unless you are adding a new module.", want: "required", why: "unless-scoped" },
-  // The limiter across a clause boundary. The first draft of `signaturePolarity` read the limiter
-  // from the CLAUSE, so a comma before "except" hid it and a scoped requirement came out a blanket
-  // waiver — this issue's own fail-open class, reproduced inside its fix and caught before shipping.
+  // Limiter across a clause boundary: reading it from the CLAUSE let a comma before "except" hide
+  // it, turning a scoped requirement into a blanket waiver.
   { doc: "A CLA is not required, except for new dependencies.", want: "required", why: "limiter behind a comma" },
   { doc: "No DCO is needed, unless you are adding a new module.", want: "required", why: "limiter behind a comma" },
   { doc: "No CLA is required, other than for vendored code.", want: "required", why: "limiter behind a comma" },
   { doc: "A CLA is not required; except for new dependencies.", want: "required", why: "limiter behind a semicolon" },
   { doc: "Except for new dependencies, a CLA is not required.", want: "required", why: "leading limiter, waiver is the main clause" },
-  // ...and the limiter must NOT reach a waiver it has nothing to do with. Reading it from the whole
-  // sentence over-blocked these, which parks a packet whose policy waives the CLA in as many words
-  // — raised as P1 by review, the mirror image of the fail-open two rows up. A limiter past a
-  // coordinating conjunction belongs to a different statement.
+  // ...and it must NOT reach a waiver it has nothing to do with. Reading it from the whole sentence
+  // over-blocked these (P1 from review) — a limiter past a conjunction is a different statement.
   { doc: "No CLA is required, and all patches are welcome except spam.", want: "waived", why: "the 'except' is about spam" },
   { doc: "No DCO is needed, and we review everything except vendored trees.", want: "waived", why: "the 'except' is about review scope" },
   { doc: "No CLA. Reviews are quick, except during release weeks.", want: "waived", why: "limiter in a later sentence about something else" },
 
-  // ANAPHORA. A P1 from review: the requirement's subject is elided, so it lands in a clause with no
-  // instrument token and the per-clause pass skipped it, recording only the waiver.
+  // Anaphora (P1 from review): the requirement's subject is elided, so it lands in a token-less
+  // clause the per-clause pass skipped, recording only the waiver.
   { doc: "A CLA is not required for documentation, but is required for code contributions.", want: "required", why: "elided subject after 'but'" },
   { doc: "No DCO is needed for docs, but is required for code.", want: "required", why: "same shape, DCO family" },
   { doc: "A CLA is not required, however it is mandatory for vendored trees.", want: "required", why: "'it is mandatory' after 'however'" },
@@ -495,9 +489,8 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "We cannot merge your work until the CLA is signed.", want: "required", why: "cannot-merge framing" },
   { doc: "Your PR will not be reviewed without a DCO sign-off.", want: "required", why: "'without' is a requirement context, never a waiver" },
 
-  // PLURALS. A P1 fail-open in the first version of this change, found in review: `\bcla\b` does
-  // not match `CLAs`, so the first row below waived the DCO, saw nothing about the CLA, and reached
-  // ALLOW. The second and third matched NOTHING AT ALL. Same defect as the issue, new spelling.
+  // Plurals (P1 from review): `\bcla\b` misses `CLAs`, so row 1 waived the DCO and saw nothing
+  // about the CLA; rows 2-3 matched NOTHING AT ALL. This issue's defect in a new spelling.
   { doc: "No DCO. CLAs are mandatory.", want: "required", why: "plural acronym after a waived sibling" },
   { doc: "CLAs are required for all contributors.", want: "required", why: "plural acronym, was silent" },
   { doc: "We require DCOs on every commit.", want: "required", why: "plural DCO, was silent" },
@@ -507,15 +500,12 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // because the optional s still needs a word boundary after it.
   { doc: "Add a class for the parser and document the class hierarchy.", want: "silent", why: "'class' is not a plural CLA" },
 
-  // MIXED POLARITY IN ONE CLAUSE. A second P1 from review: polarity was decided once per clause from
-  // the FIRST match, so a waiver joined to a same-family requirement by "and" — not a delimiter, and
-  // it should not have to be — hid the requirement and reached ALLOW. A waiver now governs only the
-  // occurrence it names; any surviving mention is ungoverned and reads as required.
+  // Mixed polarity in one clause (P1 from review): polarity was decided once per clause from the
+  // FIRST match, so a waiver joined by "and" to a same-family requirement hid it and reached ALLOW.
   { doc: "No CLA is required for documentation and a CLA is required for code contributions.", want: "required", why: "same family, both polarities, joined by 'and'" },
   { doc: "No DCO is needed for docs and a DCO is needed for code.", want: "required", why: "same shape, DCO family" },
   { doc: "No CLA is required, and a CLA is required for vendored code.", want: "required", why: "comma and 'and' together" },
-  // ...and the governance rule must not turn one instrument named twice into a requirement:
-  // "a DCO sign-off" is a single thing and both words are DCO-family tokens.
+  // ...and one instrument named twice ("a DCO sign-off") must not read as a requirement.
   { doc: "No CLA and no DCO.", want: "waived", why: "two instruments, both waived, joined by 'and'" },
 
   // --- No signature instrument at all. These must be SILENT: matching them is the over-block. ---
@@ -561,10 +551,9 @@ test("the signature corpus cannot be quietly emptied or made one-sided", () => {
 });
 
 /**
- * The verdict CODE, not just the polarity. #52's acceptance is that these hold as `HOLD_CLA`, and
- * the code used to be re-derived by substring-testing the matched phrase for "cla", "dco" or
- * "certificate" — which is why "Contributor License Agreement" landed in `HOLD_HUMAN`: those three
- * letters never appear consecutively in it (issue #50's root cause, reached from here).
+ * The verdict CODE, not just the polarity. The code used to be re-derived by substring-testing the
+ * matched phrase for "cla"/"dco"/"certificate", which is why "Contributor License Agreement" landed
+ * in `HOLD_HUMAN`: those letters never appear consecutively in it (#50's root cause, from here).
  */
 test("an asserted signature holds as HOLD_CLA, and a human-review gate stays HOLD_HUMAN", () => {
   for (const doc of SIGNATURE_CORPUS.filter((r) => r.want === "required").map((r) => r.doc)) {
