@@ -118,19 +118,13 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
     const hit = new RegExp(w, "i").exec(clause);
     if (!hit) continue;
     /**
-     * A scoped waiver is a requirement in a waiver's clothes: "not required EXCEPT for new
-     * dependencies" means a packet touching one needs it. But the limiter has to belong to THIS
-     * waiver, and both ways of getting that wrong are fail-modes this branch actually shipped:
-     *
-     * - Reading it from the CLAUSE missed "A CLA is not required, except for new dependencies.",
-     *   because the limiter sits in the next clause. Fail-open.
-     * - Reading it from the whole SENTENCE over-blocked "No CLA is required, and all patches are
-     *   welcome except spam", where the "except" is about spam. Fail-closed, and it parks a packet
-     *   whose policy waives the CLA in as many words. Raised as P1 by review.
-     *
-     * So the span is the waiver's own statement: its clause, plus what follows the waiver up to the
-     * first coordinating conjunction — a limiter past an "and" belongs to a different statement —
-     * plus a leading "Except for X, ..." that the waiver is the main clause of.
+     * A scoped waiver is a requirement in a waiver's clothes. The limiter must belong to THIS
+     * waiver, and both wrong spans shipped here: the CLAUSE missed "A CLA is not required, except
+     * for new dependencies." (fail-open), the whole SENTENCE reclassified "No CLA is required, and
+     * all patches are welcome except spam", where the except is about spam (fail-closed, parking a
+     * packet that waives the CLA outright — P1 from review). So the span is the waiver's own
+     * statement: its clause, what follows up to the first coordinating conjunction, and a leading
+     * "Except for X, ..." it is the main clause of.
      */
     const at = sentence.toLowerCase().indexOf(hit[0].toLowerCase());
     const after = at === -1 ? "" : sentence.slice(at + hit[0].length);
