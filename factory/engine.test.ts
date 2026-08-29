@@ -967,6 +967,61 @@ test("halt typed in GitHub's casing halts the roster's repo, not a repo that doe
   assert.equal(applyHalt(halted.state, "COLEMURRAY/BACKGROUND-AGENTS", "again").state.bans, 1);
 });
 
+/**
+ * The same halt against a ledger whose stored ids are OFF-canonical — which is what every ledger
+ * written before #44 looks like, and `loadFactoryState` accepts them. `.foundry-state.json` is the
+ * operator's live gitignored file, so this is the ordinary upgrade path rather than a contrived
+ * state.
+ *
+ * The test above cannot see these two lines, because the seed it uses is already canonical and plain
+ * `===` satisfies it. Reverting either `sameRepoId` in `applyHalt` to `===` left the suite at
+ * 327/327 (issue #57), and each revert reproduces verbatim the failure the function's own docblock
+ * says it prevents: report success, bump `bans`, and leave the work running.
+ */
+test("halt moves an off-canonical row and packet — the shape a pre-#44 ledger has", () => {
+  const canonical = "ColeMurray/background-agents";
+  const OFF = "COLEMURRAY/BACKGROUND-AGENTS";
+  const seed = seedState();
+  const inflightBefore = seed.packets.filter(
+    (p) => p.repoId === canonical && INFLIGHT_STATUSES.includes(p.status),
+  );
+  assert.ok(inflightBefore.length > 0, "the seed must hold an in-flight packet or this binds nothing");
+  assert.ok(
+    seed.scorecard.some((r) => r.repoId === canonical),
+    "the seed must hold the row this rewrites, or the fixture proves nothing",
+  );
+
+  const state: FactoryState = {
+    ...seed,
+    packets: seed.packets.map((p) => (p.repoId === canonical ? { ...p, repoId: OFF } : p)),
+    scorecard: seed.scorecard.map((r) => (r.repoId === canonical ? { ...r, repoId: OFF } : r)),
+  };
+
+  const halted = applyHalt(state, "colemurray/background-agents", "maintainer asked us to stop");
+  assert.equal(halted.error, undefined);
+  assert.equal(halted.repoId, canonical);
+
+  // The scorecard half. Under a raw `===` the row keeps tone=neutral/health=good while `bans`
+  // still counts the halt, so `status` reads as halted and `maySelectRepo` waves the repo through.
+  const row = halted.state.scorecard.find((r) => r.repoId === OFF)!;
+  assert.ok(row, "the off-canonical row disappeared instead of being updated");
+  assert.equal(row.maintainerTone, "banned", "the off-canonical row was not banned");
+  assert.equal(health(row), "stop");
+  assert.equal(halted.state.bans, 1);
+  const gate = maySelectRepo(halted.state, canonical);
+  assert.equal(gate.ok, false, "a halted repo whose row is stored off-canonical is still selectable");
+
+  // The packet half. Under a raw `===` the halt returns no error, bans the repo, and leaves the
+  // packet in flight — the exact "halted nothing" the sibling test's docblock names.
+  for (const before of inflightBefore) {
+    assert.equal(
+      halted.state.packets.find((p) => p.id === before.id)!.status,
+      "parked",
+      `${before.id} stayed in flight through a halt because its stored repoId is off-canonical`,
+    );
+  }
+});
+
 test("halt still refuses a repo the roster does not know, loudly", () => {
   // The fail-CLOSED half. Case-insensitivity must widen matching, not admit strangers.
   for (const id of ["attacker/not-a-repo", "attacker/background-agents", "background-agents"]) {
@@ -5057,4 +5112,58 @@ test("applyRevert writes the note and the counter together", () => {
   assert.ok(refused.error);
   assert.equal(refused.state.scorecard.reduce((a, r) => a + r.reverts, 0), 0);
   assert.equal(refused.state.packets.filter((p) => revertNote(p)).length, 0);
+});
+
+/**
+ * The other two canonicalisation sites the #57 audit found unpinned.
+ *
+ * That issue said seven of the nine were pinned and asked for a sweep to confirm none was pinned
+ * only incidentally by a canonical fixture. The sweep disproved its own premise: reverting
+ * `engine.ts:183` or `scorecard.ts:114` to a raw `===` also left the suite green. Both are the same
+ * pre-#44 upgrade path as the halt above — a ledger whose stored ids are off-canonical, which
+ * `loadFactoryState` accepts.
+ */
+test("an off-canonical stored packet is still found, so the tick cannot build a second one", () => {
+  const first = applyQueueLive(blank(), live("ravidsrk/orca-fleet", 71));
+  assert.ok(first.packet, `the fixture must queue a packet or this binds nothing: ${first.reason}`);
+
+  // The same ledger, with the packet stored the way a pre-canonicalisation state file holds it —
+  // and TERMINAL, because `applyQueueLive` returns "in-flight" before it ever reaches the duplicate
+  // guard. A merged packet is the case that matters anyway: the guard exists so the factory does not
+  // work an issue it has already finished.
+  const off: FactoryState = {
+    ...first.state,
+    packets: first.state.packets.map((p) => ({ ...p, repoId: p.repoId.toUpperCase(), status: "merged" as const })),
+  };
+  const again = applyQueueLive(off, live("ravidsrk/orca-fleet", 71));
+  assert.equal(
+    again.reason,
+    "duplicate",
+    "the duplicate guard missed an off-canonical packet, so the tick queued a second packet for one issue",
+  );
+  assert.equal(
+    again.state.packets.length,
+    off.packets.length,
+    "the ledger grew a second packet for an issue that already had one",
+  );
+});
+
+test("applyReviewToScorecard finds an off-canonical row, and only that row", () => {
+  const rows = emptyScorecard().map((r) =>
+    r.repoId === "ravidsrk/orca-fleet" ? { ...r, repoId: "RAVIDSRK/ORCA-FLEET" } : r,
+  );
+  assert.ok(rows.length > 1, "more than one row, or 'only that row' is not a claim");
+
+  const after = applyReviewToScorecard(rows, "ravidsrk/orca-fleet", { reviews: 0, comments: 0 });
+  const row = after.find((r) => r.repoId === "RAVIDSRK/ORCA-FLEET")!;
+  // Under a raw `===` the observation is written to NO row: the KPI is silently dropped, which is
+  // worse than a failed read because nothing reports it.
+  assert.equal(row.noReview, 1, "the review observation was written to no row at all");
+  // ...and the guard must still be a guard: #39's review found that removing it wrote the split into
+  // every allowlist row, inflating the factory-wide sum 8x.
+  assert.equal(
+    after.filter((r) => r.noReview > 0).length,
+    1,
+    "the observation landed on more than the row it was for",
+  );
 });
