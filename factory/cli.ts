@@ -564,10 +564,6 @@ async function main() {
         process.exit(1);
       }
       refuseIfCapped([pulls, crossRefs], packetForFreeze.repoId);
-      if (!crossRefs.ok) {
-        console.error(crossRefs.error);
-        process.exit(1);
-      }
       const verdict = classifyCompetition(
         { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
         packetForFreeze.issueNumber,
