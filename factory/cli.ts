@@ -33,7 +33,6 @@ import {
   syncGithubPr,
 } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
-import { execFile } from "node:child_process";
 import {
   applySecondaryLimitHalt,
   clearFactoryHalt,
@@ -49,26 +48,14 @@ import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
 import {
+  hostRunner,
   parseWitnessManifest,
+  resolveToolchain,
+  toolchainLabel,
   verifyWitnessLogs,
   witnessEvidence,
   type WitnessLogs,
-  type WitnessRunner,
 } from "./witness.ts";
-
-const hostRunner: WitnessRunner = (step, args, opts) =>
-  new Promise((resolveRun) => {
-    const [cmd, cmdArgs] =
-      step === "git"
-        ? ["git", args]
-        : step === "cleanup"
-          ? ["rm", ["-rf", ...args]]
-          : ["bash", ["-lc", args[0] ?? "false"]]; // run-setup and both run-tests phases execute the repo's own commands
-    execFile(cmd, cmdArgs, { cwd: opts?.cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      const exit = err && typeof (err as { code?: unknown }).code === "number" ? ((err as { code: number }).code) : err ? 1 : 0;
-      resolveRun({ exit, output: `${stdout}${stderr}` });
-    });
-  });
 
 /**
  * The sha256 on the evidence page is only proof if the maintainer can recompute it. Write the two
@@ -275,6 +262,7 @@ function usage(): void {
   halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
   advance <packetId>
   evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
+  witness-check [repoId]   (pre-flight: resolve the interpreter each allowlisted testCommand would really use here, before a packet is in flight)
   attach-witness <packetId> --manifest <path>   (ingest a witness produced on the worker host; provenance and log hashes re-checked here)
   body <packetId>
   attach-draft <packetId> <prUrl>
@@ -528,6 +516,53 @@ async function main() {
     persistWitnessLogs(outcome.witness, outcome.logs);
     persist(result.state);
     console.log(`evidence attached ${id}`);
+    return;
+  }
+
+  if (cmd === "witness-check") {
+    // The pre-flight issue #41 asked for. Its whole value is being runnable with nothing in
+    // flight: the alternative is learning at evidence time that this machine's `python3` is 3.9.6,
+    // from a refusal that reads exactly like a broken patch.
+    const repoArg = rest[0] && !rest[0].startsWith("--") ? rest[0] : undefined;
+    const named = repoArg ? repoById(repoArg) : undefined;
+    if (repoArg && !named) {
+      console.error(
+        `${repoArg} is not on the allowlist — witness-check resolves only repos the factory may see (allowlist.yaml)`,
+      );
+      process.exit(1);
+    }
+    const repos = named ? [named] : ALLOWLIST;
+    console.log("witness pre-flight — what the `evidence` verb would run on THIS machine");
+    console.log("shell: bash -c (non-login, non-interactive; inherits this process's environment)");
+    // Said out loud because it is the one way this report can be wrong: the witness resolves
+    // inside the clone, where a repo that pins its interpreter selects its own.
+    console.log(
+      "resolved in this working directory; a repo that pins its interpreter (.python-version, .tool-versions, .nvmrc) may select a different one inside the clone — the witness records what it actually used",
+    );
+    for (const repo of repos) {
+      console.log("");
+      console.log(`${repo.id}  wave ${repo.wave}  sandbox ${repo.sandbox}`);
+      if (repo.setupCommand) console.log(`  setupCommand: ${repo.setupCommand}`);
+      console.log(`  testCommand: ${repo.testCommand}`);
+      if (repo.sandbox !== "host") {
+        // Resolving OUR python3 for a Wave-1 e2b repo would be a confident report about a machine
+        // this process has never seen. ADR 0003 keeps those runs off the host; so does this.
+        console.log(
+          `  not resolved here: ${repo.sandbox === "e2b" ? "an" : "a"} ${repo.sandbox} repo's suite runs on the worker host, not this machine (ADR 0003) — witness there and ingest with \`attach-witness\``,
+        );
+        continue;
+      }
+      const resolved = await resolveToolchain(repo.testCommand, hostRunner);
+      for (const tool of resolved) {
+        console.log(
+          tool.path
+            ? `  ${tool.tool}  ${tool.path}  ${tool.version ?? "no version reported"}`
+            : `  ${tool.tool}  NOT FOUND on this machine's PATH  —  the witness would die at head with no output`,
+        );
+      }
+      const label = toolchainLabel(resolved);
+      console.log(`  toolchain a witness from here would record: ${label || "(none resolved)"}`);
+    }
     return;
   }
 

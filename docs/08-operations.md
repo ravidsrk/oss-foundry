@@ -4,6 +4,7 @@
 
 - `node --experimental-strip-types factory/cli.ts status`
 - `node --experimental-strip-types factory/cli.ts reconcile` — absorb merges/closes; read any `DIVERGENCE` lines (doctrine events, resolved by hand, never auto-rewritten)
+- `node --experimental-strip-types factory/cli.ts witness-check` — on a new machine, or after a toolchain change, before anything is in flight ([Witnessing on the host](#witnessing-on-the-host-wave-0))
 - Answer any review thread before running another tick.
 - Approvals record who attested: `approve <id> --note … --by <name>` (or set `FOUNDRY_OPERATOR`).
 - If a maintainer replies “please stop,” remove the repo the same hour.
@@ -28,6 +29,45 @@ The guarantee is therefore: *what this repository publishes about its PRs is tru
 
 `reconcile` is the other half: it absorbs live GitHub into local state and prints `DIVERGENCE …`
 for anything a human must resolve. Neither command rewrites doctrine on its own.
+
+## Witnessing on the host (Wave 0)
+
+`evidence` clones the repo and runs its `testCommand` twice. Two things about *how* it runs it are
+load-bearing enough that an operator should not have to read `factory/witness.ts` to learn them.
+
+**The shell is `bash -c` — non-login, non-interactive, inheriting the environment the CLI was
+started with.** Not the operator's `$SHELL`, and deliberately not a login shell:
+
+- A login shell (`bash -lc`) sources `/etc/profile`, and on macOS that runs `path_helper`, which
+  rebuilds `PATH` from `/etc/paths` with `/usr/bin` ahead of everything the operator installed —
+  even against an explicit `PATH=…` on the invocation. The witness then ran `/usr/bin/python3`
+  (3.9.6) while the operator's own shell had 3.14.x, `ravidsrk/orca-fleet`'s suite died on
+  3.10-only syntax at head, and the refusal was indistinguishable from a bad patch (issue #41).
+- `$SHELL -c` is not a contract: zsh, fish and nushell differ on `-c`, and their rc files are the
+  operator's to change. `bash -c` is the same shell on every machine the factory runs on.
+
+So: whatever `python3` your terminal resolves is what the witness resolves. A repo that needs more
+than that declares it as `setupCommand` in `allowlist.yaml`, where it is visible, rather than
+relying on a profile nobody reads.
+
+**Pre-flight before a packet is in flight.**
+
+```
+node --experimental-strip-types factory/cli.ts witness-check [repoId]
+```
+
+It resolves each allowlisted repo's `testCommand` through that same shell and prints the tool, the
+absolute path it selects and its version — so an interpreter mismatch is a line of output rather
+than an evidence-time refusal. It resolves in the current working directory, and says so: a repo
+that pins its own interpreter (`.python-version`, `.tool-versions`, `.nvmrc`) may select a
+different one inside the clone, which is why the witness records what it *actually* used
+(`witness.toolchain`, docs/10-schemas.md). Sandboxed repos are named but not resolved — their
+suites run on the worker host, not here (ADR 0003).
+
+**Both run failures print their run.** A red-at-head refusal and a failed negative control carry
+the resolved command, the toolchain, and the last 40 lines of the run. If a run produced no output
+at all the refusal says that too, and points at `witness-check` — a command that dies before
+printing anything is usually the environment, not the patch.
 
 ## Stopping the factory
 

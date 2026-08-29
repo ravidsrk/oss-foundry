@@ -15,7 +15,7 @@ TypeScript modules for the Foundry control plane. No operator web UI lives in th
 | `scorecard.ts` | Halt rules; engine consults `health()` |
 | `seed.ts` | Ledger seed. Keep in sync with GitHub |
 | `run-tests.ts` | The suite's own oracle — see below. Discovers every `factory/*.test.ts`; nothing to register |
-| `witness.ts` | Executes the evidence protocol; parses and re-checks ingested witnesses |
+| `witness.ts` | Executes the evidence protocol; owns `hostRunner` — the shell Wave 0 tests actually run in ([08-operations](../docs/08-operations.md#witnessing-on-the-host-wave-0)); parses and re-checks ingested witnesses |
 
 ```
 node --experimental-strip-types factory/cli.ts status

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { ALLOWLIST } from "./allowlist.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
 import { seedState } from "./seed.ts";
 import type { FactoryState } from "./types.ts";
@@ -452,6 +453,89 @@ test("`clear-halt` does not undo `halt`, and --help says so", () => {
   const help = runCli(["--help"], tmpdir());
   assert.match(help.stdout, /halt <repoId>[^\n]*NOT cleared by clear-halt/);
   assert.match(help.stdout, /clear-halt[^\n]*not the halt above/);
+});
+
+/** The line that claims a resolved toolchain. Absent under a sandboxed repo is the ADR-0003 rule. */
+const TOOLCHAIN_CLAIM = "toolchain a witness from here would record:";
+
+/**
+ * The pre-flight's report for one repo: its header line down to the blank line before the next.
+ *
+ * Reading the report as one string is what let the sandbox exclusion be pinned in one direction
+ * only. `stdout.slice(indexOf(awesome-copilot))` reaches to the end of the output, and four more
+ * e2b repos follow that one — so `/e2b[\s\S]*?worker host/` was satisfiable from a *different*
+ * repo's block, and nothing at all asserted the ABSENCE of a host answer under a sandboxed repo.
+ * Deleting the `continue;` in cli.ts left the suite green while the report said, of a machine this
+ * process has never seen, "toolchain a witness from here would record: pnpm 11.24.0".
+ */
+function preflightBlock(stdout: string, repoId: string): string {
+  const block = stdout
+    .split("\n\n")
+    .find((b) => b.startsWith(`${repoId}  wave `));
+  assert.ok(block, `${repoId} has no block of its own in the pre-flight:\n${stdout}`);
+  return block!;
+}
+
+test("witness-check reports the toolchain each allowlisted repo's testCommand would really use", () => {
+  // The pre-flight issue #41 asked for. Its whole value is being runnable with nothing in flight:
+  // the alternative is discovering at evidence time that `python3` on this machine is 3.9.6, from
+  // a refusal that looks identical to a bad patch.
+  const path = writeState(seedState());
+  const run = runCli(["witness-check", "--state", path], tmpdir());
+  assert.equal(run.code, 0, run.out);
+
+  for (const repo of ALLOWLIST) {
+    const block = preflightBlock(run.stdout, repo.id);
+    // In the repo's OWN block, as the whole line. `stdout.includes(repo.testCommand)` is satisfied
+    // by any other repo's block, and for the two repos whose testCommand is the string `true` it
+    // is satisfied by the word "true" appearing anywhere in the report at all.
+    assert.ok(
+      block.split("\n").includes(`  testCommand: ${repo.testCommand}`),
+      `${repo.id}'s own block does not print its testCommand:\n${block}`,
+    );
+  }
+
+  // A host repo resolves for real, in its own block: an absolute path and a version, both read off
+  // this machine. Anchored, because an unanchored match is satisfied by a *sandboxed* repo's block
+  // the moment the exclusion below stops holding — the two assertions would then cover for each
+  // other instead of constraining anything.
+  const hostBlock = preflightBlock(run.stdout, "ravidsrk/orca-fleet");
+  assert.match(hostBlock, /\n {2}python3 {2}\/\S*python3 {2}\S*\d+\.\d+/, hostBlock);
+  assert.ok(hostBlock.includes(TOOLCHAIN_CLAIM), `a host repo must be resolved:\n${hostBlock}`);
+
+  // ...and no sandboxed repo is given a host answer. This CLI does not run those (ADR 0003), so
+  // resolving OUR python3 for a Wave-1 e2b repo would be a confident report about another machine.
+  // Every sandboxed repo, both directions: the disclaimer present AND the claim absent. The
+  // disclaimer alone is satisfied by a block that prints the caveat and then contradicts it.
+  for (const repo of ALLOWLIST.filter((r) => r.sandbox !== "host")) {
+    const block = preflightBlock(run.stdout, repo.id);
+    assert.match(block, /not resolved here:[\s\S]*worker host[\s\S]*ADR 0003/i, block);
+    assert.ok(
+      !block.includes(TOOLCHAIN_CLAIM),
+      `${repo.id} runs in ${repo.sandbox}, and this report claims a toolchain for it — that is a ` +
+        `confident statement about a machine this process has never seen (ADR 0003):\n${block}`,
+    );
+    // The per-tool resolution lines the host branch prints, which the claim line summarises. Both
+    // come from the same block of code, so pinning only the summary leaves half of it free.
+    assert.doesNotMatch(block, /\n {2}\S+ {2}\/\S+ {2}/, `${repo.id} was resolved here:\n${block}`);
+    assert.doesNotMatch(block, /NOT FOUND on this machine's PATH/, block);
+  }
+
+  // An operator who has not read the issue meets this verb in `--help` or not at all.
+  const help = runCli(["--help"], tmpdir());
+  assert.match(help.stdout, /witness-check \[repoId\]/, help.stdout);
+});
+
+test("witness-check narrows to one repo and refuses one that is not on the allowlist", () => {
+  const path = writeState(seedState());
+  const one = runCli(["witness-check", "ravidsrk/orca-fleet", "--state", path], tmpdir());
+  assert.equal(one.code, 0, one.out);
+  assert.ok(one.stdout.includes("ravidsrk/orca-fleet"), one.out);
+  assert.ok(!one.stdout.includes("github/awesome-copilot"), one.out);
+
+  const stranger = runCli(["witness-check", "attacker/orca-fleet", "--state", path], tmpdir());
+  assert.equal(stranger.code, 1, stranger.out);
+  assert.match(stranger.out, /not on the allowlist/i);
 });
 
 /**
