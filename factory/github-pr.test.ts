@@ -488,12 +488,8 @@ test("syncGithubPr reads the human review split for a terminal PR, and says noth
   assert.equal(unreadable.ok, true);
   if (unreadable.ok) assert.equal(unreadable.meta.humanReview, undefined);
 
-  /**
-   * A CAPPED review read is not observed either, and for the same reason. Raised by review: the
-   * truncation flag was computed and then dropped here, so ten pages of a busy PR's reviews would
-   * have been recorded and published as a complete count — a wrong KPI, which is worse than a
-   * missing one and is the exact failure issue #39 exists to prevent.
-   */
+  // A CAPPED read is not observed either: the flag was computed and dropped here, so ten pages of a
+  // busy PR's reviews would have been published as a complete count — a wrong KPI, worse than none.
   const capped = await syncGithubPr({ url: "https://github.com/ravidsrk/orca-fleet/pull/70" }, async (url) => {
     const u = String(url);
     if (u.includes("/reviews") || u.includes("/comments")) {
@@ -511,9 +507,7 @@ test("syncGithubPr reads the human review split for a terminal PR, and says noth
       undefined,
       "a capped review read was recorded as a complete count",
     );
-    // ...and it is distinguishable from an endpoint FAILURE, because the operator's next move
-    // differs: a failed endpoint is worth retrying, a capped one will cap again. Round 1 of this fix
-    // made both of them a bare absent field, which is two facts wearing one face.
+    // ...and distinguishable from an endpoint FAILURE: retrying helps one and not the other.
     assert.equal(capped.reviewTruncated, true, "a capped review read is indistinguishable from an outage");
   }
   if (unreadable.ok) {
@@ -882,19 +876,13 @@ test("listCommitsSince refuses a 200 whose body is not a list of commits", async
 });
 
 /**
- * Issue #69: five list reads shared `listCommitsSince`'s pre-#39 shape — `per_page=100`, no `page`,
- * no Link follow, no truncation signal — so a truncated success was byte-identical to a complete one.
- * `:61` was the sharpest: it feeds the competing-work gate, an active repository with more than 100
- * open pull requests is ordinary, and a missed open PR means opening a duplicate against work already
- * in flight — the outcome docs/PRODUCT.md §2 exists to prevent.
- *
- * Each read is driven across a page boundary, because "it paginates" is a claim about the SECOND
- * page and a one-page fixture cannot see it.
+ * Issue #69: five list reads shared `listCommitsSince`'s pre-#39 shape, so a truncated success was
+ * byte-identical to a complete one. Each is driven across a page boundary, because "it paginates" is
+ * a claim about the SECOND page and a one-page fixture cannot see it.
  */
 function paged(pages: unknown[][]): typeof fetch {
-  // Per ENDPOINT, not one shared counter: `fetchHumanReview` reads `/reviews` and `/comments` in
-  // parallel, and a single counter handed each of them one page and then ran off the end — which
-  // looked like "pagination works" while proving the opposite.
+  // Per ENDPOINT, not one shared counter: `fetchHumanReview` reads both in parallel, and one counter
+  // gave each a single page — which looked like "pagination works" while proving the opposite.
   const served = new Map<string, number>();
   return (async (url: string | URL | Request) => {
     const key = String(url).split("?")[0];
@@ -960,8 +948,7 @@ test("every paginated list read follows the cursor to the second page", async ()
 });
 
 test("a capped read is distinguishable from a complete one", async () => {
-  // A stub that never stops offering a next page: the cap is what ends it, and `truncated` is the
-  // only thing that says so — the items and the verdict look exactly like a clean read.
+  // Never stops offering a next page: the cap ends it, and `truncated` is the only thing saying so.
   const endless: typeof fetch = (async (url: string | URL | Request) =>
     new Response(JSON.stringify([{ number: 1, html_url: "https://github.com/x/y/pull/1", head: { ref: "a" } }]), {
       status: 200,
@@ -981,10 +968,8 @@ test("a capped read is distinguishable from a complete one", async () => {
   const cappedReview = await fetchHumanReview("ravidsrk/orca-fleet", 70, endless);
   if (cappedReview.ok) assert.equal(cappedReview.truncated, true);
 
-  // EACH endpoint on its own. `truncated` is an OR over two reads, and an endless stub truncates
-  // both, so it could not tell the OR from a read of `reviews` alone. Comments-only is the half that
-  // was unpinned — and it is the more likely one, since a busy PR has far more review comments than
-  // reviews.
+  // EACH endpoint on its own: `truncated` is an OR, and an endless stub truncates both, so it could
+  // not tell the OR from `reviews` alone. Comments-only is the likelier half and was unpinned.
   const commentsOnly: typeof fetch = (async (url: string | URL | Request) => {
     const u = String(url);
     const body = u.includes("/comments") ? [{ user: { login: "a", type: "User" } }] : [];
@@ -1004,10 +989,8 @@ test("a capped read is distinguishable from a complete one", async () => {
 });
 
 /**
- * The SHIPPED cap, not just the mechanism. #83 spent three rounds on exactly this distinction: the
- * terminal boundary's mechanism was thoroughly tested while its default stream list was not, and
- * deleting `process.stderr` left the suite green. A cap the tests read out of the constant they are
- * checking cannot notice the constant changing, so the number is written down here once.
+ * The SHIPPED cap, not just the mechanism — the distinction #83 spent three rounds on. A cap the
+ * tests read out of the constant they check cannot notice it changing, so the number is written here.
  */
 test("the page cap is ten, and both list caps agree", () => {
   assert.equal(MAX_LIST_PAGES, 10);

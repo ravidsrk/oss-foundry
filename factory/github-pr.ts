@@ -58,10 +58,8 @@ export async function listOpenPulls(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
-    // The highest-severity of the five sites issue #69 names: this feeds the competing-work gate,
-    // and a repository with more than 100 open pull requests is ordinary. A missed open PR means
-    // Foundry opens a duplicate against work already in flight, which is the outcome
-    // docs/PRODUCT.md §2 exists to prevent.
+    // The sharpest of the five: this feeds the competing-work gate, >100 open PRs is ordinary, and a
+    // missed one means opening a duplicate against work in flight (docs/PRODUCT.md §2).
     const read = await listAllPages<{
       number: number;
       title?: string;
@@ -217,10 +215,9 @@ export async function fetchIssueClosingRef(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return undefined;
   try {
-    // Paginated for the same reason as its sibling above, but deliberately WITHOUT a truncation
-    // signal: this function is best-effort by contract (see the docblock), returns `undefined`
-    // rather than an error so it can never turn a refusal into a proceed, and is called only after a
-    // refusal is already decided. A capped read here degrades a message; it cannot change a verdict.
+    // Paginated, but deliberately WITHOUT a truncation signal: best-effort by contract (docblock
+    // above), called only after a refusal is decided, so a short read degrades a message and cannot
+    // move a verdict.
     const read = await listAllPages<{
       event?: string;
       commit_id?: string | null;
@@ -423,8 +420,7 @@ export async function fetchHumanReview(
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
     const base = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
-    // A busy PR undercounts human review on a single page, which is the exact metric issue #39
-    // exists to make computable — so an under-read here is a wrong KPI, not a missing one.
+    // A busy PR undercounts on one page: an under-read here is a wrong KPI, not a missing one.
     type Actor = { user?: { login?: string; type?: string } | null };
     const [reviewsRead, commentsRead] = await Promise.all([
       listAllPages<Actor>(`${base}/reviews?per_page=100`, "on reviews", fetchImpl),
@@ -452,28 +448,16 @@ export function nextPageUrl(link: string | null | undefined): string | undefined
   return undefined;
 }
 
-/**
- * How many pages any one list read may follow. Ten pages is 1,000 items — the same bound, and the
- * same reason, as `MAX_COMMIT_PAGES`: this runs unattended every six hours, and an unbounded follow
- * is the "excessive automated bulk activity" the AUP names (docs/07-github-app.md).
- */
+/** Pages one list read may follow: 1,000 items, same bound and reason as `MAX_COMMIT_PAGES` — this
+ * runs unattended every six hours (docs/07-github-app.md's "excessive automated bulk activity"). */
 export const MAX_LIST_PAGES = 10;
 
 /**
- * Every page of a GitHub list endpoint, to a stated cap, saying so when it stops short.
- *
- * ONE HOME, because the alternative was five copies. Issue #39 fixed `listCommitsSince` after it was
- * found truncating in production, and left five siblings with the identical shape — `per_page=100`,
- * no `page`, no Link follow, no truncation signal. Copying its loop five times would have been five
- * places for the rule to drift, which is the defect `fixture-counts.ts` was created to end.
- * `listCommitsSince` reads through here too, so there is one loop and not "the good one plus four".
- *
- * `truncated` exists because a short read and a complete one return the same items and the same
- * verdict. Every consumer already shouts about a read that FAILED; nothing could tell them about one
- * that merely stopped early.
- *
- * `res.headers?.get` is optional because GitHub omits `Link` entirely on a single-page response, and
- * absent means "no next page" — not an error.
+ * Every page of a GitHub list endpoint, to a stated cap, saying so when it stops short. ONE HOME:
+ * #39 fixed `listCommitsSince` and left five siblings identical, and five copies of its loop are five
+ * places to drift — `listCommitsSince` reads through here too. `truncated` exists because a short
+ * read returns the same items and verdict as a complete one. `headers?.get` is optional: GitHub omits
+ * `Link` on a single page, and absent means no next page.
  */
 async function listAllPages<T>(
   firstUrl: string,
@@ -546,9 +530,8 @@ export async function listCommitsSince(
   if (opts.until) query.set("until", opts.until);
   if (opts.sha) query.set("sha", opts.sha);
   try {
-    // Through the same loop as the other five list reads (issue #69). This one was correct first —
-    // #39 wrote it after finding the truncation in production — and it stays the reference, but as a
-    // CALLER of the shared loop rather than the one good copy beside four broken ones.
+    // Through the same loop as the other five (issue #69). Correct first, and still the reference —
+    // but as a CALLER of the shared loop rather than the one good copy.
     const read = await listAllPages<{
       sha?: string;
       commit?: { message?: string; committer?: { date?: string } | null };
@@ -689,13 +672,9 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
     let reviewTruncated = false;
     if (pr.merged || pr.state === "closed") {
       const review = await fetchHumanReview(parsed.owner + "/" + parsed.repo, parsed.number, fetchImpl);
-      // A CAPPED read leaves the field absent, exactly like a failed one, and for the same reason:
-      // "we could not read it" and "nobody reviewed it" are different facts and only one is a KPI.
-      //
-      // But it is REPORTED separately, because the operator's next move differs. A failed endpoint
-      // is worth retrying; a capped one will cap again, and the advice is to look at the PR by hand
-      // or raise the cap deliberately. Round 1 of this fix stored neither and said neither, which
-      // left "absent" meaning two different things — raised by review.
+      // A CAPPED read leaves the field absent like a failed one — "we could not read it" and
+      // "nobody reviewed it" are different facts and only one is a KPI — but is REPORTED separately,
+      // because a failed endpoint is worth retrying and a capped one will cap again.
       reviewTruncated = review.ok && review.truncated;
       if (review.ok && !review.truncated) meta.humanReview = review.humanReview;
     }

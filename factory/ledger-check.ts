@@ -29,6 +29,12 @@ export interface LivePrLite {
    * same advisory path a failed read takes, because it is the same fact at a lower strength.
    */
   revertTruncated?: boolean;
+  /**
+   * Did the human-review read stop at its page cap? `revertTruncated`'s fact one endpoint over: a
+   * capped read records nothing, like a failed one, so without this the advisory below says "re-run
+   * when GitHub answers" — advice that cannot work, because it answered and the cap is deterministic.
+   */
+  reviewTruncated?: boolean;
 }
 
 /**
@@ -193,8 +199,13 @@ export function packetChecks(packet: TaskPacket, live: LivePrLite): LedgerReconc
   // sentence the operator should be reading rather than this one.
   const liveTerminal = live.merged || live.state === "closed";
   if (isTerminalReviewSubject(packet) && liveTerminal && packet.prUrl && !packet.prMeta?.humanReview) {
+    // WHY it is missing decides the advice, and the two reasons want opposite advice: a failed
+    // endpoint is worth re-running, a CAPPED read caps again. Emitting both lines in one run told the
+    // operator to re-run and not to re-run about one PR.
     advisory.push(
-      `${packet.id}: the ledger records no human-review observation for a terminal PR — ${packet.repoId}'s noReview and reviewCommentsAvg are computed WITHOUT it, so the KPI's denominator is smaller than the terminal count suggests. Run \`reconcile\` on a pass where GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet), then promote the recovered row into factory/seed.ts`,
+      live.reviewTruncated
+        ? `${packet.id}: the human-review read on ${packet.repoId} stopped at its page cap, so noReview and reviewCommentsAvg are computed WITHOUT this PR. A re-run will cap again — read the PR by hand, or raise the cap deliberately`
+        : `${packet.id}: the ledger records no human-review observation for a terminal PR — ${packet.repoId}'s noReview and reviewCommentsAvg are computed WITHOUT it, so the KPI's denominator is smaller than the terminal count suggests. Run \`reconcile\` on a pass where GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet), then promote the recovered row into factory/seed.ts`,
     );
   }
   return { fatal: out, advisory };

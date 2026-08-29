@@ -178,11 +178,8 @@ interface LivePr {
    * reviewed it" — the distinction the two review KPIs are built on (issue #39).
    */
   reviewsUnreadable?: boolean;
-  /**
-   * The review endpoints answering with a cursor that never ends, so the paginated read stops at its
-   * page cap. Distinct from `reviewsUnreadable` because the operator's next move differs: an outage
-   * is worth retrying, a capped read will cap again (issue #69).
-   */
+  /** A never-ending review cursor, so the read stops at its cap. Distinct from `reviewsUnreadable`:
+   * an outage is worth retrying and a capped read is not (issue #69). */
   reviewsTruncated?: boolean;
 }
 
@@ -285,8 +282,7 @@ globalThis.fetch = async (url) => {
     if (pr.reviewsUnreadable) return json(500, { message: "review endpoints unavailable" });
     const reviewBody = actors(parts[5] === "reviews" ? pr.reviews : pr.reviewComments);
     if (pr.reviewsTruncated) {
-      // Same shape as the commit cursor above: points back at this path, so every page answers and
-      // only the page cap ever stops the read.
+      // Same shape as the commit cursor above: only the page cap ever stops this read.
       const rp = Number(new URL(u).searchParams.get("page") ?? "1") + 1;
       const rnext = "https://api.github.com/repos/" + parts[1] + "/" + parts[2] + "/pulls/" + parts[4] + "/" + parts[5] + "?page=" + rp;
       return json(200, reviewBody, { link: '<' + rnext + '>; rel="next"' });
@@ -2297,18 +2293,9 @@ test("the clock says so when the commit read fails, and when it merely stops sho
 });
 
 /**
- * Issue #69, the operator-visible half: a competing-work read that stops at the page cap must refuse,
- * not proceed.
- *
- * The gate exists to assert the ABSENCE of a competing pull request, and an absence is the one thing
- * a short read cannot establish. Before the fix these reads stopped silently at 100 items and a
- * truncated success was byte-identical to a complete one; now the cap is 1,000, so this is a loud
- * stop rather than a likely one — but it has to be a stop, because proceeding would publish "no
- * competing pull request" as a fact the run never checked.
- *
- * Driven through the real CLI rather than asserted on the reader's return value: the reader returning
- * `truncated` and the verb acting on it are two different claims, and only the second one protects
- * an operator.
+ * Issue #69's operator-visible half: a capped competing-work read must refuse, since proceeding
+ * publishes "no competing pull request" as a fact the run never checked. Driven through the real CLI,
+ * because the reader returning `truncated` and the verb acting on it are two claims.
  */
 test("a competing-work read that stops at the page cap refuses the tick", () => {
   const dir = tmp("foundry-cap-");
@@ -2336,15 +2323,8 @@ globalThis.fetch = async (url) => {
   assert.match(run.out, /no competing pull request/, run.out);
 });
 
-/**
- * The same refusal for the OTHER read that feeds the same verdict. Raised by review: the first
- * version checked the open-pulls read and left the cross-reference timeline unchecked, so a capped
- * timeline reached `classifyCompetition` and a competing PR past the cap was missed — the issue then
- * entered the live scouting set, which is the fail-open this unit is about, one read over.
- *
- * The open-pulls read answers cleanly here, so the timeline is the only thing capped and this test
- * is about the timeline rather than a second copy of the one above.
- */
+/** The same refusal for the OTHER read feeding that verdict: checking open-pulls alone let a capped
+ * timeline reach `classifyCompetition`. Open-pulls answers cleanly, so only the timeline caps. */
 test("a capped cross-reference timeline refuses the tick too", () => {
   const dir = tmp("foundry-cap2-");
   const preload = join(dir, "preload.mjs");
@@ -2354,8 +2334,7 @@ test("a capped cross-reference timeline refuses the tick too", () => {
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
 globalThis.fetch = async (url) => {
   const u = String(url);
-  // A clean, complete open-pulls read: no next page, and nothing matching by closing keyword, so
-  // the timeline read is reached.
+  // Clean, complete open-pulls read, so the timeline read is reached.
   if (u.includes("/pulls?state=open")) return json(200, []);
   // The timeline never runs out of pages.
   if (u.includes("/timeline")) return json(200, [], { link: "<" + u + "&page=2>; rel=" + String.fromCharCode(34) + "next" + String.fromCharCode(34) });
@@ -2382,17 +2361,15 @@ globalThis.fetch = async (url) => {
 });
 
 /**
- * Issue #69: a CAPPED review read is neither a failure nor an observation, and reconcile has to say
- * which.
- *
- * Round 1 of this fix stopped storing the partial count — correct, since a wrong KPI is worse than a
- * missing one — but left the field simply absent, which is what an OUTAGE also leaves. So the
- * operator got retry guidance for a condition that will reproduce on every re-run. Raised by review.
- *
- * The two conditions are driven side by side, because the claim is that they are distinguishable and
- * a single-condition test cannot see that.
+ * A CAPPED review read is neither a failure nor an observation. Not storing the partial count was
+ * right — a wrong KPI is worse than none — but leaving the field simply absent is what an OUTAGE
+ * leaves too, so the operator got retry advice for a condition that reproduces every run. Driven
+ * side by side, because "distinguishable" is a claim one condition cannot show.
  */
-test("reconcile tells a capped review read apart from an outage", () => {
+test("a capped review read is told apart from an outage, in BOTH verbs", () => {
+  // The cap advisory once lived in `reconcile` alone, beside `packetChecks`'s generic "re-run when
+  // GitHub answers" line — so one run said both re-run and do-not-re-run about one PR, and the clock
+  // said neither. The fact now rides `LivePrLite`, which both verbs already build.
   const BLIND = "pkt_ravidsrk_frontguard_195";
   const blind = reviewBlindState(BLIND);
   const stranded = blind.packets.find((p) => p.id === BLIND)!;
@@ -2403,21 +2380,55 @@ test("reconcile tells a capped review read apart from an outage", () => {
   assert.equal(capped.code, 0, capped.out);
   assert.match(
     capped.out,
-    new RegExp(`^ADVISORY ${BLIND}: the human-review read on .* stopped at the \\d+-page cap`, "m"),
+    new RegExp(`^ADVISORY ${BLIND}: the human-review read on .* stopped at its page cap`, "m"),
     `a capped review read must name the cap:\n${capped.out}`,
   );
-  // The advice has to be actionable and true: a re-run caps again, so it must not say "retry".
+  // Actionable and true: a re-run caps again.
   assert.match(capped.out, /re-run will cap again/, capped.out);
-  assert.match(capped.out, /NOT recorded/, capped.out);
+  assert.equal(
+    /Run `reconcile` on a pass where GitHub answers/.test(capped.out),
+    false,
+    `the cap advisory and the outage advice cannot both be printed for one PR:\n${capped.out}`,
+  );
 
-  // The outage, for contrast — same packet, same verb, different message.
+  // The outage, for contrast — same packet, same verb, the other message and no cap wording.
   const outage = runCli(["reconcile", "--state", writeState(blind)], tmpdir(), {
     preload: prFactsStub(livePrs({ [stranded.prUrl!]: { reviewsUnreadable: true } })),
   });
   assert.equal(outage.code, 0, outage.out);
+  assert.match(outage.out, new RegExp(`^ADVISORY ${BLIND}: the ledger records no human-review`, "m"), outage.out);
   assert.equal(
-    /stopped at the \d+-page cap/.test(outage.out),
+    /stopped at its page cap/.test(outage.out),
     false,
     `an outage must not report itself as a capped read:\n${outage.out}`,
   );
+});
+
+
+/**
+ * Both `packetChecks` call sites supply the same facts. This unit shipped the one-call-site defect
+ * three times — `revert`, `revertTruncated`, `reviewTruncated` — because an omitted optional field is
+ * a runtime `undefined` here, never a compile error. By source and not by a drive, deliberately: the
+ * clock reads the COMMITTED SEED, where every merged packet carries an observation, so the review
+ * advisory is UNREACHABLE from it — unavailable rather than inconvenient.
+ */
+test("reconcile and verify-ledger hand packetChecks the same fields", () => {
+  // Only the fields NOT carried by the shared `live` object: reconcile spreads `live`, the clock
+  // lists fields inline, and that difference in form is fine. The truncation flags are not in either.
+  const callSite = (rel: string) => {
+    const source = readFileSync(new URL(rel, import.meta.url), "utf8");
+    const at = source.indexOf("packetChecks(");
+    assert.notEqual(at, -1, `${rel}: packetChecks call site not found — this guard has drifted`);
+    return source.slice(at, source.indexOf("});", at));
+  };
+  for (const rel of ["./cli.ts", "./verify-ledger.ts"]) {
+    const call = callSite(rel);
+    for (const field of ["revert", "revertTruncated", "reviewTruncated"]) {
+      assert.match(
+        call,
+        new RegExp(`\\b${field}:`),
+        `${rel} stopped handing packetChecks \`${field}\`, so that check silently reports it did not run`,
+      );
+    }
+  }
 });

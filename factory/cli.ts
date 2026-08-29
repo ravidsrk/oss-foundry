@@ -178,13 +178,9 @@ const ARGV = process.argv.slice(2);
 // A cwd-relative path silently served the committed seed as live truth from anywhere else, and a
 // mutating command forked a second state file next to it.
 /**
- * A capped competing-work read cannot support "nothing is in flight".
- *
- * The gate exists to assert the ABSENCE of a competitor, and an absence is the one thing a short read
- * cannot establish. Before issue #69 these reads stopped silently at 100 items; they now follow
- * GitHub's cursor to a 10-page cap, so this is a loud stop rather than a likely one — but it is
- * refused rather than warned, because proceeding would publish "no competing pull request" as a fact
- * the run did not check. Its own message, so a capped read stays distinguishable from a failed one.
+ * A capped competing-work read cannot support "nothing is in flight". The gate asserts the ABSENCE
+ * of a competitor, and an absence is what a short read cannot establish — so it is refused, not
+ * warned, with its own message so a capped read stays distinguishable from a failed one (issue #69).
  */
 function refuseIfCapped(reads: { truncated?: boolean }[], what: string): void {
   if (!reads.some((r) => r.truncated)) return;
@@ -397,10 +393,8 @@ async function tickWithGithub(state: FactoryState) {
         console.error(crossRefs.error);
         process.exit(1);
       }
-      // Both reads that feed the verdict, not just the pulls one. Raised by review: checking
-      // `pulls` and leaving the timeline unchecked let a capped cross-reference list reach
-      // `classifyCompetition`, so a competing PR past the cap was missed and the issue entered the
-      // live scouting set — the same fail-open, one read over.
+      // BOTH reads that feed the verdict. Checking `pulls` alone let a capped timeline reach
+      // `classifyCompetition`, so a competing PR past the cap was missed — the same fail-open.
       refuseIfCapped([pulls, crossRefs], key);
       const verdict = classifyCompetition(
         { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
@@ -1115,14 +1109,6 @@ async function main() {
       // one: `syncGithubPr` populates `humanReview` for terminal PRs alone, so an open packet costs
       // nothing here. An error is still reported rather than swallowed, because a writer that
       // starts refusing for a new reason should be visible rather than silently skipped.
-      // A capped review read is not a failure and not an observation: say so, on the same advisory
-      // path the commit read below uses, so it cannot read as "nobody reviewed it" or as a retryable
-      // outage. Reported before the writer, because there is nothing to write.
-      if (synced.reviewTruncated) {
-        owed.push(
-          `${packet.id}: the human-review read on ${packet.repoId} stopped at the ${MAX_LIST_PAGES}-page cap — noReview/reviewCommentsAvg are NOT recorded for this PR, and a re-run will cap again. Read the PR by hand or raise the cap deliberately.`,
-        );
-      }
       if (synced.meta.humanReview) {
         const observed = synced.meta.humanReview;
         const recovered = applyReviewObservation(next, packet.id, observed);
@@ -1167,6 +1153,9 @@ async function main() {
         // Same fact the clock reads (issue #39 round 2): a page-capped commit read is not a clean
         // one, and both consumers must say so or the two verbs disagree about what was checked.
         revertTruncated: reverted?.ok ? reverted.truncated : undefined,
+        // The review read's own cap (issue #69), through the parameter both verbs already build so
+        // neither can forget it — this unit shipped that defect twice before.
+        reviewTruncated: synced.reviewTruncated,
       });
       doctrine.push(...checks.fatal);
       owed.push(...checks.advisory);
