@@ -27,11 +27,8 @@ const FORBIDDEN_STATEMENTS: RegExp[] = [
   /autonomous\s+agents?\s+(?:are\s+)?not\s+(?:allowed|welcome|permitted)/i,
 ];
 
-/**
- * A human gate that is NOT a signature: someone must look, but nobody signs anything.
- * Kept separate from the signature families below so the verdict code comes from WHICH roster
- * matched, rather than from substring-testing the matched text afterwards.
- */
+/** A human gate that is NOT a signature: someone looks, nobody signs. Separate roster so the
+ * verdict code comes from WHICH roster matched, not from substring-testing the matched text. */
 const HUMAN_REVIEW_STATEMENTS: RegExp[] = [
   /human:/i,
   /\bhuman\s+(?:review\s+)?required\b/i,
@@ -42,19 +39,15 @@ const HUMAN_REVIEW_STATEMENTS: RegExp[] = [
 /**
  * The instruments a human must sign. Presence is not a requirement — `signaturePolarity` decides.
  *
- * The bare CLA acronym is the fix for issue #52. Without it the only CLA patterns were
+ * The bare CLA acronym is the fix for #52: without it the only CLA patterns were
  * `sign(?:ing)?\s+the\s+cla` and `\bcla\s+(?:is\s+)?required\b`, both defeated by an interposed
- * "not", so five realistic "waive the DCO, assert the CLA" documents held on `main` only by the
- * ACCIDENT of an un-negated `\bdco\b` in the same sentence — each reporting `human=["DCO"]` and
- * nothing about the CLA. Negate the DCO without adding this and all five fail open.
+ * "not", so five "waive the DCO, assert the CLA" documents held on `main` only by the ACCIDENT of an
+ * un-negated `\bdco\b` in the same sentence — each reporting `human=["DCO"]`, nothing about the CLA.
  *
- * Plurals are a P1 from review: `\bcla\b` misses `CLAs`, so "No DCO. CLAs are mandatory." waived
- * the DCO and saw nothing — this issue's defect in a new spelling. `\bclas?\b` cannot match
- * "class" (the optional `s` still needs a boundary after it), and a corpus row asserts that.
- *
+ * Plurals are a P1 from review: `\bcla\b` misses `CLAs`, so "No DCO. CLAs are mandatory." saw
+ * nothing. `\bclas?\b` cannot match "class" (the optional `s` needs a boundary), asserted by a row.
  * Not a bare `/agreement/i`: "your agreement with the Code of Conduct" is not a CLA. Sign-off
- * vocabulary is DCO family because it is one — on `main` "All commits must carry a Signed-off-by
- * line." reached ALLOW matching nothing at all.
+ * vocabulary is DCO family — "All commits must carry a Signed-off-by line." matched nothing at all.
  */
 const SIGNATURE_FAMILIES: { family: string; token: string }[] = [
   {
@@ -213,17 +206,12 @@ export function scanPolicyText(text: string): {
   for (const sentence of sentencesOf(text)) {
     const parts = clausesOf(sentence);
     /**
-     * An ANAPHORIC requirement: a clause that asserts one while naming no instrument, because its
-     * subject was elided and is the instrument named earlier —
-     *
-     *   "A CLA is not required for documentation, but is required for code contributions."
-     *
-     * The requirement lands in a clause with no token, so the per-clause pass skipped it and only
-     * the waiver was recorded. P1 from review.
-     *
-     * The clause must START with the verb, which is what elision looks like. "and tests are
-     * required" has its own subject and must NOT flip the CLA — testing for the keywords alone
-     * would over-block that, and over-blocking parks a legitimate packet.
+     * An ANAPHORIC requirement — a clause asserting one while naming no instrument, its subject
+     * elided: "A CLA is not required for documentation, but is required for code." The requirement
+     * lands in a token-less clause, so the per-clause pass skipped it and recorded only the waiver
+     * (P1 from review). The clause must START with the verb, which is what elision looks like:
+     * "and tests are required" has its own subject and must not flip the CLA, and matching the
+     * keywords alone would over-block it.
      */
     const anaphoric = parts.some(
       (c) =>
