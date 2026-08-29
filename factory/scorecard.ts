@@ -68,24 +68,6 @@ export function applyPacketToScorecard(
   });
 }
 
-export function factoryKpis(rows: ScorecardRow[]) {
-  const opened = rows.reduce((a, r) => a + r.opened, 0);
-  const merged = rows.reduce((a, r) => a + r.merged, 0);
-  const terminal = rows.reduce((a, r) => a + terminalCount(r), 0);
-  const reverts = rows.reduce((a, r) => a + r.reverts, 0);
-  const noReview = rows.reduce((a, r) => a + r.noReview, 0);
-  const banned = rows.filter((r) => r.maintainerTone === "banned").length;
-  return {
-    opened,
-    merged,
-    terminal,
-    mergeRate: terminal === 0 ? 0 : merged / terminal,
-    reverts,
-    noReview,
-    banned,
-  };
-}
-
 /**
  * Fold one terminal PR's human review split into the repo's row (issue #39).
  *
