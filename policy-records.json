@@ -24,7 +24,7 @@
       "fetchedAt": "2026-08-28",
       "stance": "silent",
       "conditions": [],
-      "quote": "No AI-contribution language in CONTRIBUTING.md, AGENTS.md, or CLAUDE.md. Behaviorally open: 141 of 272 external PRs merged."
+      "quote": "No AI-contribution language in CONTRIBUTING.md, AGENTS.md, or CLAUDE.md."
     },
     "github/awesome-copilot": {
       "source": "CONTRIBUTING.md",

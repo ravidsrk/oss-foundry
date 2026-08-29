@@ -26,7 +26,7 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 - matplotlib banned autonomous-agent PRs after a slop incident
 - curl maintainers asked agents to stop after a HackerOne flood
-- pydantic welcomes AI-assisted PRs but bans mass submission across repos — the very pattern a contribution factory is
+- pydantic welcomes AI-assisted PRs but reserves the right to close mass submission across repos, and says it can end in a permanent ban from the org — the very pattern a contribution factory is
 - drive-by volume without governance is vandalism
 
 Foundry’s posture is the inverse: **contribute less, merge more, never surprise a maintainer.**
@@ -97,7 +97,7 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 |---|---|
 | Allowlist | Unlisted = invisible |
 | Policy | Forbidden phrases beat “but the issue is tiny.” No fetched docs = deny |
-| Freeze | First 20 packets always human. Forever on CLA/DCO and Wave 2. Wave 1+ never auto-freeze |
+| Freeze | Every packet is human-frozen. Nothing auto-freezes at any wave; the first-20 counter is an odometer, not a gate ([04-stations](04-stations.md)) |
 | Sandbox | Wave 1+ clones never hit the operator laptop. Dry-run is labeled `dry-run`, not harvested |
 | Reviewer | Blind to implementer traces. Diff + tests only. Reviewed SHA = head SHA at draft |
 | GitHub | Draft only. No merge helper |
@@ -129,7 +129,9 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 
 ### Packet statuses
 
-`scouted` → `gated` → `frozen` → `approved` → `implementing` → `reviewing` → `draft-ready` → `submitted` → `followed-up` → `merged` | `parked` | `rejected`
+`scouted` → `gated` → `approved` → `implementing` → `reviewing` → `draft-ready` → `submitted` → `followed-up` → `merged` | `parked` | `rejected`
+
+`frozen` is reserved in the union and never written: `applyApprove` accepts it as a source status and `INFLIGHT_STATUSES` counts it, but no code path sets it ([10-schemas](10-schemas.md), `factory/types.ts`). In a committed ledger it means a hand edit.
 
 `hasInflight` gates: `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`, **`submitted`**. `followed-up` is **not** in-flight.
 
@@ -159,7 +161,7 @@ PR volume is a vanity metric. Not shown as a success KPI.
 
 | Wave | Who | Sandbox | Human freeze |
 |---|---|---|---|
-| 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | First 20 factory-wide, then mechanical if `aiPolicy: owner` |
+| 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | **Always** — the first-20 counter is an odometer, not a gate that opens ([04-stations](04-stations.md)) |
 | 1 | AI-welcome, small blast radius | E2B (dry-run in this repo) | **Always** |
 | 2 | Adjacent (Mastra, OpenHands) | E2B | Always + HUMAN/DCO holds |
 
@@ -172,7 +174,7 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ### Wave 1
 
-- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (141/272 external PRs merged). First issue **#1476** (in flight as #1652)
+- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (250/408 non-owner PRs merged, measured 2026-08-29 — method in `allowlist.yaml`'s `policyNotes`). First issue **#1476** (in flight as #1652)
 - `github/awesome-copilot` — Markdown content (repo language JavaScript). First issue **#2684** (skills/github-issues reference gaps, docs class); documented 🤖🤖🤖 fast track
 - `e2b-dev/e2b-cookbook` — replaces e2b-dev/E2B; genuinely silent (no CONTRIBUTING anywhere), gate holds until policy exists
 - `mcp-use/mcp-use` — policy **unknown** until CONTRIBUTING parsed
@@ -188,7 +190,7 @@ Removed: `kortix-ai/suna` (secret-gated dev loop; externally unverifiable — is
 
 - `matplotlib/matplotlib` — autonomous-agent ban
 - `curl/curl` — maintainer asked agents to stop
-- `pydantic/pydantic` — welcomes AI-assisted PRs; bans mass submission across repos + unassigned PRs. Denied as poor factory fit, not anti-AI
+- `pydantic/pydantic` — welcomes AI-assisted PRs; reserves the right to close any PR at its discretion (mass submission across repos is a named case, and can end in a permanent ban from the org) and auto-closes unassigned PRs. Denied as poor factory fit, not anti-AI
 - `stablyai/orca` — no AI restriction; denied for conflict of interest (the runtime Foundry rides). Contribute via orca-fleet
 
 ---
@@ -326,7 +328,7 @@ Never:
 Terms are defined operationally in [08-operations.md](08-operations.md) — denominators matter.
 
 - ≥ 1 merged PR on a Wave 1 repo that is not ours
-- Merge rate ≥ 60% on opened drafts that reached a terminal state (stale-closed counts against)
+- Merge rate ≥ 60% on opened drafts that reached a terminal state (a stale draft a human closes counts against; the two terminal buckets are `merged` and `closedUnmerged` — there is no third)
 - Review-comment average ≤ 4 over human-reviewed PRs (`noReview` — terminal-state drafts never human-reviewed — reported alongside)
 - **Bans = 0. Reverts = 0** (revert = explicit revert of our merge commit, or a maintainer-stated rollback naming the PR, within 30 days; rework is not a revert)
 - First 20 packets each have a human attest

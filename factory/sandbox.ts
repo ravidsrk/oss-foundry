@@ -46,5 +46,8 @@ export const SANDBOX_RULES = [
   "No GitHub App private key, no npm tokens, no SSH keys inside the box.",
   "Clone is full (historical SHAs must be reachable). Network is allowlisted to git + package registries.",
   "Harvest is git-only: format-patch or push to the operator fork. Then destroy.",
-  "If tests cannot run in the box, park the packet. Do not skip the oracle.",
+  // `reject` is the operator's verb; `parked` is a status the engine writes on its own (over-cap
+  // scope, a scorecard halt, a policy denial). Doctrine that reads as an instruction must name a
+  // button the operator actually has (issue #44 item 5).
+  "If tests cannot run in the box, reject the packet. Do not skip the oracle.",
 ];

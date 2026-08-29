@@ -27,6 +27,12 @@ merges/closes into local state without ever releasing the in-flight slot.
 |---|---|---|---|---|
 | pkt_OpenHands_OpenHands_16907 | [OpenHands/OpenHands#16907](https://github.com/OpenHands/OpenHands/issues/16907) | — | parked | — |
 
+### Off allowlist — denied or unlisted
+
+| packet | issue | PR | status | attested by |
+|---|---|---|---|---|
+| pkt_matplotlib_matplotlib_0 | — | — | parked | — |
+
 Foundry-attested Wave 0 merges: 3 (promotion gate: 2).
 
 ### Scorecard
@@ -54,6 +60,32 @@ Live verification found six factual errors in the allowlist; all corrected:
 6. awesome-copilot repo language is JavaScript tooling; content Markdown.
 
 **Roster change — 2026-08-28 (issue #12):** awesome-copilot gains first issue #2684 (docs class; caps raised 80→120 lines for reference work); e2b-dev/E2B → e2b-dev/e2b-cookbook (the docs/examples surface moved); kortix-ai/suna removed (secret-gated dev loop, externally unverifiable). Policy records updated to match (8 records).
+
+## Corrections — 2026-08-29 (issue #44)
+
+Three carried claims were re-checked against their sources; none held as written.
+
+1. **background-agents merge figure re-derived.** `141 of 272 external PRs merged` named no method
+   and does not reproduce. Re-measured 2026-08-29 (GitHub search
+   `q=repo:ColeMurray/background-agents is:pr -author:ColeMurray`, plus `is:merged` for the
+   numerator): **250 of 408 non-owner PRs merged (61%)**. Figure and method live in
+   `allowlist.yaml`'s `policyNotes`. The `policy-records.json` `quote` is one verbatim statement
+   from the source (`docs/SPEC.md` §3, `docs/10-schemas.md`) and renders to the maintainer as their
+   own words, so it is the absence note alone — and `parsePolicyRecords` now refuses a `silent`
+   record whose quote carries a derived figure, rather than trusting the convention.
+2. **pydantic deny reason re-read at source.** A round-2 review recorded pydantic's AI policy as
+   unconfirmable; that was wrong. It is `CONTRIBUTING.md` §"AI policy", re-read 2026-08-29 — one
+   file under two paths, since the root `CONTRIBUTING.md` is a git symlink (tree mode `120000`) to
+   `docs/contributing.md`. Pydantic *welcomes* AI use, reserves the right to close any PR at its
+   discretion (mass-submission across repositories is a named case, and can end in a permanent ban),
+   and auto-closes a PR opened on an issue without assignment. "Bans AI PRs" overstated it; the deny
+   stands on fit.
+3. **Repo ids are matched case-insensitively, end to end.** `halt` typed in a maintainer's casing
+   reported success, incremented `bans`, and left the scorecard row `tone=neutral health=good` with
+   the packet still in flight. `applyHalt` and `buildPacket` now canonicalise at the boundary and
+   every lookup shares one comparison — ASCII-only, because GitHub's own case-insensitivity is, so a
+   Unicode homoglyph is a different repo rather than a way onto the roster. Bans in the block above
+   stay 0: no repository was actually halted by the defect.
 
 ## Next
 

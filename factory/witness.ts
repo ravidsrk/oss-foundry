@@ -188,6 +188,11 @@ export async function witnessEvidence(
   if (revertRun.exit === 0) {
     return {
       ok: false,
+      // KNOWN DEFECT, diagnosed not undiscovered (issue #44 item 5): the "park the packet" below
+      // names a verb the operator does not have. `parked` is a status the engine writes on its own;
+      // the operator's stand-down verb is `reject`, as the corrected sibling string in
+      // `factory/sandbox.ts` already says. The wording here should read "reject the packet"; delete
+      // this comment with that edit.
       error:
         "negative control failed — tests stayed green with the production change reverted. The proof does not bind the change; park the packet.",
     };

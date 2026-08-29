@@ -1,4 +1,4 @@
-import { repoById } from "./allowlist.ts";
+import { canonicalRepoId, repoById } from "./allowlist.ts";
 import { evidenceIsStale, needsRewitness, witnessedSha } from "./ledger-check.ts";
 import { ABORT_DEFAULT, commitTrailerLine, DISCLOSURE, FOUNDRY_REPO_URL, NON_GOALS_DEFAULT } from "./neighbor.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -9,6 +9,14 @@ function idFor(repoId: string, issue: number) {
   return `pkt_${repoId.replace("/", "_")}_${issue}`;
 }
 
+/**
+ * The other id boundary (with `applyHalt`). A packet is a stored record, and everything that later
+ * finds it — its own `id`, the scorecard row it credits, `policyRecordFor`'s exact-key map, the
+ * duplicate check in `applyQueueLive` — keys off `repoId`. Storing whatever casing the scout
+ * happened to see gives a repo two packet-id namespaces and a scorecard row that never moves
+ * (issue #44 item 10), so the roster's spelling is resolved once, here, and stored. A repo the
+ * roster does not know keeps the id it arrived with; `evaluatePolicy` refuses it either way.
+ */
 export function buildPacket(input: {
   repoId: string;
   issueNumber: number;
@@ -18,9 +26,10 @@ export function buildPacket(input: {
   agentsMd?: string;
   contributing?: string;
 }): TaskPacket {
-  const repo = repoById(input.repoId);
+  const repoId = canonicalRepoId(input.repoId);
+  const repo = repoById(repoId);
   const policy = evaluatePolicy({
-    repoId: input.repoId,
+    repoId,
     agentsMd: input.agentsMd,
     contributing: input.contributing,
     issueTitle: input.issueTitle,
@@ -39,7 +48,7 @@ export function buildPacket(input: {
 
   const now = new Date().toISOString();
   const scout = scoreIssue({
-    repoId: input.repoId,
+    repoId,
     title: input.issueTitle,
     labels: input.labels ?? repo?.preferredLabels ?? [],
   });
@@ -47,12 +56,12 @@ export function buildPacket(input: {
   const buildable = classified === "buildable";
 
   return {
-    id: idFor(input.repoId, input.issueNumber),
-    repoId: input.repoId,
+    id: idFor(repoId, input.issueNumber),
+    repoId,
     issueNumber: input.issueNumber,
     issueTitle: input.issueTitle,
     issueUrl: input.issueUrl,
-    objective: `Land a minimal, tested fix for ${input.repoId}#${input.issueNumber}: ${input.issueTitle}`,
+    objective: `Land a minimal, tested fix for ${repoId}#${input.issueNumber}: ${input.issueTitle}`,
     nonGoals: NON_GOALS_DEFAULT,
     acceptance: [
       "Failing-first test or repro exists before the fix.",

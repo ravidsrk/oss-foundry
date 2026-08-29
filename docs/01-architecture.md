@@ -48,7 +48,7 @@ Unchanged from orca-fleet:
 |---|---|
 | Allowlist | If it is not listed, it does not exist. |
 | Policy | Forbidden phrases win over “but the issue is tiny.” No docs = deny. |
-| Freeze | First 20 packets: always human. Forever on CLA/DCO and Wave 2. |
+| Freeze | Every packet, at every wave. Nothing auto-freezes; the first-20 counter is an odometer, not a gate that opens. |
 | Sandbox | Wave 1+ clones never hit the operator laptop. No secrets in the box. Dry-run is labeled dry-run. |
 | Reviewer | Does not see implementer traces. Reviews the diff + tests only. |
 | GitHub | Fork → upstream **draft** PR. No admin, no merge helper. |

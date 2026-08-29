@@ -1,5 +1,15 @@
-import { ALLOWLIST, CAPS } from "./allowlist.ts";
+import { ALLOWLIST, CAPS, sameRepoId } from "./allowlist.ts";
 import type { ScorecardRow, TaskPacket } from "./types.ts";
+
+/**
+ * The one way to reach a scorecard row. Rows are keyed by the roster's spelling; callers may hold
+ * any casing GitHub accepts. Matching raw strings here is how a halt could report success against
+ * a row it never touched (issue #44 item 10) — so the comparison is `sameRepoId`, the same one the
+ * roster gate uses.
+ */
+export function scorecardRow(rows: ScorecardRow[], repoId: string): ScorecardRow | undefined {
+  return rows.find((r) => sameRepoId(r.repoId, repoId));
+}
 
 export function emptyScorecard(): ScorecardRow[] {
   return ALLOWLIST.map((repo) => ({
@@ -46,7 +56,7 @@ export function applyPacketToScorecard(
   kind: "opened" | "merged" | "closed" | "reverted",
 ): ScorecardRow[] {
   return rows.map((row) => {
-    if (row.repoId !== packet.repoId) return row;
+    if (!sameRepoId(row.repoId, packet.repoId)) return row;
     const next = { ...row, lastTouch: new Date().toISOString().slice(0, 10) };
     if (kind === "opened") next.opened += 1;
     if (kind === "merged") next.merged += 1;

@@ -45,7 +45,7 @@ import { renderEvidencePage, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
-import { foundryAttestedWave0Merges } from "./status.ts";
+import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
 import {
   parseWitnessManifest,
@@ -163,7 +163,9 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
   if (inflight.length) {
     console.log("in flight:");
     for (const p of inflight) {
-      const quiet = p.prMeta ? `  quiet=${quietDaysOf(p.prMeta, new Date().toISOString())}d/${QUIET_RELEASE_DAYS}` : "";
+      const quiet = p.prMeta
+        ? `  ${quietLabel(quietDaysOf(p.prMeta, new Date().toISOString()), QUIET_RELEASE_DAYS, p.prMeta)}`
+        : "";
       console.log(`  ${p.id}  ${p.status}  ${p.repoId}#${p.issueNumber}  ${p.prUrl ?? ""}${quiet}`);
     }
   } else {
@@ -414,7 +416,9 @@ async function main() {
       process.exit(1);
     }
     persist(result.state);
-    console.log(`halted ${repoId} (scorecard banned). Edit allowlist.yaml denylist the same hour.`);
+    // Echo the roster's spelling, not the operator's: a halt typed in GitHub's casing now moves the
+    // row it names, and the line must say which row that was (issue #44 item 10).
+    console.log(`halted ${result.repoId ?? repoId} (scorecard banned). Edit allowlist.yaml denylist the same hour.`);
     return;
   }
 
@@ -740,17 +744,22 @@ async function main() {
 
   if (cmd === "ledger") {
     // Emits the generated block for docs/12-ledger.md — paste between the GENERATED markers.
-    const waves: [number, string][] = [[0, "Wave 0"], [1, "Wave 1"], [2, "Wave 2"]];
-    for (const [wave, title] of waves) {
-      const packets = state.packets.filter((p) => repoById(p.repoId)?.wave === wave);
-      if (packets.length === 0) continue;
+    // Grouping runs through `ledgerSections`, not `repoById(...)?.wave`: an off-allowlist packet has
+    // no wave, so the old filter dropped the denied scout the ledger most needs to show (issue #44).
+    for (const { title, packets } of ledgerSections(state.packets)) {
       console.log(`### ${title}`);
       console.log("");
       console.log("| packet | issue | PR | status | attested by |");
       console.log("|---|---|---|---|---|");
       for (const p of packets) {
+        // `#0` is the refusal fixture's placeholder for "there is no issue here", not an issue
+        // number — and this repo's doctrine is that the clock never invents issue numbers. Rendered
+        // as a link label, `matplotlib/matplotlib#0` reads exactly like one. A packet with no real
+        // issue gets a dash, the same way a packet with no PR does; the packet id still names the
+        // repo, so the dash costs the reader nothing.
+        const issue = p.issueNumber > 0 ? `[${p.repoId}#${p.issueNumber}](${p.issueUrl})` : "—";
         console.log(
-          `| ${p.id} | [${p.repoId}#${p.issueNumber}](${p.issueUrl}) | ${p.prUrl ?? "—"} | ${p.status} | ${p.humanAttest?.by ?? "—"} |`,
+          `| ${p.id} | ${issue} | ${p.prUrl ?? "—"} | ${p.status} | ${p.humanAttest?.by ?? "—"} |`,
         );
       }
       console.log("");

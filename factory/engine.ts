@@ -1,11 +1,11 @@
-import { ALLOWLIST, CAPS, isDenied, repoById } from "./allowlist.ts";
+import { ALLOWLIST, CAPS, isDenied, repoById, sameRepoId } from "./allowlist.ts";
 import { parsePrUrl } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import { factoryHalt } from "./halt.ts";
 import { AGENT_NAME_RE, commitTrailerLine, type DisclosureTrailer } from "./neighbor.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { planSandbox, runSandboxDry } from "./sandbox.ts";
-import { applyPacketToScorecard, health } from "./scorecard.ts";
+import { applyPacketToScorecard, health, scorecardRow } from "./scorecard.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
 import {
   INFLIGHT_STATUSES,
@@ -25,7 +25,7 @@ export function hasInflight(packets: TaskPacket[]): boolean {
 }
 
 export function repoHealth(scorecard: ScorecardRow[], repoId: string) {
-  const row = scorecard.find((r) => r.repoId === repoId);
+  const row = scorecardRow(scorecard, repoId);
   if (!row) return "good" as const;
   return health(row);
 }
@@ -39,6 +39,11 @@ export function maySelectRepo(
   if (halted) {
     return { ok: false, reason: `Factory halted ${halted.at}: ${halted.reason}` };
   }
+  // Among the per-repo gates deny is checked FIRST, and the order is load-bearing, not stylistic:
+  // `assertAllowlist` keeps the denylist and the roster disjoint, but a config that ever drifted (or
+  // a repo moved to the denylist without being pulled from `repos`) must still stand down rather
+  // than be selectable. Pinned by "the denylist wins even when the same id is also on the roster"
+  // (issue #44 item 10).
   const denied = isDenied(repoId);
   if (denied) return { ok: false, reason: denied.reason };
   const repo = repoById(repoId);
@@ -99,24 +104,48 @@ export function applyTick(
   return { state: next, packet, reason: packet.policy.allow ? "gated" : packet.policy.code };
 }
 
+/**
+ * Queue one already-chosen live issue. Kept beside `applyTick` — which picks a candidate itself —
+ * because it is the single-issue entry point; `cli.ts` uses `applyTick` via `tickWithGithub`, so
+ * nothing calls this in production today (issue #44 item 8).
+ *
+ * `verdict` takes the same two-tier `CompetitionVerdict` that `classifyCompetition` produces and
+ * `applyTick` carries as separate `competingKeys` / `adjacentKeys`. It replaced a `competingPr:
+ * boolean`, which could only say "stand down" or "go": an adjacent mention had to be flattened into
+ * one of those, and flattening it to `false` queues the packet and drops the taste gate without a
+ * word. Nothing was broken while this path stayed unwired — the point is that wiring it later must
+ * not be able to lose the human-triage tier.
+ */
 export function applyQueueLive(
   state: FactoryState,
   issue: LiveIssue,
   docs?: { agentsMd?: string; contributing?: string },
-  competingPr = false,
+  verdict: CompetitionVerdict = { kind: "clear" },
 ): { state: FactoryState; packet: TaskPacket | null; reason: string } {
   if (hasInflight(state.packets)) {
     const next = appendEvent(state, ev("tick", "Queue blocked — a packet is already in flight."));
     return { state: next, packet: null, reason: "in-flight" };
   }
-  if (competingPr) {
+  if (verdict.kind === "competing") {
     const next = appendEvent(
       state,
       ev("tick", `Queue refused ${issue.repoId}#${issue.number}: an open PR already covers the issue.`),
     );
     return { state: next, packet: null, reason: "already-has-pr" };
   }
-  const existing = state.packets.find((p) => p.repoId === issue.repoId && p.issueNumber === issue.number);
+  if (verdict.kind === "adjacent") {
+    const next = appendEvent(
+      state,
+      ev(
+        "tick",
+        `Queue held ${issue.repoId}#${issue.number} — adjacent PR ${verdict.url} (${verdict.why}) mentions the issue; taste gate, human triage before scouting.`,
+      ),
+    );
+    return { state: next, packet: null, reason: "adjacent-hold" };
+  }
+  const existing = state.packets.find(
+    (p) => sameRepoId(p.repoId, issue.repoId) && p.issueNumber === issue.number,
+  );
   if (existing) return { state, packet: existing, reason: "duplicate" };
 
   const gate = maySelectRepo(state, issue.repoId);
@@ -233,18 +262,27 @@ export function applyReject(
   };
 }
 
+/**
+ * The operator's same-hour stop (docs/PRODUCT.md:47, SPEC §7). The id arrives from a terminal, so
+ * it arrives in whatever casing the maintainer's message used. `repo.id` — the roster's spelling —
+ * is what every store downstream is keyed by, so resolve to it once here and never touch `repoId`
+ * again: matching the raw argument against scorecard rows and packets is exactly how a halt could
+ * report success, bump `bans`, and leave the row `tone=neutral health=good` with the packet still
+ * in flight (issue #44 item 10). An id the roster does not know is still refused, loudly.
+ */
 export function applyHalt(
   state: FactoryState,
   repoId: string,
   reason: string,
-): { state: FactoryState; error?: string } {
+): { state: FactoryState; error?: string; repoId?: string } {
   const repo = repoById(repoId);
   if (!repo) return { state, error: `${repoId} is not on the allowlist.` };
+  const canonical = repo.id;
   const note = reason || "maintainer asked the factory to stop.";
-  const row = state.scorecard.find((r) => r.repoId === repoId);
+  const row = scorecardRow(state.scorecard, canonical);
   const alreadyBanned = row?.maintainerTone === "banned";
   const scorecard = state.scorecard.map((r) =>
-    r.repoId === repoId
+    sameRepoId(r.repoId, canonical)
       ? { ...r, maintainerTone: "banned" as const, lastTouch: now().slice(0, 10) }
       : r,
   );
@@ -254,12 +292,13 @@ export function applyHalt(
     bans: alreadyBanned ? state.bans : state.bans + 1,
   };
   for (const packet of state.packets) {
-    if (packet.repoId !== repoId) continue;
+    if (!sameRepoId(packet.repoId, canonical)) continue;
     if (!INFLIGHT_STATUSES.includes(packet.status) && packet.status !== "followed-up") continue;
     next = park(next, packet.id, note, "score");
   }
   return {
-    state: appendEvent(next, ev("score", `Halted ${repoId}: ${note}`)),
+    state: appendEvent(next, ev("score", `Halted ${canonical}: ${note}`)),
+    repoId: canonical,
   };
 }
 

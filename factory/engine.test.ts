@@ -26,8 +26,10 @@ import {
   hasInflight,
   isBoundSha,
   isPlaceholderSha,
+  maySelectRepo,
   mentionsIssue,
   referencesIssue,
+  repoHealth,
   type EvidenceBinding,
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
@@ -37,11 +39,11 @@ import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { runSandboxDry } from "./sandbox.ts";
-import { emptyScorecard, health } from "./scorecard.ts";
+import { applyPacketToScorecard, emptyScorecard, health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
-import { inflightCount, type FactoryState } from "./types.ts";
+import { INFLIGHT_STATUSES, inflightCount, type FactoryState } from "./types.ts";
 
 function blank(): FactoryState {
   return {
@@ -572,9 +574,41 @@ test("tick skips issues that already have a competing PR", () => {
   assert.ok(ticked.packet);
   assert.notEqual(`${ticked.packet.repoId}#${ticked.packet.issueNumber}`, "ravidsrk/orca-fleet#71");
 
-  const queued = applyQueueLive(blank(), live("ravidsrk/orca-fleet", 80), undefined, true);
+  const queued = applyQueueLive(blank(), live("ravidsrk/orca-fleet", 80), undefined, {
+    kind: "competing",
+    url: "https://github.com/ravidsrk/orca-fleet/pull/2",
+    why: "closing-keyword",
+  });
   assert.equal(queued.packet, null);
   assert.equal(queued.reason, "already-has-pr");
+});
+
+/**
+ * `applyTick` carries the two-tier verdict (`competingKeys` stand down, `adjacentKeys` hold for
+ * human triage). `applyQueueLive` took a single `competingPr: boolean`, which can only say "stand
+ * down" or "go" — an adjacent mention had to be flattened into one of those, and flattening it to
+ * `false` queues the packet and loses the taste gate silently. The queue path is not wired into
+ * `cli.ts` today, so nothing was broken; the point is that wiring it later must not be able to
+ * lose the distinction (issue #44 item 8).
+ */
+test("applyQueueLive keeps the two-tier competing verdict instead of one boolean", () => {
+  const issue = live("ravidsrk/orca-fleet", 80);
+
+  const adjacent = applyQueueLive(blank(), issue, undefined, {
+    kind: "adjacent",
+    url: "https://github.com/ravidsrk/orca-fleet/pull/3",
+    why: "plain-mention",
+  });
+  assert.equal(adjacent.packet, null, "an adjacent mention is a hold, not a green light");
+  assert.equal(adjacent.reason, "adjacent-hold");
+  assert.notEqual(adjacent.reason, "already-has-pr", "a hold is not a stand-down");
+  assert.match(adjacent.state.events[0].message, /human triage/i);
+
+  const clear = applyQueueLive(blank(), issue, undefined, { kind: "clear" });
+  assert.equal(clear.packet?.issueNumber, 80);
+
+  const unchecked = applyQueueLive(blank(), issue);
+  assert.equal(unchecked.packet?.issueNumber, 80);
 });
 
 test("tick uses fetched AGENTS.md instead of YAML notes alone", () => {
@@ -609,6 +643,129 @@ test("halt sets scorecard banned, parks inflight, and blocks a new queue", () =>
   const queued = applyQueueLive(halted.state, live(repoId, 99));
   assert.equal(queued.packet, null);
   assert.match(queued.reason, /halted/);
+});
+
+/**
+ * The maintainer's same-hour stop (docs/PRODUCT.md:47, SPEC §7), typed the way a maintainer writes
+ * it rather than the way `allowlist.yaml` spells it. Case-insensitive *lookup* alone made this
+ * strictly worse than the loud refusal it replaced: `repoById` found the roster row, so the halt
+ * reported success and pushed `bans` to 1, while every store it then wrote through — the scorecard
+ * rows, the in-flight packets — was still matched on the raw argument and moved nothing. A halt
+ * that says "halted" and halts nothing is the one failure mode this command cannot have
+ * (issue #44 item 10).
+ */
+test("halt typed in GitHub's casing halts the roster's repo, not a repo that does not exist", () => {
+  const state = seedState();
+  const canonical = "ColeMurray/background-agents";
+  const inflightBefore = state.packets.filter(
+    (p) => p.repoId === canonical && INFLIGHT_STATUSES.includes(p.status),
+  );
+  assert.ok(inflightBefore.length > 0, "the seed must hold an in-flight packet or this binds nothing");
+  assert.equal(state.bans, 0);
+
+  const halted = applyHalt(state, "colemurray/background-agents", "maintainer asked us to stop");
+  assert.equal(halted.error, undefined);
+  // The row the operator meant, found by its own spelling — not by the argument's.
+  assert.equal(halted.repoId, canonical);
+  const row = halted.state.scorecard.find((r) => r.repoId === canonical)!;
+  assert.equal(row.maintainerTone, "banned");
+  assert.equal(health(row), "stop");
+  assert.equal(repoHealth(halted.state.scorecard, canonical), "stop");
+  assert.equal(halted.state.bans, 1);
+  // ...and the work actually stopped.
+  for (const before of inflightBefore) {
+    assert.equal(halted.state.packets.find((p) => p.id === before.id)!.status, "parked");
+  }
+  assert.equal(
+    halted.state.packets.filter((p) => p.repoId === canonical && INFLIGHT_STATUSES.includes(p.status)).length,
+    0,
+    "a halt that leaves the packet in flight has halted nothing",
+  );
+  // The event names the roster's spelling, so the ledger says which row moved.
+  assert.match(halted.state.events[0].message, new RegExp(`Halted ${canonical}:`));
+
+  // The gate agrees, in the operator's casing and in the roster's.
+  for (const spelling of [canonical, "colemurray/background-agents", "COLEMURRAY/BACKGROUND-AGENTS"]) {
+    const gate = maySelectRepo(halted.state, spelling);
+    assert.equal(gate.ok, false, `${spelling} must be refused after the halt`);
+    if (!gate.ok) assert.match(gate.reason, /halted on the scorecard/);
+  }
+
+  // Halting twice is idempotent on the counter — `bans` must stay 0 in the KPIs, so it must not
+  // drift upward on a repeated stop (docs/08-operations.md).
+  assert.equal(applyHalt(halted.state, "COLEMURRAY/BACKGROUND-AGENTS", "again").state.bans, 1);
+});
+
+test("halt still refuses a repo the roster does not know, loudly", () => {
+  // The fail-CLOSED half. Case-insensitivity must widen matching, not admit strangers.
+  for (const id of ["attacker/not-a-repo", "attacker/background-agents", "background-agents"]) {
+    const refused = applyHalt(seedState(), id, "stop");
+    assert.match(refused.error ?? "", /is not on the allowlist/, id);
+    assert.equal(refused.state.bans, 0, id);
+  }
+});
+
+/**
+ * `maySelectRepo` checks `isDenied` before `repoById`, and the order is load-bearing rather than
+ * incidental: reversed, a denied repo falls out as "not on the allowlist" — a true-sounding refusal
+ * that names the wrong reason and would go on naming the wrong reason if the denylist and the
+ * roster ever overlapped. `assertAllowlist` now keeps them disjoint case-insensitively, which is
+ * what makes overlap a config error rather than a live hazard; this pins the ordering that stands
+ * behind it (issue #44 item 10).
+ */
+test("the denylist is consulted before the roster, so a denial says why", () => {
+  for (const spelling of ["matplotlib/matplotlib", "Matplotlib/MatPlotLib", "MATPLOTLIB/MATPLOTLIB"]) {
+    const gate = maySelectRepo(blank(), spelling);
+    assert.equal(gate.ok, false, spelling);
+    if (!gate.ok) {
+      assert.match(gate.reason, /Autonomous-agent PRs banned/, spelling);
+      assert.doesNotMatch(
+        gate.reason,
+        /is not on the allowlist/,
+        `${spelling}: roster-first would refuse it for the wrong reason`,
+      );
+    }
+  }
+  // The contrast that makes the assertion above mean something: an unlisted, undenied repo *does*
+  // get the roster's refusal.
+  const stranger = maySelectRepo(blank(), "attacker/orca-fleet");
+  assert.equal(stranger.ok, false);
+  if (!stranger.ok) assert.match(stranger.reason, /is not on the allowlist/);
+});
+
+/**
+ * The third consequence of keying stores on the raw argument: a packet built from GitHub's casing
+ * got a second packet-id namespace and credited a scorecard row that did not exist, so the row the
+ * halt rules read (`opened`, and through it `halt_after_opens`) never moved. `buildPacket`
+ * canonicalizes at the boundary, and `applyPacketToScorecard` matches the same way regardless
+ * (issue #44 item 10).
+ */
+test("a packet scouted in GitHub's casing credits the roster's scorecard row", () => {
+  const packet = buildPacket({
+    repoId: "COLEMURRAY/BACKGROUND-AGENTS",
+    issueNumber: 4242,
+    issueTitle: "docs tweak",
+    issueUrl: "https://github.com/ColeMurray/background-agents/issues/4242",
+  });
+  assert.equal(packet.repoId, "ColeMurray/background-agents");
+  assert.equal(packet.id, "pkt_ColeMurray_background-agents_4242");
+  // The policy record is an exact-key map; off-canonical it silently missed and the gate saw no
+  // committed record at all.
+  assert.equal(packet.policy.record?.repoId, "ColeMurray/background-agents");
+
+  const rows = applyPacketToScorecard(emptyScorecard(), packet, "opened");
+  const row = rows.find((r) => r.repoId === "ColeMurray/background-agents")!;
+  assert.equal(row.opened, 1, "the roster's row is the only row there is — it must be the one credited");
+  assert.equal(
+    rows.reduce((a, r) => a + r.opened, 0),
+    1,
+    "exactly one row moved",
+  );
+
+  // And a packet already stored off-canonical (a hand-edited or pre-fix state file) still finds it.
+  const legacy = { ...packet, repoId: "colemurray/background-agents" };
+  const migrated = applyPacketToScorecard(emptyScorecard(), legacy, "opened");
+  assert.equal(migrated.find((r) => r.repoId === "ColeMurray/background-agents")!.opened, 1);
 });
 
 test("findCompetingPull binds only a closing-keyword PR for this issue", () => {
@@ -1472,6 +1629,132 @@ test("the committed evidence page regenerates byte-identical from this tree", ()
   );
   assert.equal(committed.trimEnd(), renderEvidencePage(merged).trimEnd());
   assert.equal(committed.includes(DISCLOSURE), true);
+});
+
+/**
+ * Drives the real binary against a ledger these fixtures own. It delegates to the one `runCli`
+ * helper (declared below and hoisted), which is what supplies `--state`: the ledger path is
+ * anchored to the repo root, so a spawned CLI left to its default reads the developer's real state
+ * file no matter which temp directory it was started in — and this helper's earlier form passed the
+ * state by `cwd` alone, which meant every assertion below was silently made against the seed.
+ */
+function runCliWithState(args: string[], state: FactoryState) {
+  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-ledger-"));
+  writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+  const run = runCli(dir, args);
+  return { ...run, out: run.seen, dir };
+}
+
+/**
+ * `ledgerSections` is unit-tested in `status.test.ts`, but the divergence issue #44 item 9 describes
+ * — `status` says `packets=6` while `ledger` prints 5, the missing one being the denied
+ * `matplotlib/matplotlib` scout — lives in the `ledger` *command*, which did its own wave filter.
+ * Re-adding a `wave < 99` filter there restores the divergence with every helper test still green,
+ * so the count agreement has to be asserted across the two shipped commands.
+ */
+test("the ledger command lists every packet status counts, denials included", () => {
+  const seed = seedState();
+  const status = runCliWithState(["status"], seed);
+  assert.equal(status.status, 0, status.out);
+  const counted = Number(/packets=(\d+)/.exec(status.stdout)?.[1]);
+  assert.equal(counted, seed.packets.length);
+  assert.ok(counted > 0);
+
+  const ledger = runCliWithState(["ledger"], seed);
+  assert.equal(ledger.status, 0, ledger.out);
+  const rows = ledger.stdout.split("\n").filter((l) => l.startsWith("| pkt_"));
+  assert.equal(rows.length, counted, `status counted ${counted}, ledger listed ${rows.length}`);
+
+  // Not just the count: the packet the old filter dropped is the refusal the audit surface exists
+  // to show, and it must appear under a heading that says what it is.
+  assert.match(ledger.stdout, /### Off allowlist — denied or unlisted/);
+  assert.match(ledger.stdout, /\| pkt_matplotlib_matplotlib_0 \|/);
+  for (const p of seed.packets) assert.ok(ledger.stdout.includes(`| ${p.id} |`), `${p.id} is missing`);
+});
+
+/**
+ * The committed block in `docs/12-ledger.md` is generated, and its header says so — but nothing
+ * checked it, so deleting the off-allowlist section the fix added left the suite green and the
+ * audit surface silently short one denial again. Same guard the evidence page already has
+ * (issue #44 item 9).
+ */
+test("the committed ledger GENERATED block regenerates byte-identical from this tree", () => {
+  const doc = readFileSync(new URL("../docs/12-ledger.md", import.meta.url), "utf8");
+  const block = /<!-- GENERATED:[^\n]*-->\n([\s\S]*?)<!-- \/GENERATED -->/.exec(doc);
+  assert.ok(block, "the GENERATED markers must exist or nothing is being guarded");
+  const ledger = runCliWithState(["ledger"], seedState());
+  assert.equal(ledger.status, 0, ledger.out);
+  assert.equal(block[1], ledger.stdout);
+  // The two halves of the guard: the block is generated, and it is not empty boilerplate.
+  assert.match(block[1], /### Off allowlist — denied or unlisted/);
+  assert.match(block[1], /pkt_matplotlib_matplotlib_0/);
+  // ...and the refusal row does not render its `#0` placeholder as an issue number. This repo's
+  // doctrine is that the clock never invents issue numbers, and a `matplotlib/matplotlib#0` link
+  // label reads like one to anyone auditing the ledger.
+  assert.doesNotMatch(block[1], /matplotlib\/matplotlib#0/);
+  assert.match(block[1], /\| pkt_matplotlib_matplotlib_0 \| — \|/);
+});
+
+/**
+ * `quietLabel` is unit-tested, but the operator only ever sees it through `status`. Reverting
+ * `cli.ts` to interpolate a bare `quiet=0d/14` leaves every `status.test.ts` assertion green while
+ * the terminal goes back to reading like a live look at the PR (issue #44 item 11).
+ */
+test("status names the observation its quiet counter was extrapolated from", () => {
+  const seed = seedState();
+  const inflight = seed.packets.find((p) => INFLIGHT_STATUSES.includes(p.status) && p.prMeta)!;
+  assert.ok(inflight, "the seed must hold an in-flight packet carrying prMeta");
+  const status = runCliWithState(["status"], seed);
+  assert.equal(status.status, 0, status.out);
+
+  const line = status.stdout.split("\n").find((l) => l.includes(inflight.id))!;
+  assert.ok(line, status.stdout);
+  assert.match(line, /quiet=\d+d\/14/);
+  assert.match(line, /PR last active \d{4}-\d{2}-\d{2}/);
+  assert.match(line, /read by `sync` \d{4}-\d{2}-\d{2}/);
+  assert.match(line, /`sync` to refresh/);
+  assert.ok(line.includes(inflight.prMeta!.syncedAt.slice(0, 10)), line);
+  assert.ok(line.includes(inflight.prMeta!.updatedAt.slice(0, 10)), line);
+});
+
+/**
+ * The shipped verb, not the reducer. `cli.ts halt` printed the operator's own argument back and
+ * exited 0 while the scorecard row it named kept `tone=neutral health=good` and the packet stayed
+ * in flight — a silent fail-open on the one command docs/PRODUCT.md:47 promises within the hour
+ * (issue #44 item 10).
+ */
+test("the halt command, typed in GitHub's casing, actually halts", () => {
+  const seed = seedState();
+  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-halt-"));
+  const statePath = join(dir, ".foundry-state.json");
+  writeFileSync(statePath, JSON.stringify(seed));
+  const cli = join(import.meta.dirname, "cli.ts");
+  // The ledger is repo-anchored, so a spawned CLI must be pointed at the temp copy explicitly or it
+  // would read — and mutate — the real repo-root state file.
+  const at = (args: string[]) =>
+    spawnSync(process.execPath, ["--experimental-strip-types", cli, ...args, "--state", statePath], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+
+  const halt = at(["halt", "colemurray/background-agents", "--reason", "maintainer asked us to stop"]);
+  assert.equal(halt.status, 0, `${halt.stdout}${halt.stderr}`);
+  // It reports the roster's spelling — the row it moved, not the argument it was given.
+  assert.match(halt.stdout, /halted ColeMurray\/background-agents \(scorecard banned\)/);
+
+  const after = at(["status"]);
+  assert.equal(after.status, 0, `${after.stdout}${after.stderr}`);
+  const row = after.stdout.split("\n").find((l) => l.includes("ColeMurray/background-agents  opened="))!;
+  assert.ok(row, after.stdout);
+  assert.match(row, /tone=banned/);
+  assert.match(row, /health=stop/);
+  assert.match(after.stdout, /bans=1/);
+  assert.match(after.stdout, /in flight: none/);
+
+  // And the fail-closed half survives: a repo the roster does not know is still refused, loudly.
+  const stranger = at(["halt", "attacker/background-agents", "--reason", "x"]);
+  assert.equal(stranger.status, 1, `${stranger.stdout}${stranger.stderr}`);
+  assert.match(stranger.stderr, /attacker\/background-agents is not on the allowlist/);
 });
 
 test("test-path classifier knows suffix conventions and setup runs before tests", async () => {
