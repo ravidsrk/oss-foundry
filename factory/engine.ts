@@ -1270,6 +1270,22 @@ export function applyRevert(
   // the one exception, and it errs toward the halt — a ledger missing `mergedAt` must not become
   // the way to keep a reverted repo selectable.
   const window = revertWindow(packet.prMeta?.mergedAt, at);
+  // A date BEFORE the merge fails the same predicate but is a different mistake, and the paragraph
+  // below is written entirely for the late one — it would tell an operator their rollback is "past
+  // the window that closed" on a day before the window opened, and advise re-dating it EARLIER.
+  // A refusal that misdescribes the thing it refused is the defect this repo keeps filing.
+  if (window.known && !window.within && window.days < 0) {
+    return {
+      state,
+      error:
+        `refusing to record a revert on ${id}: the rollback is dated ${at}, which is ${-window.days} days ` +
+        `BEFORE the merge at ${packet.prMeta!.mergedAt} — nothing can revert a commit that did not exist yet. ` +
+        `classifyRevert skips pre-merge commits for the same reason, and reverts is a permanent scorecard stop, ` +
+        `so this is refused rather than recorded. Check the date you passed to \`--at\`: it wants the day the ` +
+        `maintainer rolled the patch back, in ISO form.`,
+      recorded: false,
+    };
+  }
   if (window.known && !window.within) {
     return {
       state,

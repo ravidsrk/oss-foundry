@@ -60,6 +60,7 @@ import {
   health,
   revertNote,
   scorecardRow,
+  revertWindow,
 } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState } from "./state.ts";
@@ -4295,6 +4296,39 @@ test("classifyRevert names the reverting commit, and only inside the 30-day wind
     assert.match(late.why, /30-day/);
     assert.match(late.why, /landed 31 days after the merge/, late.why);
   }
+
+  // A rollback dated BEFORE the merge is impossible, and the window must say so on BOTH paths.
+  // `classifyRevert` filters it in its own loop (`at < mergedMs`), so the shared predicate was
+  // never asked; the operator path, which reaches `revertWindow` directly with `--at`, was. An
+  // upper-bound-only comparison accepted a negative-day rollback, incremented `reverts`, and
+  // `health()` turns that into a permanent `stop` — a repository retired on an impossible date.
+  const preMerge = revertWindow(mergedAt, "2026-08-17T09:00:00Z");
+  assert.equal(preMerge.known, true);
+  if (preMerge.known) {
+    assert.equal(preMerge.within, false, "a rollback dated before the merge is not inside the window");
+    assert.ok(preMerge.days < 0, `days must show the impossibility, got ${preMerge.days}`);
+  }
+  // And the refusal must describe the mistake it refused. The late-rollback paragraph tells the
+  // operator their date is "past the window that closed" and advises re-dating it EARLIER — both
+  // false, and the second actively wrong, for a date before the merge.
+  const preMergeSeed = seedState();
+  const preMergePacket = preMergeSeed.packets.find((k) => k.id === "pkt_ravidsrk_orca-fleet_42")!;
+  const preMergeAt = new Date(Date.parse(preMergePacket.prMeta!.mergedAt!) - 10 * 86_400_000).toISOString();
+  const preMergeState = applyRevert(preMergeSeed, preMergePacket.id, {
+    source: "operator",
+    why: "maintainer said so",
+    at: preMergeAt,
+  });
+  assert.equal(preMergeState.recorded, false, "a pre-merge rollback must not be recorded");
+  assert.match(preMergeState.error!, /BEFORE the merge/, preMergeState.error);
+  assert.doesNotMatch(preMergeState.error!, /past the 30-day window/, preMergeState.error);
+  assert.doesNotMatch(preMergeState.error!, /-\d+ days after the merge/, preMergeState.error);
+  // The repo stays selectable: an impossible date must not retire it.
+  assert.equal(repoHealth(preMergeState.state.scorecard, preMergePacket.repoId), "good");
+
+  // The bound is closed at the merge instant itself, not one millisecond after it.
+  const atMerge = revertWindow(mergedAt, mergedAt);
+  if (atMerge.known) assert.equal(atMerge.within, true, "a rollback at the merge instant is inside the window");
 
   // The merge commit cannot revert itself, and nothing before the merge can revert it.
   const self = classifyRevert({

@@ -490,6 +490,20 @@ const MUTANTS: Mutant[] = [
     why: "the count is always zero — an affirmative false statement about output that WAS tampered with",
   },
   {
+    label: "review-premerge-window",
+    file: "factory/scorecard.ts",
+    from: "    within: atMs >= mergedMs && atMs <= deadlineMs,",
+    to: "    within: atMs <= deadlineMs,",
+    why: "an upper-bound-only window accepts a rollback dated BEFORE the merge: reverts is incremented on an impossible date and health() retires the repository permanently",
+  },
+  {
+    label: "review-premerge-refusal",
+    file: "factory/engine.ts",
+    from: "  if (window.known && !window.within && window.days < 0) {",
+    to: "  if (false && window.known && !window.within && window.days < 0) {",
+    why: "the late-rollback paragraph would tell an operator a pre-merge date is `past the window that closed` and advise re-dating it EARLIER — a refusal that misdescribes what it refused",
+  },
+  {
     label: "min-window-deadline",
     file: "factory/scorecard.ts",
     from: "    deadline: new Date(deadlineMs).toISOString(),\n",

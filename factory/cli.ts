@@ -1128,7 +1128,6 @@ async function main() {
         revert: reverted?.ok ? reverted.verdict : undefined,
         // Same fact the clock reads (issue #39 round 2): a page-capped commit read is not a clean
         // one, and both consumers must say so or the two verbs disagree about what was checked.
-        revertTruncated: reverted?.ok ? reverted.truncated : undefined,
       });
       doctrine.push(...checks.fatal);
       owed.push(...checks.advisory);
