@@ -27,6 +27,13 @@ const STALE_HEAD = "deadbee1c0ffee2b3a4d5e6f708192a3b4c5d6e7";
  */
 const LIVE_HEAD_1652 = "6b6ff04079a47109263b81726a1c29459b334de5";
 const WITNESSED_1652 = "48c2242683705b00503d3436575bf3c28b1b0c9b";
+/**
+ * The third fact the #49 sync promoted, from the same read-only fetch. It is pinned here because
+ * nothing else can hold it: `packetChecks` reconciles draft, head and merge state, and deliberately
+ * says nothing about `commits` — so a hand-edited count in the seed is invisible to the clock, and
+ * this assertion is the only thing standing between it and a silently wrong published number.
+ */
+const LIVE_COMMITS_1652 = 7;
 
 function submittedPacket(): TaskPacket {
   return seedState().packets.find((p) => p.status === "submitted")!;
@@ -45,6 +52,11 @@ test("#49: promoting the live facts into the seed reconciles the clock without e
   // The committed seed must name exactly the live facts; that is what makes the clock green.
   assert.equal(packet.prMeta!.draft, live.draft, "the seed still records a draft the PR is not");
   assert.equal(packet.prMeta!.headSha, live.headSha, "the seed still records a head GitHub left");
+  assert.equal(
+    packet.prMeta!.commits,
+    LIVE_COMMITS_1652,
+    "the seed still records a commit count GitHub left — and no check downstream of here can tell",
+  );
   // ...and must NOT have re-stamped the evidence, which is the one way to make the clock green by
   // lying: nobody re-ran the test command at 6b6ff04, so the proof still covers 48c2242 only.
   assert.equal(
@@ -213,6 +225,40 @@ test("re-witnessing at the live head clears the staleness", () => {
       headSha: LIVE_HEAD,
     }),
     [],
+  );
+});
+
+test("a followed-up packet owes the re-witness exactly as a submitted one does", () => {
+  // `needsRewitness` gates on a PAIR of live statuses, and the seed's only advisory-bearing packet
+  // is `submitted` — so narrowing the guard to `submitted` alone leaves the whole suite green while
+  // a packet that has already been answered once, with commits landed after its review, silently
+  // stops being reported. Since #49 that guard decides what the clock prints and what `reconcile`
+  // labels, so both arms are pinned here and the terminal arm below stays shut.
+  const packet = submittedPacket();
+  const followedUp: TaskPacket = { ...packet, status: "followed-up" };
+  assert.equal(
+    needsRewitness(followedUp, LIVE_HEAD_1652),
+    true,
+    "a followed-up packet is still live — its stale evidence is still someone's debt",
+  );
+  const { fatal, advisory } = packetChecks(followedUp, {
+    state: "open",
+    merged: false,
+    draft: followedUp.prMeta!.draft,
+    headSha: LIVE_HEAD_1652,
+  });
+  assert.deepEqual(fatal, [], `nothing here contradicts GitHub; got ${JSON.stringify(fatal)}`);
+  assert.equal(
+    advisory.some((a) => a.includes(WITNESSED_1652.slice(0, 7)) && a.includes(LIVE_HEAD_1652.slice(0, 7))),
+    true,
+    `the debt must reach the advisory bucket from this status too; got ${JSON.stringify(advisory)}`,
+  );
+  // The complement: the guard is those two statuses, not "any status". A rejected packet is at
+  // rest and nobody can re-witness it, so it must not be asked to.
+  assert.equal(
+    needsRewitness({ ...packet, status: "rejected" }, LIVE_HEAD_1652),
+    false,
+    "a terminal packet is at rest — re-reporting it every tick trains the operator to ignore the line",
   );
 });
 

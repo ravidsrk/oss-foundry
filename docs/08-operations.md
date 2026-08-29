@@ -11,8 +11,10 @@
 ## What the clock actually verifies
 
 `factory/verify-ledger.ts` (the 6h job) checks the **committed seed** — `factory/seed.ts`, the
-published ledger — against live GitHub, and fails the run on divergence. It does **not** read
-`.foundry-state.json`: that file is gitignored and absent in CI, so it does not exist to be checked.
+published ledger — against live GitHub. It does **not** read `.foundry-state.json`: that file is
+gitignored and absent in CI, so it does not exist to be checked. It prints two kinds of line and
+fails the run on only one of them — [What stops the clock](#what-stops-the-clock) below says which,
+and why the other never gates.
 
 The guarantee is therefore: *what this repository publishes about its PRs is true.* It is not:
 *what the operator has in flight locally is true.* Two consequences:
@@ -65,8 +67,8 @@ Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in fli
 
 ## What stops the clock
 
-`verify-ledger` runs on every tick. It reads the **committed seed**, never `.foundry-state.json`, and
-compares it to live GitHub. It reports two different things and gates on only one.
+`verify-ledger` runs on every tick, over the committed seed as above. It reports two different
+things and gates on only one.
 
 - A **divergence** is the published ledger asserting something GitHub contradicts: a draft flag, a
   recorded head, a merge the ledger has not absorbed. It exits non-zero and **reds the default
