@@ -55,7 +55,29 @@ test("negative-control refusal tells the operator to reject, not to press a verb
 });
 
 /**
- * Every comment in a source, separately: each block comment, and each run of consecutive `//` lines.
+ * The `//` that starts a trailing comment, or -1. String contents are masked to the same width
+ * first, so the `//` in a URL inside a string literal cannot fabricate a comment — inventing one is
+ * how a scan starts reporting violations that are not there, which is the whole subject of #99.
+ */
+function trailingCommentAt(line: string): number {
+  let masked = "";
+  let quote = "";
+  for (const char of line) {
+    if (quote === "") {
+      if (char === '"' || char === "'" || char === "`") quote = char;
+      masked += char;
+      continue;
+    }
+    // Inside a literal: keep the width, drop the content, and let the closing quote through.
+    masked += char === quote ? char : " ";
+    if (char === quote) quote = "";
+  }
+  return masked.indexOf("//");
+}
+
+/**
+ * Every comment in a source, separately: each block comment, each run of consecutive `//` lines, and
+ * each trailing comment written after code.
  *
  * Separately is the whole point. The first version of the guard below matched
  * `/KNOWN DEFECT[\s\S]{0,200}issue #\d+/` over the raw file, and `[\s\S]` crosses newlines, code and
@@ -65,18 +87,22 @@ test("negative-control refusal tells the operator to reject, not to press a verb
 function commentsIn(source: string): string[] {
   const out = [...source.matchAll(/\/\*[\s\S]*?\*\//g)].map((m) => m[0]);
   let run: string[] = [];
+  const endRun = () => {
+    if (run.length > 0) out.push(run.join("\n"));
+    run = [];
+  };
   for (const line of source.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.startsWith("//")) {
       run.push(trimmed);
       continue;
     }
-    if (run.length > 0) {
-      out.push(run.join("\n"));
-      run = [];
-    }
+    endRun();
+    // A note written after code is its own comment, not part of any run around it.
+    const at = trailingCommentAt(line);
+    if (at >= 0) out.push(line.slice(at));
   }
-  if (run.length > 0) out.push(run.join("\n"));
+  endRun();
   return out;
 }
 
@@ -131,6 +157,31 @@ test("the KNOWN DEFECT scan reads one comment at a time, not a 200-character win
     "a marker and a pointer on consecutive // lines are one comment",
   );
   assert.equal(commentsIn(spread).length, 1, "the run must be joined into one comment, not two");
+  // A note written after code, which the first version of the extractor skipped entirely — and
+  // production files here do use trailing `//` comments, so that was live coverage missing.
+  assert.equal(
+    commentsIn('const x = 1;  // KNOWN DEFECT: tracked in issue #12\n').some(tracksAnIssue),
+    true,
+    "a trailing comment after code must be scanned",
+  );
+  // A trailing note stands alone: it does not absorb the separate comment on the next line.
+  assert.equal(
+    commentsIn("const x = 1;  // KNOWN DEFECT: wrong verb.\n// Filed as issue #12.\n").some(tracksAnIssue),
+    false,
+    "a trailing comment is not joined to the comment below it",
+  );
+  // The reason string contents are masked: a URL in a literal must not become a comment. If it did,
+  // the code line would read as a comment and could carry a marker into a pointer that is not there.
+  assert.deepEqual(
+    commentsIn('const u = "https://example.invalid/a";\n'),
+    [],
+    "a // inside a string literal is not a comment",
+  );
+  assert.deepEqual(
+    commentsIn('const u = "https://example.invalid/a";  // see issue #12\n'),
+    ["// see issue #12"],
+    "the real trailing comment is still found on a line that also contains a URL",
+  );
 
   // ...and the direction issue #99 is about: two SEPARATE comments, neither of which tracks
   // anything. The old window matched across the gap and reported a violation that was not one.
