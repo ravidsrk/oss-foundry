@@ -19,6 +19,12 @@ status            scouted → gated → approved → implementing → reviewing 
 station           scout | policy | freeze | implement | review | draft | follow-up | terminal
 lighting          lit
 policy            PolicyVerdict
+policyDocs        [{ name: AGENTS.md | CONTRIBUTING, chars, excerpt, truncated }] — the fetched
+                  documents the verdict was computed from, kept so the freeze reads the words the
+                  scanner parsed rather than a boolean (04-stations §3). `excerpt` is capped;
+                  `chars` is always the true size and `truncated` is re-derived on load as
+                  `excerpt.length < chars`. Absent when nothing was fetched, which is a different
+                  fact from a document fetched and empty (`chars: 0`) and is displayed as one.
 scout             ScoutScore
 humanAttest       { by, at, note }  required before implement on Wave 1+
 evidence          EvidenceManifest

@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { buildPacket } from "./packet.ts";
 import { emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
@@ -238,4 +239,81 @@ test("a state file at exactly the in-flight cap still loads", () => {
   writeFileSync(path, JSON.stringify(seed));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true);
+});
+
+/**
+ * `policyDocs` is what the freeze renders to the operator as the maintainer's own words, so it is
+ * the one packet field whose whole purpose is to be read by a human making a terminal decision.
+ * Both the field types and their coherence are asserted, because `truncated` is not an independent
+ * fact — it is a claim about `excerpt` and `chars`, and a stored `truncated: false` over a
+ * shortened excerpt tells the approver they are reading the whole document.
+ */
+test("a stored policy document must be well-formed and internally consistent", () => {
+  const seed = seedState();
+  const base = seed.packets[0];
+  const doc = { name: "CONTRIBUTING", chars: 10, excerpt: "0123456789", truncated: false };
+  const write = (policyDocs: unknown): string => {
+    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "policydocs.json");
+    writeFileSync(path, JSON.stringify({ ...seed, packets: [{ ...base, policyDocs }] }));
+    return path;
+  };
+
+  // Loads: a well-formed pair, whole and truncated.
+  assert.equal(loadFactoryState(write([doc])).ok, true);
+  assert.equal(
+    loadFactoryState(write([{ name: "AGENTS.md", chars: 40, excerpt: "0123456789", truncated: true }])).ok,
+    true,
+  );
+  // ...and a packet with no documents at all, which is the common case.
+  assert.equal(loadFactoryState(write(undefined)).ok, true);
+  // ...and the fetched-but-empty document, which must survive the round trip as a record rather
+  // than being refused into the same shape as "never fetched".
+  assert.equal(loadFactoryState(write([{ name: "CONTRIBUTING", chars: 0, excerpt: "", truncated: false }])).ok, true);
+
+  for (const [why, bad] of [
+    ["not an array", doc],
+    ["missing name", [{ chars: 10, excerpt: "0123456789", truncated: false }]],
+    ["name not a string", [{ ...doc, name: 3 }]],
+    ["chars not an integer", [{ ...doc, chars: 10.5 }]],
+    // The row above is refused by the coherence clause, not by `Number.isInteger`: at chars 10.5 a
+    // ten-character excerpt IS shortened, so `truncated: false` is incoherent on its own and
+    // `Number.isInteger` could be deleted with the suite green. These two agree with the coherence
+    // clause and are refused only by the integer check, which is what pins it.
+    ["a fractional document size", [{ ...doc, chars: 10.5, truncated: true }]],
+    ["an infinite document size", [{ ...doc, chars: Infinity, truncated: true }]],
+    ["negative chars", [{ ...doc, chars: -1, excerpt: "" }]],
+    ["excerpt not a string", [{ ...doc, excerpt: null }]],
+    ["truncated not a boolean", [{ ...doc, truncated: "no" }]],
+    ["excerpt longer than the document it came from", [{ ...doc, chars: 4 }]],
+    ["a shortened excerpt reported as whole", [{ ...doc, chars: 40 }]],
+    ["a whole excerpt reported as truncated", [{ ...doc, truncated: true }]],
+  ] as [string, unknown][]) {
+    assert.equal(loadFactoryState(write(bad)).ok, false, why);
+  }
+});
+
+/**
+ * The round trip proper: what `buildPacket` writes must be what `loadFactoryState` accepts and
+ * hands back. A validator and a producer that disagree fail in only one direction — the operator
+ * loses the freeze evidence at the moment a real packet is read back off disk.
+ */
+test("policy documents survive save and load unchanged", () => {
+  const seed = seedState();
+  const built = buildPacket({
+    repoId: "mcp-use/mcp-use",
+    issueNumber: 991,
+    issueTitle: "docs typo",
+    issueUrl: "https://github.com/mcp-use/mcp-use/issues/991",
+    agentsMd: "Agents may open draft PRs.",
+    contributing: `${"long contributing prose. ".repeat(400)}`,
+  });
+  assert.equal(built.policyDocs?.length, 2);
+  assert.equal(built.policyDocs?.[1].truncated, true);
+
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "roundtrip.json");
+  saveFactoryState(path, { ...seed, packets: [built, ...seed.packets.filter((p) => p.status !== "submitted")] });
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true, "a freshly built packet must load back");
+  if (!loaded.ok) return;
+  assert.deepEqual(loaded.state.packets.find((p) => p.id === built.id)?.policyDocs, built.policyDocs);
 });

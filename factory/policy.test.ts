@@ -268,3 +268,45 @@ test("the committed policy records parse under the quote guard", () => {
     assert.doesNotMatch(r.quote, /\d\s*(?:\/|of)\s*\d|\d\s*%/, `${r.repoId} quote: ${r.quote}`);
   }
 });
+
+/**
+ * Issue #37, leg 4 — the assertion behind a sentence in docs/04-stations.md §2, not a claim about
+ * recall.
+ *
+ * The page used to leave a reader to infer that deny-by-default covers a scanner miss. It does
+ * not, and the two guards must not be conflated: `hasParsedEvidence` is satisfied by ANY fetched
+ * document, so a `CONTRIBUTING` whose refusal the scanner cannot read is evidence the gate counts,
+ * and the packet reaches `ALLOW`. Only the no-evidence case denies.
+ *
+ * This is a CHARACTERIZATION test of the gate as it stands, deliberately asserting `ALLOW` on
+ * phrasings the scanner misses. It is not a recall assertion and must not be read as endorsing the
+ * miss: the matcher work from the same issue is parked, and the freeze display (`renderFreezeEvidence`)
+ * is what stands between these strings and a PR. If the matchers are later broadened so that these
+ * DENY, this test is the thing that should be rewritten alongside the sentence it pins — that is
+ * what it is for.
+ */
+test("deny-by-default covers the no-evidence case, not the missed-ban case", () => {
+  // Paraphrases from the issue's own probe table that this tree's scanner does not match.
+  const missed = [
+    "we are not currently accepting AI-generated contributions",
+    "only human contributors may open pull requests",
+    "we don't want AI slop here",
+  ];
+  for (const text of missed) {
+    assert.equal(
+      evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: text }).code,
+      "ALLOW",
+      `a ban the scanner cannot read reaches ALLOW: ${text}`,
+    );
+  }
+  // The same packet with nothing fetched is the case deny-by-default actually covers...
+  assert.equal(
+    evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo" }).code,
+    "DENY_UNKNOWN_POLICY",
+  );
+  // ...and so is a fetch that came back empty, which carries no evidence either.
+  assert.equal(
+    evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: "" }).code,
+    "DENY_UNKNOWN_POLICY",
+  );
+});
