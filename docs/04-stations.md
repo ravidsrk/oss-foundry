@@ -39,7 +39,37 @@ Input: candidate + `AGENTS.md` / `CONTRIBUTING` blob + the repo's committed poli
 
 The scanner matches policy **statements**, not topic words: a ban pairs an AI subject with a
 contribution object and a refusal verdict inside one sentence-sized window. A repo whose docs
-merely *discuss* autonomous agents is not banning them. Precedence: record `forbidden` → scanned
+merely *discuss* autonomous agents is not banning them.
+
+**The scanner is a high-recall suggester feeding a human gate, not a sufficient arbiter.** Its miss
+mode is real, and stated here rather than left to be inferred: a phrasing nobody has written a
+pattern for reads as silence. Nine paraphrases of real maintainer ban language were run through it
+and seven reached `ALLOW` (issue #37). The matcher work from that issue is **parked** — three review
+rounds failed on it and the unit hit its cap — so this page describes the scanner as it actually is,
+not as the fix would have left it.
+
+Be exact about what catches a miss, because the two guards cover different cases and only one of
+them covers this one. **Deny-by-default covers the no-evidence case, not the missed-ban case.** A
+repo with nothing fetched and no affirmative record is `DENY_UNKNOWN_POLICY` and never `ALLOW` — but
+`hasParsedEvidence` is satisfied by *any* fetched document, so a `CONTRIBUTING` whose refusal the
+scanner cannot read is evidence the gate counts, and **a missed ban on a fetched document reaches
+`ALLOW`.** Verified, not assumed, and pinned in `factory/policy.test.ts` ("deny-by-default covers the
+no-evidence case, not the missed-ban case"): three ban phrasings the scanner does not match, supplied
+as fetched docs, each returned `ALLOW`; the same packet with nothing fetched, and the same packet
+with a fetch that came back empty, both returned `DENY_UNKNOWN_POLICY`. The freeze (§3) is the only
+thing standing there. That is precisely why it is now shown the parsed text — the operator reading
+the maintainer's own words is the guard against a scanner miss, and the gate's default is not.
+
+The over-block direction is a real cost too, not a free safety margin. `DENY_FORBIDDEN` is terminal
+and there is no in-tool operator override, so a false positive is not a one-look correction at the
+freeze; it is an allowlisted repo the factory cannot work with until a human edits
+`factory/policy.ts`. Most of `allowlist.yaml` is agent and MCP infrastructure — `background-agents`,
+`awesome-copilot`, `e2b-cookbook`, `mcp-use`, `mastra`, `OpenHands`, `orca-fleet` — whose docs use
+`agent`, `bot` and the brand words as ordinary vocabulary rather than as the subject of a refusal.
+That is why broadening recall here is not the cheap change it looks like, and why it was parked
+rather than half-landed.
+
+Precedence: record `forbidden` → scanned
 ban statement → CLA/DCO (from scan or record conditions) → record conditions → unknown-without-
 evidence. A `silent` record ("parsed, found nothing") does **not** satisfy parse-policy-first for
 an `unknown` repo — absence is re-verified by a live fetch; affirmative records (welcome /
@@ -61,6 +91,21 @@ The gate is deterministic. Grok does not get a vote here. There is no demo CONTR
 ## 3. Freeze (human)
 
 The operator reads the packet: objective, non-goals, acceptance, abort, policy, scout.
+
+`approve` prints the policy text the gate parsed *before* it takes the attest, for whatever packet
+the operator names — each fetched document with its name and character count, the `policyNotes` and
+committed record that were also in the scan blob, and either the statement the scanner matched or
+an explicit "no ban statement matched in N chars from <source>". A packet with nothing fetched is
+told so as an absence and the scan line is withheld: "no ban statement matched" over zero characters
+of policy text is the most misleading thing this surface could say, and absence is therefore counted
+in **characters**, not in documents — a `CONTRIBUTING` that was fetched and came back empty produces
+a document record and would otherwise take the scanned branch. The print happens before the
+competing-work network reads, so a stand-down or an unreachable GitHub cannot swallow the one thing
+the human is there to read. The documents ride on the packet (`policyDocs`, excerpt-capped with the
+true size recorded), so what the operator reads is the text the verdict was actually computed from
+and not a re-fetch. Before issue #37 `buildPacket` forwarded those documents into `evaluatePolicy`
+and discarded them, which left the second layer of defence confirming a boolean about text it could
+not see.
 
 Actions: `approve` (attest) or `reject` (stand the packet down — it writes status `rejected`, not `parked`; see below). Denied, halted, and unlisted packets cannot be approved. Approve re-runs the competing-work check SPEC §4 requires, and reads the issue's own state alongside it: either a competitor that appeared since gating or an issue that closed since gating blocks the approval; an adjacent mention is shown to the approver. Neither *parks* the packet — the freeze is the human's, so a refusal hands the decision back rather than making it, and `reject` stays the operator's verb.
 

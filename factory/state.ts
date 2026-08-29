@@ -91,6 +91,30 @@ function isPolicy(value: unknown): boolean {
   );
 }
 
+/**
+ * The freeze reads these fields back and renders them to the operator as the maintainer's own
+ * words, so the shape check is also a coherence check: `chars` is the document's TRUE size and
+ * `excerpt` may be a prefix of it, which means `truncated` is not an independent fact but a
+ * statement about the other two. A stored record claiming `truncated: false` over an excerpt
+ * shorter than `chars` tells the approver they are reading the whole document when they are not,
+ * and a non-integer size describes no document at all.
+ */
+function isPolicyDoc(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.name === "string" &&
+    Number.isInteger(o.chars) &&
+    typeof o.excerpt === "string" &&
+    // No separate `chars >= 0`: a string's length is never negative, so `excerpt.length <= chars`
+    // already refuses every negative size. The clause could be deleted with the suite green, and a
+    // guard that cannot fail is a guard a reader trusts for a reason that is not there.
+    o.excerpt.length <= (o.chars as number) &&
+    typeof o.truncated === "boolean" &&
+    o.truncated === o.excerpt.length < (o.chars as number)
+  );
+}
+
 function isScout(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const o = value as Record<string, unknown>;
@@ -228,6 +252,7 @@ function isPacket(value: unknown): boolean {
     typeof o.createdAt === "string" &&
     typeof o.updatedAt === "string" &&
     isPolicy(o.policy) &&
+    optional(o.policyDocs, (v) => Array.isArray(v) && v.every(isPolicyDoc)) &&
     isScout(o.scout) &&
     optional(o.humanAttest, isAttest) &&
     optional(o.evidence, isEvidence) &&

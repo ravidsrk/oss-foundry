@@ -3,10 +3,37 @@ import { evidenceIsStale, needsRewitness, witnessedSha } from "./ledger-check.ts
 import { ABORT_DEFAULT, commitTrailerLine, DISCLOSURE, FOUNDRY_REPO_URL, NON_GOALS_DEFAULT } from "./neighbor.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { scoreIssue } from "./scout.ts";
-import type { PacketClass, TaskPacket } from "./types.ts";
+import type { PacketClass, PolicyDocSource, TaskPacket } from "./types.ts";
 
 function idFor(repoId: string, issue: number) {
   return `pkt_${repoId.replace("/", "_")}_${issue}`;
+}
+
+/**
+ * How much of each fetched document the packet keeps. Enough that a policy section is read whole —
+ * a real AI-contribution paragraph sits in the first page or two of a CONTRIBUTING — without
+ * turning the ledger into a mirror of every target's docs. The record's `chars` always states the
+ * true size, so a truncation is never mistaken for a short document.
+ */
+export const POLICY_DOC_EXCERPT_LIMIT = 4000;
+
+/**
+ * The documents that were fetched, in the order the scan blob concatenates them. A document that
+ * was never fetched is absent rather than empty: "we read nothing" and "we read a blank file" are
+ * different facts, and the freeze must not be shown the second one when the first is true.
+ */
+function policyDocsOf(input: { agentsMd?: string; contributing?: string }): PolicyDocSource[] | undefined {
+  const sources: [string, string | undefined][] = [
+    ["AGENTS.md", input.agentsMd],
+    ["CONTRIBUTING", input.contributing],
+  ];
+  const docs: PolicyDocSource[] = [];
+  for (const [name, text] of sources) {
+    if (text === undefined) continue;
+    const excerpt = text.slice(0, POLICY_DOC_EXCERPT_LIMIT);
+    docs.push({ name, chars: text.length, excerpt, truncated: excerpt.length < text.length });
+  }
+  return docs.length > 0 ? docs : undefined;
 }
 
 /**
@@ -76,11 +103,87 @@ export function buildPacket(input: {
     station: buildable ? "freeze" : "terminal",
     lighting: "lit",
     policy,
+    policyDocs: policyDocsOf(input),
     scout,
     createdAt: now,
     updatedAt: now,
     parkReason: buildable ? undefined : policy.reasons[0],
   };
+}
+
+/**
+ * What the operator reads at the freeze, before the attest is taken.
+ *
+ * The freeze is the documented second layer over a scanner whose miss mode is known and named
+ * (docs/04-stations.md §2), and a second layer that is handed a boolean is not a second layer. So
+ * this prints the text the gate actually parsed, names every source with its size, and states the
+ * scan result as a claim *about that text*.
+ *
+ * The absence branch is the load-bearing one. "No ban statement matched" over zero characters of
+ * policy text is the single most misleading thing this surface could say, so an empty fetch is
+ * reported as an absence and the scan line is withheld entirely — the same fail-safe direction as
+ * `DENY_UNKNOWN_POLICY` itself (AGENTS.md: "Unknown policy = deny").
+ *
+ * Absence is measured in CHARACTERS, not in documents. A fetch that returned a 0-byte
+ * `CONTRIBUTING` — a repository with the file present and empty, a truncated response — produces a
+ * `policyDocs` entry, so a document-counted branch would take the scanned path and print the exact
+ * sentence the branch exists to prevent: "no ban statement matched in 0 chars from CONTRIBUTING".
+ */
+export function renderFreezeEvidence(packet: TaskPacket): string {
+  const docs = packet.policyDocs ?? [];
+  const fetched = new Set(docs.map((d) => d.name));
+  const lines: string[] = [
+    `Policy text the gate parsed for ${packet.repoId}#${packet.issueNumber} — read it before you attest:`,
+    "",
+  ];
+
+  for (const doc of docs) {
+    lines.push(
+      `  ${doc.name} — ${doc.chars} chars${doc.truncated ? ` (first ${doc.excerpt.length} shown)` : ""}`,
+    );
+    for (const line of doc.excerpt.split("\n")) lines.push(`  | ${line}`);
+    lines.push("");
+  }
+  for (const name of ["AGENTS.md", "CONTRIBUTING"]) {
+    if (!fetched.has(name)) lines.push(`  ${name} — not fetched.`);
+  }
+
+  // `policyNotes` is concatenated into the scan blob (docs/10-schemas.md), so it is part of what
+  // the scanner read — but it is ours, not the repository's, and is labelled as such.
+  const notes = repoById(packet.repoId)?.policyNotes;
+  if (notes) {
+    lines.push("", `  allowlist.yaml policyNotes — ${notes.length} chars, written by us, not the repo:`, `  | ${notes}`);
+  }
+  const record = packet.policy.record;
+  if (record) {
+    lines.push(
+      "",
+      `  Committed policy record — ${record.source} (fetched ${record.fetchedAt}, stance ${record.stance}):`,
+      `  | ${record.quote}`,
+    );
+  }
+
+  lines.push("");
+  const total = docs.reduce((n, d) => n + d.chars, 0);
+  if (total === 0) {
+    lines.push(
+      docs.length === 0
+        ? "  No policy text was fetched for this packet, so any scan result would stand on nothing."
+        : `  ${docs.map((d) => d.name).join(" + ")} came back empty, so any scan result would stand on nothing.`,
+      "  Fetch AGENTS.md / CONTRIBUTING and re-gate before you attest.",
+    );
+  } else if (packet.policy.matchedPhrases.length > 0) {
+    lines.push("  Scanner matched — confirm these are the maintainer's words and mean what the verdict says:");
+    for (const phrase of packet.policy.matchedPhrases) lines.push(`    · ${phrase}`);
+  } else {
+    lines.push(`  Scanner: no ban statement matched in ${total} chars from ${docs.map((d) => d.name).join(" + ")}.`);
+  }
+  lines.push(
+    `  Verdict: ${packet.policy.code}${packet.policy.reasons.length > 0 ? ` — ${packet.policy.reasons.join(" ")}` : ""}`,
+    "  The scanner is a high-recall suggester with a known miss mode, not the arbiter. You are.",
+    "",
+  );
+  return lines.join("\n");
 }
 
 /** Written for the maintainer, not the factory: what changed, how it was verified, who prepared it. Internal vocabulary (policy codes, scout scores, lighting) stays in the packet record. */

@@ -45,7 +45,7 @@ import {
 } from "./halt.ts";
 import { packetChecks, seedDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
-import { renderEvidencePage, renderPrBody } from "./packet.ts";
+import { renderEvidencePage, renderFreezeEvidence, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
@@ -372,6 +372,12 @@ async function main() {
       process.exit(1);
     }
     const packetForFreeze = state.packets.find((p) => p.id === id);
+    // The evidence first, and for any packet the operator names — not only the ones the gate will
+    // let through. The freeze is the documented second layer over a scanner with a known miss mode
+    // (docs/04-stations.md §2), and until issue #37 it was handed a verdict with the parsed text
+    // discarded. Printed before the competing-work reads, so a network failure below cannot swallow
+    // the one thing the human is here to read.
+    if (packetForFreeze) console.log(renderFreezeEvidence(packetForFreeze));
     if (packetForFreeze && (packetForFreeze.status === "gated" || packetForFreeze.status === "frozen")) {
       // SPEC.md §4: the approval step re-checks for competing upstream work and stands down rather
       // than proceed. An issue closed since gating is the strongest form of that — the work is

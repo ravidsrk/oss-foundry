@@ -1165,3 +1165,92 @@ test("an unreadable issue refuses at all three gates rather than proceeding blin
   assert.equal(packet?.status, "gated", "an unreadable issue must not move the packet");
   assert.equal(packet?.humanAttest, undefined, "an unreadable issue must not stamp an attestation");
 });
+
+/**
+ * Issue #37: the human freeze is the documented second layer of defence over a scanner with a
+ * known miss mode, and it was reading a verdict with the evidence discarded. `approve` now prints
+ * the policy text the gate actually parsed before the attest is taken, so the operator confirms
+ * against the maintainer's own words. This is the wiring test — the rendering itself is pinned in
+ * `packet.test.ts`, and this file exists to kill a mutation of the CALL SITE, which no test of
+ * `renderFreezeEvidence` can see.
+ */
+const FREEZE_CONTRIBUTING =
+  "Thanks for contributing! Run `pnpm test` before opening a pull request and open an issue first for anything large.";
+
+/** The seed with its in-flight slot given to a freshly gated Wave 1 packet, docs and all. */
+function gatedState(docs: { agentsMd?: string; contributing?: string }): FactoryState {
+  const seed = seedState();
+  const gated = buildPacket({
+    repoId: "mcp-use/mcp-use",
+    issueNumber: 999,
+    issueTitle: "docs typo",
+    issueUrl: "https://github.com/mcp-use/mcp-use/issues/999",
+    ...docs,
+  });
+  assert.equal(gated.status, "gated", "the fixture must actually reach the freeze station");
+  return {
+    ...seed,
+    packets: [gated, ...seed.packets.filter((p) => p.status !== "submitted")],
+  };
+}
+
+test("approve shows the operator the policy text the gate parsed", () => {
+  const state = gatedState({ contributing: FREEZE_CONTRIBUTING });
+  const path = writeState(state);
+  const stub = githubStub("record");
+  const run = runCli(
+    ["approve", state.packets[0].id, "--note", "read CONTRIBUTING myself", "--by", "ravidsrk", "--state", path],
+    tmpdir(),
+    { preload: stub.preload },
+  );
+  assert.equal(run.code, 0, run.out);
+  // The maintainer's own words, on the terminal, before the attest was written.
+  assert.match(run.stdout, /open an issue first for anything large/);
+  assert.match(run.stdout, new RegExp(`CONTRIBUTING[^\\n]*${FREEZE_CONTRIBUTING.length} chars`));
+  assert.match(run.stdout, /no ban statement matched/i);
+  assert.match(run.stdout, /approved /);
+  assert.equal(
+    JSON.parse(readFileSync(path, "utf8")).packets.find((p: { id: string }) => p.id === state.packets[0].id).status,
+    "approved",
+  );
+});
+
+test("approve prints the policy text before the competing-work reads, not after them", () => {
+  // Ordering is the whole point of where the call sits. The competing-work check is a network read
+  // that can fail and `process.exit(1)` — if the evidence printed after it, an operator hitting a
+  // stand-down or an unreadable issue would never see the words they are here to read. The stand
+  // down still refuses the approval; what is under test is that the evidence survived it.
+  const state = gatedState({ contributing: FREEZE_CONTRIBUTING });
+  const path = writeState(state);
+  const stub = githubStub("record", { "mcp-use/mcp-use#999": { state: "closed" } });
+  const run = runCli(["approve", state.packets[0].id, "--note", "n", "--state", path], tmpdir(), {
+    preload: stub.preload,
+  });
+  assert.equal(run.code, 1, "a closed issue must still stand the approval down");
+  assert.match(run.out, /stand down/i);
+  assert.match(run.stdout, /open an issue first for anything large/, "the evidence must survive the stand-down");
+  assert.equal(
+    JSON.parse(readFileSync(path, "utf8")).packets.find((p: { id: string }) => p.id === state.packets[0].id).status,
+    "gated",
+  );
+});
+
+test("approve names the absence when the gate parsed no policy text at all", () => {
+  // `mcp-use/mcp-use` is `aiPolicy: unknown` with a committed `silent` record, so a packet built
+  // with no fetched docs is DENY_UNKNOWN_POLICY and cannot be approved. The point is what the
+  // operator is told on the way to that refusal: not a clean scan, an absence.
+  const seed = seedState();
+  const blind = buildPacket({
+    repoId: "mcp-use/mcp-use",
+    issueNumber: 998,
+    issueTitle: "docs typo",
+    issueUrl: "https://github.com/mcp-use/mcp-use/issues/998",
+  });
+  const path = writeState({ ...seed, packets: [blind, ...seed.packets.filter((p) => p.status !== "submitted")] });
+  const run = runCli(["approve", blind.id, "--note", "n", "--state", path], tmpdir(), {
+    preload: githubStub("record").preload,
+  });
+  assert.match(run.stdout, /no policy text/i);
+  assert.equal(/no ban statement matched/i.test(run.stdout), false);
+  assert.equal(run.code, 1, "a packet the gate denied still cannot be approved");
+});

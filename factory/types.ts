@@ -124,6 +124,31 @@ export interface PolicyVerdict {
   record?: PolicyRecord;
 }
 
+/**
+ * One document the gate actually read, kept on the packet so the human freeze can confirm the
+ * verdict against the maintainer's own words instead of a boolean.
+ *
+ * `buildPacket` used to forward `agentsMd` / `contributing` into `evaluatePolicy` and then drop
+ * them, which left the mandatory freeze (docs/04-stations.md §3) blind to the very text the
+ * scanner parsed — and the scanner is a high-recall suggester with a known miss mode, not an
+ * arbiter (issue #37). Catching a miss then meant going and reading the repo out of band, which is
+ * exactly the diligence the tool claims to systematize.
+ *
+ * `chars` is the size of the document as fetched, `excerpt` is what the ledger keeps of it: a
+ * truncated record still states the true size, so a short excerpt can never be misread as a short
+ * document.
+ */
+export interface PolicyDocSource {
+  /** The document as the fetcher named it: `AGENTS.md` or `CONTRIBUTING`. */
+  name: string;
+  /** Length of the fetched text in characters, BEFORE truncation. */
+  chars: number;
+  /** The head of the fetched text, capped at `POLICY_DOC_EXCERPT_LIMIT`. */
+  excerpt: string;
+  /** True exactly when `excerpt` is shorter than the document `chars` describes. */
+  truncated: boolean;
+}
+
 export interface ScoutScore {
   total: number;
   parts: {
@@ -172,6 +197,12 @@ export interface TaskPacket {
   station: Station;
   lighting: Lighting;
   policy: PolicyVerdict;
+  /**
+   * The fetched documents the verdict was computed from. Absent when nothing was fetched — which
+   * is a different fact from a document that was fetched and came back empty (`chars: 0`), and the
+   * freeze displays the two differently.
+   */
+  policyDocs?: PolicyDocSource[];
   scout: ScoutScore;
   createdAt: string;
   updatedAt: string;
