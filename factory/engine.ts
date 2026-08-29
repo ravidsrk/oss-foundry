@@ -1,5 +1,5 @@
 import { ALLOWLIST, CAPS, isDenied, repoById, sameRepoId } from "./allowlist.ts";
-import { parsePrUrl } from "./github-pr.ts";
+import { parsePrUrl, type IssueLiveState } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import { factoryHalt } from "./halt.ts";
 import { AGENT_NAME_RE, commitTrailerLine, type DisclosureTrailer } from "./neighbor.ts";
@@ -65,6 +65,7 @@ export function applyTick(
   live: LiveIssue[] = [],
   competingKeys: readonly string[] = [],
   adjacentKeys: readonly string[] = [],
+  closedIssues: readonly { key: string; reason: string }[] = [],
 ): { state: FactoryState; packet: TaskPacket | null; reason: string } {
   if (hasInflight(state.packets)) {
     const next = appendEvent(state, ev("tick", "Tick aborted — a packet is already in flight. One at a time."));
@@ -81,9 +82,17 @@ export function applyTick(
       ),
     );
   }
+  // A skip, not a consumption (issue #40). Nothing is written against the issue — no packet, no
+  // park — so a reopen makes the row selectable again on the next tick with no hand edit. What IS
+  // written is the reason, because a named `firstIssues` row silently going unscouted is the shape
+  // of a factory that has quietly stopped working; the ledger has to say which row and why. The
+  // reason already names its own issue (`issueStandDownReason`), so the event does not repeat it.
+  for (const closed of closedIssues) {
+    held = appendEvent(held, ev("tick", `Tick skipped: ${closed.reason}`));
+  }
 
   const used = usedKeys(held.packets);
-  const blocked = new Set([...competingKeys, ...adjacentKeys]);
+  const blocked = new Set([...competingKeys, ...adjacentKeys, ...closedIssues.map((c) => c.key)]);
   const candidate = pickCandidate(held, live, used, blocked);
   if (!candidate) {
     const next = appendEvent(
@@ -586,6 +595,49 @@ export function classifyCompetition(
   const branch = input.pulls.find((pull) => branchMentionsIssue(pull.headRef, issueNumber));
   if (branch) return { kind: "adjacent", url: branch.url, why: "branch-name" };
   return { kind: "clear" };
+}
+
+/**
+ * Is this issue still something a maintainer wants worked on? (issue #40)
+ *
+ * A sibling of `classifyCompetition`, deliberately: same shape — a live GitHub fact the CLI fetches
+ * and the engine judges — and the same posture word, "stand down", that docs/02-good-neighbor.md
+ * rule 8 uses for a competing PR. It exists because that rule's machinery is blind here:
+ * `classifyCompetition` reads only OPEN pull requests, so the moment someone else's fix merges, the
+ * PR closes, the issue closes, and the verdict goes back to `clear` — indistinguishable from an
+ * issue nobody has touched. What follows is the drive-by pattern docs/PRODUCT.md §2 names as
+ * vandalism, reached through a blind spot rather than bad intent.
+ *
+ * Returns the refusal sentence, or `undefined` when the issue is workable — the same
+ * `…Violation`/`scopeOverflow` idiom the rest of this module uses for a gate that usually passes.
+ * The whole sentence is composed here rather than at the three call sites so tick, freeze and
+ * contact cannot drift into three different accounts of the same fact, and it names its own issue
+ * so it survives being copied into the ledger without the caller's prefix.
+ *
+ * `not_planned` gets its own wording because it is a different fact: nobody fixed this, the
+ * maintainers decided against it. An operator told "already resolved" would go hunting for a fix
+ * that does not exist.
+ */
+export function issueStandDownReason(
+  target: { repoId: string; issueNumber: number },
+  issue: Pick<IssueLiveState, "state" | "isPullRequest"> & { stateReason?: string; closedBy?: string },
+  closingRef?: string,
+): string | undefined {
+  const key = `${target.repoId}#${target.issueNumber}`;
+  if (issue.isPullRequest) {
+    return `${key} is a pull request, not an issue — GitHub serves both from the issues endpoint, and the roster names a number that is not workable as an issue. Fix the firstIssues row in allowlist.yaml.`;
+  }
+  if (issue.state === "open") return undefined;
+  const by = issue.closedBy ? ` by ${issue.closedBy}` : "";
+  const ref = closingRef ? ` (${closingRef})` : "";
+  if (issue.stateReason === "not_planned") {
+    return `${key} is closed as not planned${by}${ref} — the maintainers decided against it. Nothing to contribute here; a PR nobody asked for is a surprise, not a contribution.`;
+  }
+  const resolved =
+    issue.stateReason === "completed"
+      ? "it was already resolved"
+      : "GitHub gives no reason, so read the issue before assuming it can be reopened";
+  return `${key} is closed${by}${ref} — ${resolved}. A PR on a closed issue is a surprise, not a contribution.`;
 }
 
 function scopeOverflow(repoId: string, filesChanged: number, diffLines: number): string | undefined {

@@ -17,6 +17,7 @@ import {
   isBoundSha,
   findCompetingPull,
   hasInflight,
+  issueStandDownReason,
   maySelectRepo,
   QUIET_RELEASE_DAYS,
   quietDaysOf,
@@ -26,11 +27,14 @@ import {
   compareCommits,
   createDraftPull,
   draftPullPayload,
+  fetchIssueClosingRef,
+  fetchIssueState,
   fetchRepoFile,
   listCrossReferencingOpenPulls,
   listOpenPulls,
   parsePrUrl,
   syncGithubPr,
+  type IssueLiveState,
 } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import {
@@ -186,10 +190,31 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
   }
 }
 
+/**
+ * The closing commit or pull request, read only when there is a refusal to enrich (issue #40).
+ *
+ * Calling `fetchIssueClosingRef` unconditionally would spend a timeline request on every open issue
+ * at every gate, which is the opposite of the point: the reference exists for the refusal message,
+ * and an open issue has no refusal message. It is not free on the path where it IS spent, and the
+ * ordering does not pay for it: this is the identical `issues/{n}/timeline?per_page=100` GET the
+ * competing-work check below would have made, spent on the refusal instead. So a closed row costs
+ * exactly what an open row that reaches the timeline costs, and one request MORE than an open row
+ * a closing-keyword hit settles from the already-fetched pulls — live, that last case is
+ * ColeMurray/background-agents#1476, which spends one request here and spent none before.
+ */
+async function closingRefFor(
+  issue: IssueLiveState,
+  target: { repoId: string; issueNumber: number },
+): Promise<string | undefined> {
+  if (issue.state === "open") return undefined;
+  return fetchIssueClosingRef(target.repoId, target.issueNumber);
+}
+
 async function tickWithGithub(state: FactoryState) {
   if (hasInflight(state.packets)) return applyTick(state);
   const competingKeys: string[] = [];
   const adjacentKeys: string[] = [];
+  const closedIssues: { key: string; reason: string }[] = [];
   const live: LiveIssue[] = [];
   for (const repo of ALLOWLIST) {
     if (repo.firstIssues.length === 0) continue;
@@ -204,6 +229,30 @@ async function tickWithGithub(state: FactoryState) {
       (await fetchRepoFile(repo.id, ".github/CONTRIBUTING.md"));
     for (const issue of repo.firstIssues) {
       const key = `${repo.id}#${issue.number}`;
+      // Is the target still open at all? First, ahead of the competing-work classification,
+      // because it is the more decisive fact: a closed issue needs no competitor to be
+      // unscoutable. The ordering buys no requests. Refusing here does short-circuit the
+      // competing-work timeline call below, but `closingRefFor` then makes the identical
+      // `issues/{n}/timeline?per_page=100` GET for the refusal message, so the saving is exactly
+      // zero. Measured live over the four rows `allowlist.yaml` names, two of them closed: a full
+      // tick went 15 requests → 19. The cost is +1 GET per named row, unconditionally — closed
+      // rows are not cheaper, they cost the same +1 as every other row.
+      const liveIssue = await fetchIssueState(repo.id, issue.number);
+      if (!liveIssue.ok) {
+        // Fail closed, exactly like the two reads either side of it: "GitHub would not say" is not
+        // "the issue is open".
+        console.error(liveIssue.error);
+        process.exit(1);
+      }
+      const target = { repoId: repo.id, issueNumber: issue.number };
+      const standDown = issueStandDownReason(target, liveIssue.issue, await closingRefFor(liveIssue.issue, target));
+      if (standDown) {
+        // The reason names the issue itself, so the prefix does not repeat it — unlike the
+        // competing/adjacent lines below, whose verdicts carry only a PR url.
+        console.error(`stand down: ${standDown}`);
+        closedIssues.push({ key, reason: standDown });
+        continue;
+      }
       // Cheap path first: a closing-keyword hit in the already-fetched pulls settles "competing"
       // without spending a timeline call per issue.
       const keywordHit = findCompetingPull(pulls.pulls, issue.number, issue.url, repo.id);
@@ -243,7 +292,7 @@ async function tickWithGithub(state: FactoryState) {
       });
     }
   }
-  return applyTick(state, live, competingKeys, adjacentKeys);
+  return applyTick(state, live, competingKeys, adjacentKeys, closedIssues);
 }
 
 const [cmd, ...rest] = ARGV;
@@ -324,6 +373,23 @@ async function main() {
     }
     const packetForFreeze = state.packets.find((p) => p.id === id);
     if (packetForFreeze && (packetForFreeze.status === "gated" || packetForFreeze.status === "frozen")) {
+      // SPEC.md §4: the approval step re-checks for competing upstream work and stands down rather
+      // than proceed. An issue closed since gating is the strongest form of that — the work is
+      // already done or explicitly unwanted — and it is invisible to the open-PR half of the
+      // re-check. A check at selection alone would not catch it: the tick that gated this packet
+      // may have run days ago.
+      const liveIssue = await fetchIssueState(packetForFreeze.repoId, packetForFreeze.issueNumber);
+      if (!liveIssue.ok) {
+        console.error(liveIssue.error);
+        process.exit(1);
+      }
+      const standDown = issueStandDownReason(packetForFreeze, liveIssue.issue, await closingRefFor(liveIssue.issue, packetForFreeze));
+      if (standDown) {
+        // Refuse, do not park: `reject` is the operator's verb and a closed issue can be reopened.
+        // The freeze is the human's, so the refusal hands the decision back rather than making it.
+        console.error(`stand down: ${standDown} Reject or leave it gated — do not approve.`);
+        process.exit(1);
+      }
       const pulls = await listOpenPulls(packetForFreeze.repoId);
       if (!pulls.ok) {
         console.error(pulls.error);
@@ -682,6 +748,25 @@ async function main() {
       console.error(`open-draft needs a draft-ready packet with no PR; ${id} is ${packet.status}${packet.prUrl ? ` with ${packet.prUrl}` : ""}`);
       process.exit(1);
     }
+    // The moment of contact (SPEC.md §6), and the last one that can still be taken back. The gate
+    // at tick cannot cover this: an issue can close while a packet is in flight, and by here the
+    // implementation, the review and the witness are all already spent. Refusing costs that work;
+    // proceeding costs a maintainer's attention on a PR nobody needs, which is what
+    // docs/02-good-neighbor.md rule 8 stands down for. Before the create, so a closed issue never
+    // becomes a write.
+    const liveIssue = await fetchIssueState(packet.repoId, packet.issueNumber);
+    if (!liveIssue.ok) {
+      console.error(liveIssue.error);
+      process.exit(1);
+    }
+    const issueStandDown = issueStandDownReason(packet, liveIssue.issue, await closingRefFor(liveIssue.issue, packet));
+    if (issueStandDown) {
+      // Names `reject` and the do-nothing, exactly like the freeze-time refusal above. There is no
+      // `park` verb for an operator to type (issue #62): `parked` is a status the engine writes,
+      // and the packet is `draft-ready` here — leaving it there is the second real option.
+      console.error(`stand down: ${issueStandDown} Reject or leave it draft-ready — do not open.`);
+      process.exit(1);
+    }
     const pulls = await listOpenPulls(packet.repoId);
     const crossRefs = pulls.ok
       ? findCompetingPull(pulls.pulls, packet.issueNumber, packet.issueUrl, packet.repoId)
@@ -883,6 +968,13 @@ async function main() {
       process.exit(1);
     }
     const packetForDraft = state.packets.find((p) => p.id === id);
+    // Deliberately NOT gated on the issue's state (issue #40), unlike tick / approve / open-draft.
+    // By here the pull request already exists on GitHub; the only question left is whether the
+    // ledger records it. Refusing would leave a live PR the ledger has never heard of — the
+    // abandoned-live-PR hole `packetChecks` exists to surface (ledger-check.ts, issue #34) — and
+    // the closed issue would still be there, now with nothing watching the draft. The right
+    // response to a draft on an issue that closed is a human closing the draft, which needs the
+    // record first.
     if (packetForDraft) {
       const parsed = parsePrUrl(url)!;
       const pulls = await listOpenPulls(packetForDraft.repoId);

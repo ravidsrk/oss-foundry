@@ -118,6 +118,123 @@ export async function listCrossReferencingOpenPulls(
   }
 }
 
+/** The target issue's own state, as GitHub records it. */
+export interface IssueLiveState {
+  number: number;
+  state: "open" | "closed";
+  /** GitHub's `state_reason`: `completed`, `not_planned`, `reopened`, or absent. */
+  stateReason?: string;
+  /**
+   * The number names a pull request. GitHub serves pull requests from the issues endpoint too,
+   * distinguished only by this key — without it a roster row pointing at a PR number reads back as
+   * a perfectly healthy issue.
+   */
+  isPullRequest: boolean;
+  closedAt?: string;
+  /** Login of whoever closed it, when GitHub reports one. */
+  closedBy?: string;
+  url: string;
+}
+
+/**
+ * Is the target issue still open? (issue #40)
+ *
+ * The read nothing in the factory made. Competing-work detection sees only OPEN pull requests —
+ * `listOpenPulls` asks for `state=open`, and `listCrossReferencingOpenPulls` drops every
+ * cross-reference that is not an open PR — so a fix that merged and closed the issue leaves no
+ * trace in either, and `classifyCompetition` returns `{kind: "clear"}`, byte-identical to an issue
+ * nobody has touched. This endpoint is the only one that answers the question.
+ *
+ * Fails closed like every other read on these paths: a non-answer is `{ok: false}`, never an
+ * assumed-open issue. Callers refuse on it.
+ */
+export async function fetchIssueState(
+  repoId: string,
+  issueNumber: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; issue: IssueLiveState } | { ok: false; error: string }> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
+      headers: githubApiHeaders(),
+    });
+    if (!res.ok) {
+      return { ok: false, error: `GitHub ${res.status} reading ${repoId}#${issueNumber}` };
+    }
+    const body = (await res.json()) as {
+      number?: number;
+      state?: string;
+      state_reason?: string | null;
+      pull_request?: unknown;
+      closed_at?: string | null;
+      closed_by?: { login?: string } | null;
+      html_url?: string;
+    };
+    return {
+      ok: true,
+      issue: {
+        number: body.number ?? issueNumber,
+        // Anything that is not the literal "open" is treated as closed: an unrecognised value is
+        // not a licence to contact a maintainer.
+        state: body.state === "open" ? "open" : "closed",
+        stateReason: body.state_reason ?? undefined,
+        isPullRequest: body.pull_request !== undefined && body.pull_request !== null,
+        closedAt: body.closed_at ?? undefined,
+        closedBy: body.closed_by?.login,
+        url: body.html_url ?? `https://github.com/${repoId}/issues/${issueNumber}`,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
+/**
+ * The commit or pull request GitHub's timeline says resolved the issue — for the refusal message,
+ * so the operator can go look at who fixed it instead of guessing.
+ *
+ * The same timeline `listCrossReferencingOpenPulls` reads, mined for what that one throws away: the
+ * closing pull request is CLOSED by definition, and that filter keeps only open ones. Live shape on
+ * ravidsrk/orca-fleet#71 — the roster's own first named issue, closed 2026-08-27 — is a
+ * `cross-referenced` event naming closed PR #72 plus a `closed` event with a null `commit_id`.
+ *
+ * Best-effort by design, and called only once a refusal has already been decided: a timeline that
+ * will not load degrades the message and nothing else. It must never be able to turn a refusal into
+ * a proceed, so it returns `undefined` rather than an error the caller could mistake for a verdict.
+ */
+export async function fetchIssueClosingRef(
+  repoId: string,
+  issueNumber: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | undefined> {
+  const [owner, repo] = repoId.split("/");
+  if (!owner || !repo) return undefined;
+  try {
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/timeline?per_page=100`,
+      { headers: githubApiHeaders() },
+    );
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as {
+      event?: string;
+      commit_id?: string | null;
+      source?: { issue?: { html_url?: string; pull_request?: unknown } };
+    }[];
+    // A commit that closed the issue outright is the more specific answer, so it outranks a
+    // cross-reference that merely names it.
+    const closingCommit = body.find((e) => e.event === "closed" && typeof e.commit_id === "string");
+    if (closingCommit?.commit_id) return `commit ${closingCommit.commit_id.slice(0, 7)}`;
+    const referenced = body
+      .filter((e) => e.event === "cross-referenced" && e.source?.issue?.pull_request !== undefined)
+      .map((e) => e.source?.issue?.html_url)
+      .filter((url): url is string => typeof url === "string");
+    return referenced.at(-1);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fetchRepoFile(
   repoId: string,
   path: string,

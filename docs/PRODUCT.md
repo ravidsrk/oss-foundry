@@ -47,7 +47,7 @@ These cannot be relaxed by a tick, a prompt, or “just this once.” The factor
 8. **Stop the same hour** a maintainer asks (denylist + scorecard tone `banned`; scorecard = per-repo standing, see §5 — unrelated to OpenSSF Scorecard).
 9. **Failing-first.** Test or repro is red before the fix. Revert must go red again. The engine does not stamp placeholder SHAs or auto-`red-on-revert`.
 10. **Scope caps.** Per-repo `maxFiles` / `maxDiffLines`. Overflow = park.
-11. **No competing PRs.** If upstream already has an open PR on the issue, assist or stand down.
+11. **No competing PRs, and no PR on a closed issue.** If upstream already has an open PR on the issue, assist or stand down. A closed issue is refused at tick, at freeze, and before contact — the open-PR check cannot see it, because the fix that closed the issue closed its PR too.
 12. **Follow up until quiet / merged / closed.** A rotting draft is still slop.
 
 Promotion: Wave 1+ packets cannot be queued until **two Foundry-attested Wave 0 merges** exist (`status === "merged"` and `humanAttest` on a Wave 0 repo).
