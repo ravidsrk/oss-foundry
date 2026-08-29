@@ -474,7 +474,9 @@ export function mentionsIssue(
   const closePrefixed = new RegExp(`${kw}\\s*:?\\s*${escapeRe(repoId)}#${n}(?!\\d)`, "i");
   if (closeBare.test(text) || closePrefixed.test(text)) return true;
   if (issueUrl) {
-    const closeUrl = new RegExp(`${kw}\\s*:?\\s*${escapeRe(issueUrl)}`, "i");
+    // `(?!\d)` for the same reason the two `#N` patterns carry it: `.../issues/710` *starts with*
+    // `.../issues/71`, so an unbounded match bound a different issue in the same repo.
+    const closeUrl = new RegExp(`${kw}\\s*:?\\s*${escapeRe(issueUrl)}(?!\\d)`, "i");
     if (closeUrl.test(text)) return true;
   }
   return false;
@@ -495,6 +497,15 @@ export function findCompetingPull(
  * over-inclusive: "PR #71" (a pull's own number) also matches — over-inclusion only
  * escalates to an adjacent hold a human clears, never a silent skip. Do not "fix" this
  * into a false negative.
+ *
+ * Two consumers now, with different costs for over-inclusion. Competition classification is the
+ * one the paragraph above is about. The other is the evidence gate (`evidenceBindingViolation`,
+ * issue #42), where over-inclusion means a commit range that merely names #N is accepted as
+ * evidence for it — bounded by everything else the gate checks (SHAs, fast-forward, scope caps,
+ * witness provenance) and by `applyAttachDraft`, which still demands a real closing keyword in
+ * the PR body. What must stay exact in both is the *identity* of the reference: the negative
+ * lookbehind keeps `other-owner/other-repo#71` out, `(?!\d)` keeps `#710` out, and the URL form
+ * carries the same digit guard so `.../issues/710` cannot bind `.../issues/71` by prefix.
  */
 export function referencesIssue(
   text: string,
@@ -506,7 +517,31 @@ export function referencesIssue(
   const bare = new RegExp(String.raw`(?<![\w/])#${n}(?!\d)`);
   const prefixed = new RegExp(`(?<![\\w/])${escapeRe(repoId)}#${n}(?!\\d)`, "i");
   if (bare.test(text) || prefixed.test(text)) return true;
-  return Boolean(issueUrl) && text.includes(issueUrl);
+  return Boolean(issueUrl) && new RegExp(`${escapeRe(issueUrl)}(?!\\d)`).test(text);
+}
+
+/**
+ * The evidence gate's binding half — the one part of `applyAttachEvidence` decidable from the
+ * commit messages alone, so the CLI can run it before `witnessEvidence` clones anything. The
+ * inputs are in hand the moment `compareCommits` returns; a mis-bound range should not cost a
+ * clone and two full test runs to refuse (issue #42), same class as the 40-hex SHA pre-check the
+ * `evidence` verb already does. `applyAttachEvidence` still calls it, so the reducer remains the
+ * authority and the `attach-witness` path — which has no pre-check — is unchanged.
+ *
+ * `referencesIssue`, not `mentionsIssue`: closing keywords are what make a *pull request body*
+ * auto-close an issue on GitHub, and `applyAttachDraft` still requires them there. A commit range
+ * only has to name the issue it is evidence for. Under the keyword-only rule the factory's own
+ * merged Wave-0 range (ravidsrk/orca-fleet PR #72, whose sole reference reads `(issue #71)`) was
+ * refused by the gate this factory enforces. The foreign-repo guard is untouched: neither rule
+ * binds `other-owner/other-repo#71`.
+ */
+export function evidenceBindingViolation(
+  packet: Pick<TaskPacket, "issueNumber" | "issueUrl" | "repoId">,
+  messages: string[],
+): string | undefined {
+  const blob = messages.join("\n");
+  if (referencesIssue(blob, packet.issueNumber, packet.issueUrl, packet.repoId)) return undefined;
+  return `commit range does not reference ${packet.repoId}#${packet.issueNumber} — no commit message in the range names the issue (bare #${packet.issueNumber}, ${packet.repoId}#${packet.issueNumber}, or ${packet.issueUrl}); a reference to another repo's #${packet.issueNumber} is not this packet's evidence`;
 }
 
 /** Head branch names that conventionally carry an issue number: fix/71, issue-71, gh_71, bug/71-slug. `bug` is a deliberate superset of the spec's fix|issue|gh seed list. */
@@ -603,9 +638,12 @@ export function applyAttachEvidence(
     const parked = park(state, id, overflow);
     return { state: parked, error: `${overflow} Packet parked.` };
   }
-  const blob = binding.messages.join("\n");
-  if (!mentionsIssue(blob, packet.issueNumber, packet.issueUrl, packet.repoId)) {
-    return { state, error: `commit range does not close ${packet.repoId}#${packet.issueNumber}` };
+  // The CLI's `evidence` verb runs this same check before the witness, so a mis-bound range costs
+  // no clone. It is repeated here because the reducer, not CLI convention, is the authority — and
+  // `attach-witness` reaches this line with no pre-check at all.
+  const unbound = evidenceBindingViolation(packet, binding.messages);
+  if (unbound) {
+    return { state, error: unbound };
   }
   const trailerViolation = commitTrailerViolation(
     binding.messages,

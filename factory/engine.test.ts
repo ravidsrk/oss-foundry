@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -313,9 +313,14 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     notes: [],
   }, bindingFor(state.packets[0], { messages: ["unrelated refactor"] }));
   assert.ok(unrelatedExisting.error);
-  assert.match(unrelatedExisting.error, /does not close/);
+  assert.match(unrelatedExisting.error, /does not reference/);
 
-  const casualMention = applyAttachEvidence(state, id, {
+  // A plain reference *is* a binding, for evidence purposes (issue #42). This assertion used to
+  // read the other way, and under it the factory's own merged Wave-0 range — whose only mention of
+  // the issue is `(issue #71)` — was refused by the gate the factory enforces. Closing keywords
+  // stay required where GitHub's auto-close semantics actually apply: the PR body, checked by
+  // `applyAttachDraft` (the `casualPr` case below still refuses).
+  const plainReference = applyAttachEvidence(state, id, {
     baseSha: BASE,
     headSha: OTHER,
     testCommand: "true",
@@ -325,8 +330,8 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     diffLines: 1,
     notes: [],
   }, bindingFor(state.packets[0], { messages: [`see also #${state.packets[0].issueNumber}`] }));
-  assert.ok(casualMention.error);
-  assert.match(casualMention.error, /does not close/);
+  assert.equal(plainReference.error, undefined, plainReference.error);
+  assert.equal(plainReference.state.packets[0].evidence?.shaVerified, true);
 
   const foreignRepo = applyAttachEvidence(state, id, {
     baseSha: BASE,
@@ -341,7 +346,7 @@ test("advance does not stamp placeholder SHA or auto-harvest", () => {
     messages: [`Fixes other-owner/other-repo#${state.packets[0].issueNumber}`],
   }));
   assert.ok(foreignRepo.error);
-  assert.match(foreignRepo.error, /does not close/);
+  assert.match(foreignRepo.error, /does not reference/);
 
   state = applyAttachEvidence(state, id, {
     baseSha: BASE,
@@ -368,6 +373,158 @@ test("mentionsIssue rejects a foreign owner/repo with the same issue number", ()
   assert.equal(mentionsIssue(`Fixes ${url}`, 71, url, repo), true);
   assert.equal(mentionsIssue("Fixes other-owner/other-repo#71", 71, url, repo), false);
   assert.equal(mentionsIssue("Closes matplotlib/matplotlib#71", 71, url, repo), false);
+  // A longer issue number whose URL merely *starts* with ours is a different issue. The keyword
+  // path matched it by substring, so `Fixes .../issues/710` bound packet #71 (issue #42).
+  assert.equal(mentionsIssue(`Fixes ${url}0`, 71, url, repo), false);
+});
+
+// --- Evidence binding: the reference forms the project itself ships (issue #42) ---
+
+/**
+ * The factory's own merged Wave-0 range. `ravidsrk/orca-fleet` PR #72: base 36d0f23, head 8c7068a,
+ * merged. Read live with `gh api repos/ravidsrk/orca-fleet/pulls/72/commits` on 2026-08-29 and
+ * reproduced byte-for-byte below — its only mention of the issue is `(issue #71)`, no closing
+ * keyword. Under the keyword-only rule this exact range, already shipped and reviewed and merged
+ * by this project, was refused by the gate this project enforces: `commit range does not close
+ * ravidsrk/orca-fleet#71`.
+ */
+const MERGED_BASE = "36d0f23708adbdf911e4df050ed516821278a9fc";
+const MERGED_HEAD = "8c7068a5467a283de524c88e549dfa66782eeec2";
+const MERGED_MESSAGE = [
+  "fix(validate): one unreadable SKILL.md must not abort the catalog",
+  "",
+  "Wrap SKILL.md and playbook/runtime reads so UnicodeDecodeError / OSError",
+  "become a one-item per-file error. Fixture tests lock the branch (issue #71).",
+  "",
+  "Prepared by Foundry. Draft only. Foundry does not merge.",
+].join("\n");
+
+test("the factory's own merged Wave-0 range attaches as evidence", () => {
+  const { state, id } = reviewing();
+  const packet = state.packets[0];
+  assert.equal(packet.repoId, "ravidsrk/orca-fleet", "the regression fixture is the Wave 0 packet");
+  assert.equal(packet.issueNumber, 71);
+
+  const attached = applyAttachEvidence(
+    state,
+    id,
+    {
+      baseSha: MERGED_BASE,
+      headSha: MERGED_HEAD,
+      testCommand: "true",
+      testExit: 0,
+      negativeControl: "red-on-revert",
+      filesChanged: 1,
+      diffLines: 1,
+      notes: [],
+      witness: { ...witnessed(), baseSha: MERGED_BASE, headSha: MERGED_HEAD },
+    },
+    bindingFor(packet, { messages: [MERGED_MESSAGE] }),
+  );
+  assert.equal(attached.error, undefined, attached.error);
+  assert.equal(attached.state.packets[0].evidence?.shaVerified, true);
+  assert.equal(evidenceIsReady(attached.state.packets[0]), true, "and it reaches the promotion gate");
+});
+
+/**
+ * The whole surface of the relaxation, in one table: what the *commit-range* gate binds, and what
+ * the *PR-body* gate (`mentionsIssue`, still keyword-only, still the rule `applyAttachDraft`
+ * enforces) binds, for the same text. `bind` in the second column and not the first is exactly the
+ * set the change opened; every such row names this packet's own repo and its own issue number.
+ */
+const BINDING_TABLE: { text: string; range: boolean; prBody: boolean; note: string }[] = [
+  { text: "Fixes #71", range: true, prBody: true, note: "closing keyword, bare" },
+  { text: "Closes #71", range: true, prBody: true, note: "closing keyword, bare" },
+  { text: "resolved #71", range: true, prBody: true, note: "closing keyword, past tense" },
+  { text: "Fixes ravidsrk/orca-fleet#71", range: true, prBody: true, note: "keyword + own repo prefix" },
+  {
+    text: "Fixes https://github.com/ravidsrk/orca-fleet/issues/71",
+    range: true,
+    prBody: true,
+    note: "keyword + issue URL",
+  },
+  { text: MERGED_MESSAGE, range: true, prBody: false, note: "the real merged PR #72 range: `(issue #71)`" },
+  { text: "issue #71", range: true, prBody: false, note: "plain `issue #N`" },
+  { text: "see also #71", range: true, prBody: false, note: "bare #N" },
+  { text: "#71", range: true, prBody: false, note: "bare #N alone" },
+  { text: "ravidsrk/orca-fleet#71", range: true, prBody: false, note: "own repo prefix, no keyword" },
+  {
+    text: "context: https://github.com/ravidsrk/orca-fleet/issues/71",
+    range: true,
+    prBody: false,
+    note: "issue URL, no keyword",
+  },
+  {
+    text: "PR #71 tracks this",
+    range: true,
+    prBody: false,
+    note: "over-inclusive by design: a pull number that collides with the issue number still binds",
+  },
+  {
+    text: "Fixes #71abc",
+    range: true,
+    prBody: true,
+    note: "pre-existing over-inclusion in BOTH matchers: `(?!\\d)` guards digits, not letters",
+  },
+  { text: "##71", range: true, prBody: false, note: "stray sigil; still this repo's #71 token" },
+  { text: "Fixes other-owner/other-repo#71", range: false, prBody: false, note: "FOREIGN repo" },
+  { text: "other-owner/other-repo#71", range: false, prBody: false, note: "FOREIGN repo, no keyword" },
+  { text: "Closes matplotlib/matplotlib#71", range: false, prBody: false, note: "FOREIGN, denylisted repo" },
+  { text: "ravidsrk/orca-fleet-mirror#71", range: false, prBody: false, note: "near-neighbour repo name" },
+  { text: "Fixes #72", range: false, prBody: false, note: "different issue, same repo" },
+  { text: "see also #710", range: false, prBody: false, note: "longer number, same repo" },
+  {
+    text: "https://github.com/ravidsrk/orca-fleet/issues/710",
+    range: false,
+    prBody: false,
+    note: "different issue number inside a URL",
+  },
+  {
+    text: "https://github.com/ravidsrk/orca-fleet/pull/71",
+    range: false,
+    prBody: false,
+    note: "the number lives in a pull URL, not the issue URL",
+  },
+  { text: "unrelated refactor", range: false, prBody: false, note: "no reference at all" },
+];
+
+test("the evidence gate binds plain references and nothing foreign or misnumbered", () => {
+  const { state, id } = reviewing();
+  const packet = state.packets[0];
+  const url = packet.issueUrl;
+  assert.equal(url, "https://github.com/ravidsrk/orca-fleet/issues/71");
+
+  for (const row of BINDING_TABLE) {
+    const attached = applyAttachEvidence(
+      state,
+      id,
+      {
+        baseSha: BASE,
+        headSha: HEAD,
+        testCommand: "true",
+        testExit: 0,
+        negativeControl: "red-on-revert",
+        filesChanged: 1,
+        diffLines: 1,
+        notes: [],
+      },
+      bindingFor(packet, { messages: [row.text] }),
+    );
+    const bound = attached.error === undefined;
+    assert.equal(bound, row.range, `range binding for ${JSON.stringify(row.text)} (${row.note}): ${attached.error ?? "bound"}`);
+    if (!bound) assert.match(attached.error!, /does not reference/, row.note);
+    // The PR body keeps GitHub's own rule, unrelaxed — that is where auto-close semantics live.
+    assert.equal(
+      mentionsIssue(row.text, packet.issueNumber, url, packet.repoId),
+      row.prBody,
+      `PR-body binding for ${JSON.stringify(row.text)} (${row.note})`,
+    );
+  }
+
+  // Nothing foreign is anywhere in the accepted set — the relaxation is same-repo only.
+  for (const row of BINDING_TABLE.filter((r) => r.range)) {
+    assert.doesNotMatch(row.text, /other-owner|matplotlib|orca-fleet-mirror/, row.note);
+  }
 });
 
 test("renderPrBody embeds verbatim disclosure; create payload is draft-only", () => {
@@ -2663,11 +2820,42 @@ function wave0Origin(): { path: string; base: string; head: string } {
 }
 
 /**
+ * A `git` on the child's PATH that appends every invocation to a file and then execs the real one.
+ * This is the injected runner the ordering test reads: `witnessEvidence`'s very first act on the
+ * host path is `git clone`, so an empty record is proof the witness never ran — not an inference
+ * from how long the refusal took. The positive control in the same test runs a well-bound range
+ * through the same shim and sees the clone recorded, so an empty record cannot mean a dead shim.
+ */
+function recordingGit(dir: string): { binDir: string; record: string; calls: () => string[] } {
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  assert.match(realGit, /git$/, "the shim needs a real git to delegate to");
+  const binDir = join(dir, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const record = join(dir, "git-calls.log");
+  const shim = join(binDir, "git");
+  writeFileSync(shim, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(record)}\nexec ${JSON.stringify(realGit)} "$@"\n`);
+  chmodSync(shim, 0o755);
+  return {
+    binDir,
+    record,
+    calls: () => {
+      try {
+        return readFileSync(record, "utf8").split("\n").filter(Boolean);
+      } catch {
+        return [];
+      }
+    },
+  };
+}
+
+/**
  * A work tree the `evidence` verb can be run in: the ledger holding the Wave 0 packet in
  * `reviewing`, a `compareCommits` stub reporting `filesChanged` files, and a git config that
- * rewrites the upstream clone URL to the local origin so nothing touches the network.
+ * rewrites the upstream clone URL to the local origin so nothing touches the network. `message` is
+ * what the stubbed compare reports as the range's commit message — the input the binding is
+ * decided from, and the only thing the ordering test varies.
  */
-function evidenceFixture(filesChanged = 2) {
+function evidenceFixture(filesChanged = 2, message = "fix the answer\n\nFixes #71") {
   const origin = wave0Origin();
   const dir = mkdtempSync(join(tmpdir(), "foundry-evidence-"));
   const { state, id } = reviewing();
@@ -2679,7 +2867,7 @@ function evidenceFixture(filesChanged = 2) {
     ahead_by: 1,
     behind_by: 0,
     files: Array.from({ length: filesChanged }, () => ({ additions: 1, deletions: 1 })),
-    commits: [{ commit: { message: "fix the answer\n\nFixes #71" } }],
+    commits: [{ commit: { message } }],
   };
   const stub = join(dir, "stub-github.mjs");
   writeFileSync(
@@ -2701,14 +2889,15 @@ function evidenceFixture(filesChanged = 2) {
     join(dir, "docs", "evidence", "logs", id, "test.log"),
     join(dir, "docs", "evidence", "logs", id, "revert.log"),
   ];
+  const git = recordingGit(dir);
   const runEvidence = () =>
     runCli(
       dir,
       ["evidence", id, "--base", origin.base, "--head", origin.head],
       stub,
-      { GIT_CONFIG_GLOBAL: gitconfig },
+      { GIT_CONFIG_GLOBAL: gitconfig, PATH: `${git.binDir}:${process.env.PATH ?? ""}` },
     );
-  return { dir, id, origin, logPaths, runEvidence };
+  return { dir, id, origin, logPaths, runEvidence, gitCalls: git.calls };
 }
 
 function exists(path: string): boolean {
@@ -2854,5 +3043,46 @@ test("attach-witness refuses identical log digests even when both logs are on di
   assert.equal(run.status, 1, run.seen);
   assert.doesNotMatch(run.seen, /does not match the witness sha256/, "the read itself must succeed");
   assert.match(run.seen, /hash to the same sha256/, run.seen);
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
+});
+
+test("a mis-bound range is refused before the witness runs at all", () => {
+  // Ordering proved by observation, not by stopwatch (issue #42). Every `git` the CLI child spawns
+  // goes through a shim that records it, and `witnessEvidence`'s first act on the host path is
+  // `git clone` — so the claim "the witness never ran" is the record being empty, not the refusal
+  // being fast.
+
+  // Positive control first: the recorder is live, and a well-bound range does clone and run twice.
+  const bound = evidenceFixture();
+  const green = bound.runEvidence();
+  assert.equal(green.status, 0, green.seen);
+  const clones = bound.gitCalls().filter((line) => line.startsWith("clone "));
+  assert.equal(clones.length, 1, `the shim must see the witness clone: ${bound.gitCalls().join(" | ")}`);
+  for (const path of bound.logPaths) assert.ok(exists(path), `${path} was never written: ${green.seen}`);
+
+  // Same fixture, same verb, one input changed: a commit range that names no issue at all.
+  const { dir, id, logPaths, runEvidence, gitCalls } = evidenceFixture(2, "unrelated refactor");
+  const run = runEvidence();
+  assert.equal(run.status, 1, run.seen);
+  // This assertion, and not the wall clock, is the claim: no git at all.
+  assert.deepEqual(gitCalls(), [], `the witness ran for a range the gate refuses: ${run.seen}`);
+  assert.match(run.seen, /does not reference ravidsrk\/orca-fleet#71/, run.seen);
+  // ...and therefore neither run happened, so neither log exists.
+  for (const path of logPaths) assert.equal(exists(path), false, `${path} was written for a refused range`);
+  // ...and the terminal did not narrate a clone it never performed.
+  assert.doesNotMatch(run.seen, /cloning/, run.seen);
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
+  assert.equal(ledgerAt(dir).packets[0].status, "reviewing", "a refusal at the pre-check parks nothing");
+  assert.equal(runCli(dir, ["advance", id]).status, 1);
+});
+
+test("the pre-check does not let a foreign reference through the evidence verb", () => {
+  // The security-relevant half: relaxing the matcher must not start binding someone else's issue
+  // number. Driven through the real verb so the pre-check and the reducer are both on the path.
+  const { dir, runEvidence, gitCalls } = evidenceFixture(2, "fix the answer\n\nFixes other-owner/other-repo#71");
+  const run = runEvidence();
+  assert.equal(run.status, 1, run.seen);
+  assert.deepEqual(gitCalls(), [], `a foreign reference bought a clone: ${run.seen}`);
+  assert.match(run.seen, /does not reference ravidsrk\/orca-fleet#71/, run.seen);
   assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
 });
