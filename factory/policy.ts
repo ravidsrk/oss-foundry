@@ -211,11 +211,31 @@ export function scanPolicyText(text: string): {
     if (m) humanReview.push(quoteOf(m));
   }
   for (const sentence of sentencesOf(text)) {
-    for (const clause of clausesOf(sentence)) {
+    const parts = clausesOf(sentence);
+    /**
+     * An ANAPHORIC requirement: a clause that asserts one while naming no instrument, because its
+     * subject was elided and is the instrument named earlier —
+     *
+     *   "A CLA is not required for documentation, but is required for code contributions."
+     *
+     * The requirement lands in a clause with no token, so the per-clause pass skipped it and only
+     * the waiver was recorded. P1 from review.
+     *
+     * The clause must START with the verb, which is what elision looks like. "and tests are
+     * required" has its own subject and must NOT flip the CLA — testing for the keywords alone
+     * would over-block that, and over-blocking parks a legitimate packet.
+     */
+    const anaphoric = parts.some(
+      (c) =>
+        /^(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?(?:required|needed|necessary|mandatory|obligatory|compulsory)\b/i.test(c) &&
+        !SIGNATURE_FAMILIES.some(({ token }) => new RegExp(token, "i").test(c)),
+    );
+    for (const clause of parts) {
       for (const { family, token } of SIGNATURE_FAMILIES) {
         if (!new RegExp(token, "i").test(clause)) continue;
         const quote = `${family}: ${clause.replace(/\s+/g, " ").trim().slice(0, 140)}`;
-        if (signaturePolarity(clause, sentence, token) === "required") signatureRequired.push(quote);
+        const polarity = signaturePolarity(clause, sentence, token);
+        if (polarity === "required" || anaphoric) signatureRequired.push(quote);
         else signatureWaived.push(quote);
       }
     }

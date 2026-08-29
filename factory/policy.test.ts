@@ -474,6 +474,14 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No DCO is needed, and we review everything except vendored trees.", want: "waived", why: "the 'except' is about review scope" },
   { doc: "No CLA. Reviews are quick, except during release weeks.", want: "waived", why: "limiter in a later sentence about something else" },
 
+  // ANAPHORA. A P1 from review: the requirement's subject is elided, so it lands in a clause with no
+  // instrument token and the per-clause pass skipped it, recording only the waiver.
+  { doc: "A CLA is not required for documentation, but is required for code contributions.", want: "required", why: "elided subject after 'but'" },
+  { doc: "No DCO is needed for docs, but is required for code.", want: "required", why: "same shape, DCO family" },
+  { doc: "A CLA is not required, however it is mandatory for vendored trees.", want: "required", why: "'it is mandatory' after 'however'" },
+  // ...and a later clause with its OWN subject must not flip anything, or the rule over-blocks.
+  { doc: "No CLA is required, and tests are required.", want: "waived", why: "'tests' is the subject, not the CLA" },
+
   // --- Plain requirements, in the phrasings a real CONTRIBUTING.md uses. ---
   { doc: "Pull requests without a signed Contributor License Agreement will be closed.", want: "required", why: "#50: the phrasing most likely to appear for real" },
   { doc: "We require a DCO sign-off.", want: "required", why: "plain DCO requirement" },
