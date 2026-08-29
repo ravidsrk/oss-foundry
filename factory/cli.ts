@@ -13,6 +13,7 @@ import {
   applyTick,
   bindingFromCompare,
   classifyCompetition,
+  evidenceBindingViolation,
   isBoundSha,
   findCompetingPull,
   hasInflight,
@@ -466,6 +467,15 @@ async function main() {
     const compared = await compareCommits(packet.repoId, base, head);
     if (!compared.ok) {
       console.error(compared.error);
+      process.exit(1);
+    }
+    // The binding is decidable right here, from messages already in hand, and the gate will refuse
+    // on it anyway — so refusing after the clone and both test runs threw away several seconds of
+    // genuinely green witness work at a string check (issue #42). Pre-check, like the 40-hex SHA
+    // guard above, and before the progress line so the terminal narrates no clone it will not do.
+    const unbound = evidenceBindingViolation(packet, compared.messages);
+    if (unbound) {
+      console.error(unbound);
       process.exit(1);
     }
     // Only the host path clones anything. On a sandboxed repo `witnessEvidence` refuses on the very
