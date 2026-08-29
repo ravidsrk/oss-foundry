@@ -1,9 +1,10 @@
-# Live ledger — 2026-08-28
+# Live ledger — 2026-08-29
 
 Operator snapshot. Foundry does not merge. Seed: `factory/seed.ts`. The block between the
 GENERATED markers is emitted by `node --experimental-strip-types factory/cli.ts ledger` — regenerate
 it after any state change instead of hand-editing; the clock cross-checks the committed seed against
-GitHub every tick (`factory/verify-ledger.ts`, divergence fails the run), and `reconcile` absorbs
+GitHub every tick (`factory/verify-ledger.ts`: a divergence fails the run, an advisory is printed
+and does not — see "What stops the clock" in `08-operations.md`), and `reconcile` absorbs
 merges/closes into local state without ever releasing the in-flight slot.
 
 <!-- GENERATED: node --experimental-strip-types factory/cli.ts ledger — do not hand-edit between these markers -->
@@ -87,8 +88,44 @@ Three carried claims were re-checked against their sources; none held as written
    Unicode homoglyph is a different repo rather than a way onto the roster. Bans in the block above
    stay 0: no repository was actually halted by the defect.
 
+## Corrections — 2026-08-29 (issue #49)
+
+**ColeMurray/background-agents#1652 is not a draft, and seven doc surfaces said it was.** The seed
+recorded `draft: true` at head `48c2242`, truthfully, as of the 16:16:39Z sync on 2026-08-28. At
+**18:09:24Z the operator (`ravidsrk`) marked the PR ready for review**, and `6b6ff04` — a merge of
+upstream `main`, the 7th commit — landed eight seconds later. Nothing synced afterwards, so
+`verify-ledger` went red on `main` and stayed red. The clock was right.
+
+Asked to choose, the operator kept the ready-for-review state rather than re-drafting upstream.
+Draft-only is the hardest rule this factory has. **This is a deviation, not a healing** — the same
+posture as the frontguard#196 operator merge: it happened, a named human did it at a named time, it
+is recorded, and it does not license a second one. What changed:
+
+1. `factory/seed.ts` `prMeta` synced to live: `draft: false`, `headSha: 6b6ff04`, `commits: 7`,
+   `updatedAt: 2026-08-28T18:09:34Z`, `syncedAt: 2026-08-29T05:08:48Z`. Fetched read-only from
+   `GET /repos/ColeMurray/background-agents/pulls/1652`. Nothing was written to that repository.
+2. **Seven surfaces asserted a draft**, across five files. All corrected and date-qualified:
+   `README.md` Status; `docs/PRODUCT.md` at the Status table row, the Wave 1 in-flight row, and the
+   §8 disclosure paragraph; `docs/06-v2.md` Live packets; `docs/03-allowlist.md` roster entry; and
+   this file's Next list. Issue #49 named five — `06-v2.md` and `03-allowlist.md` were found by
+   sweeping every file for the PR number. `docs/PRODUCT.md` §10 separately told the operator to
+   "prefer marking #1652 **draft**"; that instruction now records the decision instead of
+   contradicting it. `docs/08-operations.md` asserted no draft flag but named the packet, so it
+   gained the deviation and the clock section below.
+3. No doc states a live PR property in bare present tense any more. Every such claim now names the
+   sync it came from, because one click in a browser this factory does not control can falsify a
+   sentence written in the present tense.
+4. **The evidence was not touched.** It still describes `48c2242`, because nobody re-ran the test
+   command at `6b6ff04`. Re-stamping `reviewedSha` would have made the clock green by claiming a
+   test run that never happened. A re-witness is owed and outstanding.
+5. `verify-ledger` now separates a **divergence** (the ledger contradicting GitHub — SPEC.md §7,
+   still fatal, still reds `main`) from an **advisory** (a debt on a ledger that already
+   reconciles — printed every tick, never a gate). The re-witness gap is the only advisory
+   outstanding. See "What stops the clock" in `docs/08-operations.md`.
+
 ## Next
 
-1. Follow #1652 (now **draft**, disclosure verbatim — healed 2026-08-28) until quiet / merged-by-maintainer / closed.
-2. `sync pkt_ColeMurray_background-agents_1476 --threads-answered` once ≥14 quiet days accrue — the slot releases itself.
-3. Idle. One packet in flight.
+1. Follow #1652 (**ready for review, not draft**, as of the 2026-08-29 sync — disclosure verbatim as verified 2026-08-28; the draft-only deviation is recorded above) until quiet / merged-by-maintainer / closed.
+2. Re-witness #1652 at `6b6ff04` before its evidence is read as covering the live head. `verify-ledger` reports the gap as an advisory every tick until someone does.
+3. `sync pkt_ColeMurray_background-agents_1476 --threads-answered` once ≥14 quiet days accrue — the slot releases itself.
+4. Idle. One packet in flight.

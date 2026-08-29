@@ -1,17 +1,122 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { packetDivergences, seedDivergences } from "./ledger-check.ts";
+import {
+  evidenceIsStale,
+  needsRewitness,
+  packetChecks,
+  packetDivergences,
+  seedDivergences,
+} from "./ledger-check.ts";
 import { seedState } from "./seed.ts";
 import type { TaskPacket } from "./types.ts";
 
-/** A head the PR moved to after the evidence was witnessed. */
-const LIVE_HEAD = "6b6ff04c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
+/**
+ * A head the PR moved to after the evidence was witnessed. Synthetic — deliberately sharing no
+ * abbreviated prefix with any SHA in the seed, so an assertion on the seven-character form cannot
+ * pass by colliding with the real #1652 head below.
+ */
+const LIVE_HEAD = "facade00c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6";
 /** A head the committed ledger still names after the branch has moved on. */
 const STALE_HEAD = "deadbee1c0ffee2b3a4d5e6f708192a3b4c5d6e7";
+
+/**
+ * The real head ColeMurray/background-agents#1652 sits at, and the commit its evidence was
+ * witnessed against. Both read-only from `GET /repos/ColeMurray/background-agents/pulls/1652`
+ * (fetched 2026-08-29); the seed was synced to the first by issue #49 and must never be synced to
+ * the second, because nobody re-ran the tests there.
+ */
+const LIVE_HEAD_1652 = "6b6ff04079a47109263b81726a1c29459b334de5";
+const WITNESSED_1652 = "48c2242683705b00503d3436575bf3c28b1b0c9b";
 
 function submittedPacket(): TaskPacket {
   return seedState().packets.find((p) => p.status === "submitted")!;
 }
+
+test("#49: promoting the live facts into the seed reconciles the clock without erasing the re-witness debt", () => {
+  // The operator marked #1652 ready for review at 18:09:24Z on 2026-08-28 and a seventh commit
+  // landed eight seconds later, so the seed's `draft: true` / `headSha: 48c2242` contradicted
+  // GitHub and `verify-ledger` was red on `main`. Promoting the live facts clears that
+  // contradiction. It must NOT clear the fact that the evidence describes a commit two pushes
+  // back — that is the signal #43 anchored to the immutable `evidence.reviewedSha` precisely so
+  // this sync could not silently erase it.
+  const packet = submittedPacket();
+  const live = { state: "open" as const, merged: false, draft: false, headSha: LIVE_HEAD_1652 };
+
+  // The committed seed must name exactly the live facts; that is what makes the clock green.
+  assert.equal(packet.prMeta!.draft, live.draft, "the seed still records a draft the PR is not");
+  assert.equal(packet.prMeta!.headSha, live.headSha, "the seed still records a head GitHub left");
+  // ...and must NOT have re-stamped the evidence, which is the one way to make the clock green by
+  // lying: nobody re-ran the test command at 6b6ff04, so the proof still covers 48c2242 only.
+  assert.equal(
+    packet.evidence!.reviewedSha,
+    WITNESSED_1652,
+    "evidence may only move when a witness actually re-ran it",
+  );
+
+  const { fatal, advisory } = packetChecks(packet, live);
+  assert.deepEqual(fatal, [], `the ledger must reconcile against live; got ${JSON.stringify(fatal)}`);
+  assert.equal(
+    advisory.some(
+      (a) => a.includes(WITNESSED_1652.slice(0, 7)) && a.includes(LIVE_HEAD_1652.slice(0, 7)),
+    ),
+    true,
+    `the re-witness debt must outlive the sync; got ${JSON.stringify(advisory)}`,
+  );
+});
+
+test("#49: staleness anchored to prMeta.headSha would have gone silent at this exact sync", () => {
+  // The ordering rationale for #49 behind #43, executable. Before #43 the staleness check measured
+  // from the MUTABLE prMeta.headSha; reproduced here in shape, it is silent on the very inputs the
+  // sync above produces, so the sync would have erased the witnessed-at-48c2242 fact for good.
+  const packet = submittedPacket();
+  const unanchoredIsStale = (p: TaskPacket, headSha: string) => p.prMeta!.headSha !== headSha;
+
+  assert.equal(
+    unanchoredIsStale(packet, LIVE_HEAD_1652),
+    false,
+    "the un-anchored predicate goes quiet the moment prMeta catches up — this is what #43 removed",
+  );
+  assert.equal(evidenceIsStale(packet, LIVE_HEAD_1652), true, "the anchored fact is still true");
+  assert.equal(needsRewitness(packet, LIVE_HEAD_1652), true, "and someone still owes the re-witness");
+});
+
+test("#49: only the re-witness debt is advisory — a ledger contradiction stays fatal", () => {
+  // The fatal/advisory split exists so a debt the operator owes cannot masquerade as the ledger
+  // lying, and it must not become a way to demote real contradictions out of the clock.
+  const packet = submittedPacket();
+  const at = (over: Partial<{ draft: boolean; headSha: string }>) =>
+    packetChecks(packet, {
+      state: "open" as const,
+      merged: false,
+      draft: packet.prMeta!.draft,
+      headSha: packet.prMeta!.headSha!,
+      ...over,
+    });
+
+  const flipped = at({ draft: !packet.prMeta!.draft });
+  assert.equal(
+    flipped.fatal.some((d) => d.includes("doctrine event")),
+    true,
+    `a draft-flag flip must stop the clock; got ${JSON.stringify(flipped)}`,
+  );
+  const behind = at({ headSha: STALE_HEAD });
+  assert.equal(
+    behind.fatal.some((d) => d.includes("recorded head")),
+    true,
+    `a ledger head behind live must stop the clock; got ${JSON.stringify(behind)}`,
+  );
+  // The flat view stays whole: every line still reaches a caller that only reports.
+  assert.deepEqual(
+    packetDivergences(packet, {
+      state: "open",
+      merged: false,
+      draft: !packet.prMeta!.draft,
+      headSha: STALE_HEAD,
+    }).length,
+    at({ draft: !packet.prMeta!.draft, headSha: STALE_HEAD }).fatal.length +
+      at({ draft: !packet.prMeta!.draft, headSha: STALE_HEAD }).advisory.length,
+  );
+});
 
 test("evidence staleness is bound to the witnessed SHA and survives the sync that moves prMeta", () => {
   const packet = submittedPacket();
@@ -101,7 +206,10 @@ test("re-witnessing at the live head clears the staleness", () => {
     packetDivergences(rewitnessed, {
       state: "open",
       merged: false,
-      draft: true,
+      // The live flag the seed records, whatever it is — the subject here is staleness, and
+      // hard-coding `true` made this test fail the day the seed recorded the ready-for-review
+      // state (#49) for a reason that has nothing to do with re-witnessing.
+      draft: rewitnessed.prMeta!.draft,
       headSha: LIVE_HEAD,
     }),
     [],

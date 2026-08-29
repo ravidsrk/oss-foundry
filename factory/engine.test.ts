@@ -33,7 +33,7 @@ import {
   type EvidenceBinding,
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
-import { packetDivergences } from "./ledger-check.ts";
+import { packetChecks, packetDivergences } from "./ledger-check.ts";
 import { isTestPath, verifyWitnessLogs, witnessEvidence } from "./witness.ts";
 import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
@@ -1255,13 +1255,22 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
   });
   assert.equal(ghost.some((d) => /ledger says merged/.test(d)), true);
 
-  const clean = packetDivergences(submitted, {
+  // A ledger that agrees with GitHub on every recorded field reports no divergence. Since #49 the
+  // seed's in-flight packet also carries a re-witness debt (evidence at 48c2242, head at 6b6ff04),
+  // which is an advisory and not a divergence — so read the two apart rather than asserting the
+  // flat list is empty, which would pass again only if that debt were erased.
+  const clean = packetChecks(submitted, {
     state: "open",
     merged: false,
     draft: submitted.prMeta?.draft ?? false,
     headSha: submitted.prMeta?.headSha ?? "",
   });
-  assert.deepEqual(clean, []);
+  assert.deepEqual(clean.fatal, []);
+  assert.equal(
+    clean.advisory.some((a) => a.includes("evidence witnessed at")),
+    true,
+    "the re-witness debt is still owed on a ledger that reconciles",
+  );
 });
 
 test("an absorbed close is at rest: reconcile-style re-diff reports no divergence", () => {

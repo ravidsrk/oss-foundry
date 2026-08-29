@@ -8,7 +8,7 @@ Operator takeover document. This is the whole product: why it exists, how it run
 | Control plane | `factory/` TypeScript + `allowlist.yaml`. Operator loop: `node --experimental-strip-types factory/cli.ts` |
 | Data plane | [ravidsrk/orca-fleet](https://github.com/ravidsrk/orca-fleet) `oss-contribute` |
 | License | MIT |
-| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **draft**, disclosure verbatim). |
+| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — open and **ready for review, not draft**, as of the 2026-08-29 sync; disclosure verbatim as verified 2026-08-28. A draft-only deviation, disclosed in §8. |
 
 ---
 
@@ -217,7 +217,7 @@ Tests: `node --experimental-strip-types factory/run-tests.ts` (Node 22+).
 
 ---
 
-## 8. Live ledger — 2026-08-28
+## 8. Live ledger — 2026-08-29
 
 `foundryAttestedWave0Merges` = packets with `status === "merged"` **and** `humanAttest` on Wave 0.
 
@@ -235,7 +235,7 @@ Promotion rule: Wave 1 may tick only after **two Foundry-attested Wave 0 merges*
 
 | Packet | Issue | PRs | Status |
 |---|---|---|---|
-| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open, draft** (converted 2026-08-28, live-verified), `mergeable_state=blocked`, +88/−1 across 3 files, head `48c2242` | **`submitted`** — in-flight until the quiet-day rule releases it. Do not tick another packet |
+| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open, ready for review — not draft**, as of the 2026-08-29 sync (converted to draft 2026-08-28T16:16:39Z, then marked ready by `ravidsrk` at 18:09:24Z), `mergeable_state=blocked`, +88/−1 across 3 files, head `6b6ff04` — the evidence covers `48c2242` only | **`submitted`** — in-flight until the quiet-day rule releases it. Do not tick another packet |
 
 Policy parsed for #1476 (operator, before open):
 
@@ -244,7 +244,13 @@ Policy parsed for #1476 (operator, before open):
 - Labels: `good first issue`, `help wanted`, `enhancement`
 - No open competing PR on #1476 at open time
 
-#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure — a doctrine miss, healed 2026-08-28: converted to draft (live-verified) and the verbatim disclosure confirmed in the body. The slot releases via the quiet-day rule; issue #5 machine-enforces the moment of contact so this class of miss cannot recur.
+#1652 was opened from a browser session because the GitHub App cannot `POST` pulls on ColeMurray/background-agents (403). It was opened **ready**, not draft, with a shortened disclosure — a doctrine miss. It was converted to draft at 2026-08-28T16:16:39Z and the verbatim disclosure confirmed in the body.
+
+**It is not a draft now.** `ravidsrk` marked #1652 ready for review at 2026-08-28T18:09:24Z, and `6b6ff04` — a merge of upstream `main` — landed eight seconds later. Draft-only is the hardest rule this factory has, and the operator made this call deliberately: asked to choose between re-drafting upstream and recording the deviation, the operator chose to record it (issue #49). So the ledger says ready-for-review as of the 2026-08-29 sync, which is the state the PR is in, not the state doctrine prefers.
+
+This is a **deviation, not a healing** — the same posture as the frontguard#196 operator merge above. It happened, a named human did it at a named time, it is recorded, and it does not license a second one. Issue #5 machine-enforces the moment of *contact*; nothing in this repository can stop a human clicking Ready afterwards, and this paragraph is the record that one did. The slot still releases via the quiet-day rule.
+
+The evidence is unchanged and still describes `48c2242`. Nobody re-ran the test command at `6b6ff04`, so the reviewed SHA was not re-stamped to make the clock look current; `verify-ledger` prints that gap as an outstanding advisory on every tick until the packet is re-witnessed.
 
 ### Scorecard (Foundry packets in this control plane)
 
@@ -259,6 +265,8 @@ Policy parsed for #1476 (operator, before open):
 Merge-rate halt is **not** tripped (`opened ≥ 3` required).
 
 **Corrections 2026-08-28 (issue #3):** six allowlist facts fixed after live verification — pydantic and stablyai/orca deny reasons rewritten (both were mischaracterized as AI-restrictions), OpenHands org rename, background-agents `welcome` → `unknown` (no written policy), E2B surface re-scoped toward e2b-cookbook, awesome-copilot language. Details in [12-ledger.md](12-ledger.md).
+
+**Corrections 2026-08-29 (issue #49):** the ledger said #1652 was a draft at `48c2242`; it is ready for review at `6b6ff04`, and had been since 2026-08-28T18:09:24Z. Seed synced to live, seven doc surfaces corrected and date-qualified, the draft-only deviation disclosed above rather than healed. Evidence deliberately left at `48c2242` — nobody re-ran it at the new head. Details in [12-ledger.md](12-ledger.md).
 
 ---
 
@@ -301,7 +309,8 @@ Daily:
 Now:
 
 - [ ] Follow ColeMurray#1652 until quiet / merged / closed. **Do not merge.**
-- [ ] Prefer marking #1652 **draft** until CI/tests on that head are green
+- [ ] Leave #1652 as the operator set it — **ready for review** since 2026-08-28T18:09:24Z. Re-drafting upstream was option (b) of issue #49 and was **not** chosen; do not flip it back without a new decision, and record it in §8 if you do
+- [ ] Re-witness #1652 at `6b6ff04` before anyone reads its evidence as covering the live head. Until then `verify-ledger` carries the gap as an advisory
 - [ ] Do not tick. #1652 is `submitted` (in-flight)
 - [ ] Do not open awesome-copilot or any other Wave 1 packet
 
