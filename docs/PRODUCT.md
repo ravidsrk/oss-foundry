@@ -211,7 +211,7 @@ Removed: `kortix-ai/suna` (secret-gated dev loop; externally unverifiable — is
 | [`docs/`](.) | Protocol. This file is the takeover bible |
 | [`CONTEXT.md`](../CONTEXT.md) | Glossary |
 
-Tests: `node --experimental-strip-types --test factory/*.test.ts` (Node 22+).
+Tests: `node --experimental-strip-types factory/run-tests.ts` (Node 22+).
 
 ---
 

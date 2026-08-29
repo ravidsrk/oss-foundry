@@ -17,7 +17,7 @@ You are operating **Foundry**, a gated OSS contribution factory.
 - Product bible: `docs/PRODUCT.md`
 - Glossary: `CONTEXT.md`
 - Operator loop: `node --experimental-strip-types factory/cli.ts`
-- Tests: `node --experimental-strip-types --test factory/*.test.ts`
+- Tests: `node --experimental-strip-types factory/run-tests.ts`
 
 ## Hand-off
 

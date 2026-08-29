@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { ALLOWLIST, CAPS, repoById } from "./allowlist.ts";
@@ -32,7 +32,7 @@ import {
 } from "./engine.ts";
 import { draftPullPayload } from "./github-pr.ts";
 import { packetDivergences } from "./ledger-check.ts";
-import { isTestPath, witnessEvidence } from "./witness.ts";
+import { isTestPath, verifyWitnessLogs, witnessEvidence } from "./witness.ts";
 import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -1919,7 +1919,6 @@ test("the host witness persists both logs and binds them to its subject", async 
       : p === outcome.witness.revertLogPath
         ? outcome.logs.revert
         : undefined;
-  const { verifyWitnessLogs } = await import("./witness.ts");
   assert.equal(verifyWitnessLogs(outcome.witness, read).ok, true);
 });
 
@@ -2074,7 +2073,12 @@ test("the evidence page tells the maintainer where the hashed logs are", () => {
   // A bare relative path resolves to nothing in an upstream maintainer's own tree, and the page is
   // written for them (ADR 0005). The recompute offer has to name the repo the logs are committed in.
   assert.match(page, /Recompute it yourself/);
-  assert.ok(page.includes(FOUNDRY_REPO_URL), page);
+  // Pinned verbatim, not against itself: `page.includes(FOUNDRY_REPO_URL)` held for any value the
+  // constant could take, so repointing it at `https://example.invalid/` stayed green. A URL the
+  // reader cannot follow is #35's defect class, which is why INGEST_INVOCATION is pinned the same
+  // way — the assertion has to know what the right answer is.
+  assert.equal(FOUNDRY_REPO_URL, "https://github.com/ravidsrk/oss-foundry");
+  assert.ok(page.includes("https://github.com/ravidsrk/oss-foundry"), page);
   assert.match(page, /not yours/);
   assert.match(page, new RegExp(`shasum -a 256 docs/evidence/logs/${id}/test\\.log`));
 });
@@ -2113,13 +2117,13 @@ test("a witness forged straight into the ledger is refused at the promotion gate
 // #35's own defect blessed by a green test. These drive `node cli.ts attach-witness` for real.
 
 /** The one network call on the ingest path, stubbed in the child so the test needs no GitHub. */
-function writeCompareStub(dir: string, issueNumber: number): string {
+function writeCompareStub(dir: string, issueNumber: number, filesChanged = 1): string {
   const stub = join(dir, "stub-github.mjs");
   const canned = {
     status: "ahead",
     ahead_by: 1,
     behind_by: 0,
-    files: [{ additions: 1, deletions: 0 }],
+    files: Array.from({ length: filesChanged }, () => ({ additions: 1, deletions: 0 })),
     commits: [{ commit: { message: `docs: close the reference gaps\n\nFixes #${issueNumber}` } }],
   };
   writeFileSync(
@@ -2136,11 +2140,15 @@ function writeCompareStub(dir: string, issueNumber: number): string {
   return stub;
 }
 
-function runCli(dir: string, args: string[], stub?: string) {
+function runCli(dir: string, args: string[], stub?: string, env: Record<string, string> = {}) {
   const nodeArgs = ["--experimental-strip-types"];
   if (stub) nodeArgs.push("--import", pathToFileURL(stub).href);
   nodeArgs.push(join(import.meta.dirname, "cli.ts"), ...args);
-  const run = spawnSync(process.execPath, nodeArgs, { cwd: dir, encoding: "utf8" });
+  const run = spawnSync(process.execPath, nodeArgs, {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
   return { ...run, seen: `${run.stdout}${run.stderr}` };
 }
 
@@ -2148,7 +2156,11 @@ function runCli(dir: string, args: string[], stub?: string) {
  * A temp tree the CLI can be pointed at: the ledger with a Wave-1 packet in `reviewing`, the two
  * run logs where the schema says they live, and a manifest naming them.
  */
-function ingestFixture(overrides: Record<string, unknown> = {}, logOverrides: Partial<{ test: string; revert: string }> = {}) {
+function ingestFixture(
+  overrides: Record<string, unknown> = {},
+  logOverrides: Partial<{ test: string; revert: string }> = {},
+  filesChanged = 1,
+) {
   const dir = mkdtempSync(join(tmpdir(), "foundry-ingest-"));
   const { state, id } = reviewingWave1();
   const packet = state.packets[0];
@@ -2172,7 +2184,13 @@ function ingestFixture(overrides: Record<string, unknown> = {}, logOverrides: Pa
   };
   const manifestPath = join(dir, "witness.json");
   writeFileSync(manifestPath, JSON.stringify(manifest));
-  return { dir, id, packet, manifestPath, stub: writeCompareStub(dir, packet.issueNumber) };
+  return {
+    dir,
+    id,
+    packet,
+    manifestPath,
+    stub: writeCompareStub(dir, packet.issueNumber, filesChanged),
+  };
 }
 
 function ledgerAt(dir: string): FactoryState {
@@ -2245,7 +2263,7 @@ test("witnessed run logs are written where the schema says, and land verifiable"
   // #36's "logs persisted" bullet. The CLI's writer was reachable from no test at all: deleting
   // the call left the suite green, and a digest whose logs were never written is not evidence.
   const { persistWitnessLogs } = await import("./cli.ts");
-  const { verifyWitnessLogs, witnessLogPaths } = await import("./witness.ts");
+  const { witnessLogPaths } = await import("./witness.ts");
   const root = mkdtempSync(join(tmpdir(), "foundry-persist-"));
   const { runner } = fakeRunner({
     "run-tests@head": { exit: 0, output: "42 passing" },
@@ -2281,4 +2299,262 @@ test("witnessed run logs are written where the schema says, and land verifiable"
     }
   };
   assert.equal(verifyWitnessLogs(outcome.witness, read).ok, true);
+});
+
+// --- The `evidence` verb, driven end to end (issue #36) ---
+//
+// The persist test above calls `persistWitnessLogs` directly, so it locks the function's body and
+// nothing else: deleting the call in cli.ts, or moving it back above the `applyAttachEvidence`
+// error check that it was moved below, both left the suite green. No test drove the `evidence`
+// verb at all. The version that shipped green never writes the logs, so `attach-witness` later
+// refuses `missing or unreadable` and the evidence page's "Recompute it yourself" line points at
+// files nobody has — #36's defect, restored.
+//
+// So these run the real verb: a real clone, the repo's real test command, both runs, on a local
+// origin the child is pointed at with `GIT_CONFIG_GLOBAL` + `url.insteadOf`. Only `compareCommits`
+// is stubbed, exactly as the ingest tests do.
+
+/**
+ * A git repo standing in for the Wave 0 target. Head is green under the allowlist's real
+ * `testCommand`; reverting the one non-test file to base makes it red, so the negative control
+ * genuinely goes red instead of being asserted. Built once — the CLI only ever clones from it.
+ */
+let originRepo: { path: string; base: string; head: string } | undefined;
+function wave0Origin(): { path: string; base: string; head: string } {
+  if (originRepo) return originRepo;
+  const path = mkdtempSync(join(tmpdir(), "foundry-origin-"));
+  const git = (...args: string[]) => {
+    const run = spawnSync(
+      "git",
+      ["-C", path, "-c", "user.email=fixture@example.invalid", "-c", "user.name=Fixture", "-c", "commit.gpgsign=false", ...args],
+      // The fixture must not inherit the developer's global git config (signing keys, hooks,
+      // templates); the CLI child gets its own global config below.
+      { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } },
+    );
+    assert.equal(run.status, 0, `git ${args.join(" ")}: ${run.stdout}${run.stderr}`);
+    return run.stdout.trim();
+  };
+  const write = (rel: string, text: string) => {
+    mkdirSync(join(path, dirname(rel)), { recursive: true });
+    writeFileSync(join(path, rel), text);
+  };
+
+  const init = spawnSync("git", ["init", "-q", "-b", "main", path], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+  });
+  assert.equal(init.status, 0, `git init: ${init.stdout}${init.stderr}`);
+  const suite = (expected: string) =>
+    `import unittest\n\n\nclass AnswerTest(unittest.TestCase):\n    def test_answer(self):\n        with open("src/answer.txt") as handle:\n            self.assertEqual(handle.read().strip(), "${expected}")\n`;
+  write("scripts/validate.py", "import sys\n\nsys.exit(0)\n");
+  write("src/answer.txt", "wrong\n");
+  write("tests/test_answer.py", suite("wrong"));
+  git("add", "-A");
+  git("commit", "-q", "-m", "base");
+  const base = git("rev-parse", "HEAD");
+
+  write("src/answer.txt", "right\n");
+  write("tests/test_answer.py", suite("right"));
+  git("add", "-A");
+  git("commit", "-q", "-m", "fix the answer\n\nFixes #71");
+  const head = git("rev-parse", "HEAD");
+  git("config", "uploadpack.allowAnySHA1InWant", "true");
+
+  originRepo = { path, base, head };
+  return originRepo;
+}
+
+/**
+ * A work tree the `evidence` verb can be run in: the ledger holding the Wave 0 packet in
+ * `reviewing`, a `compareCommits` stub reporting `filesChanged` files, and a git config that
+ * rewrites the upstream clone URL to the local origin so nothing touches the network.
+ */
+function evidenceFixture(filesChanged = 2) {
+  const origin = wave0Origin();
+  const dir = mkdtempSync(join(tmpdir(), "foundry-evidence-"));
+  const { state, id } = reviewing();
+  assert.equal(state.packets[0].repoId, "ravidsrk/orca-fleet", "the evidence verb is host/Wave 0 only");
+  writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+
+  const canned = {
+    status: "ahead",
+    ahead_by: 1,
+    behind_by: 0,
+    files: Array.from({ length: filesChanged }, () => ({ additions: 1, deletions: 1 })),
+    commits: [{ commit: { message: "fix the answer\n\nFixes #71" } }],
+  };
+  const stub = join(dir, "stub-github.mjs");
+  writeFileSync(
+    stub,
+    `const canned = ${JSON.stringify(canned)};\n` +
+      `globalThis.fetch = async (url) => {\n` +
+      `  const u = String(url);\n` +
+      `  if (u.includes("/compare/")) {\n` +
+      `    return new Response(JSON.stringify(canned), { status: 200, headers: { "content-type": "application/json" } });\n` +
+      `  }\n` +
+      `  throw new Error("unstubbed fetch: " + u);\n` +
+      `};\n`,
+  );
+
+  const gitconfig = join(dir, "gitconfig");
+  writeFileSync(gitconfig, `[url "${origin.path}"]\n\tinsteadOf = https://github.com/ravidsrk/orca-fleet.git\n`);
+
+  const logPaths = [
+    join(dir, "docs", "evidence", "logs", id, "test.log"),
+    join(dir, "docs", "evidence", "logs", id, "revert.log"),
+  ];
+  const runEvidence = () =>
+    runCli(
+      dir,
+      ["evidence", id, "--base", origin.base, "--head", origin.head],
+      stub,
+      { GIT_CONFIG_GLOBAL: gitconfig },
+    );
+  return { dir, id, origin, logPaths, runEvidence };
+}
+
+function exists(path: string): boolean {
+  try {
+    readFileSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("the evidence verb writes the run logs its own ledger entry points at", () => {
+  const { dir, id, origin, logPaths, runEvidence } = evidenceFixture();
+
+  const run = runEvidence();
+  assert.equal(run.status, 0, run.seen);
+  assert.match(run.stdout, new RegExp(`evidence attached ${id}`));
+
+  const witness = ledgerAt(dir).packets[0].evidence?.witness;
+  assert.ok(witness, run.seen);
+  assert.equal(witness!.provider, "host");
+  assert.equal(witness!.baseSha, origin.base);
+  assert.equal(witness!.headSha, origin.head);
+  assert.equal(witness!.testExit, 0);
+  assert.notEqual(witness!.revertExit, 0, "the negative control ran and went red for real");
+
+  // The point of the whole exercise: the paths the ledger and the evidence page name resolve to
+  // files, and those files hash to the digests the page offers the maintainer.
+  for (const path of logPaths) assert.ok(exists(path), `${path} was never written: ${run.seen}`);
+  const read = (rel: string) => {
+    try {
+      return readFileSync(join(dir, rel), "utf8");
+    } catch {
+      return undefined;
+    }
+  };
+  assert.equal(verifyWitnessLogs(witness!, read).ok, true, "the maintainer's recompute must succeed");
+  // ...and the two logs are different files, not one result copied twice.
+  assert.notEqual(read(witness!.testLogPath!), read(witness!.revertLogPath!));
+});
+
+test("an evidence run refused at the gate leaves no orphan logs behind", () => {
+  // Ordering, not existence. `persistWitnessLogs` sits *after* the `applyAttachEvidence` error
+  // check; moving it back above — where it was — leaves two logs on disk with no ledger entry
+  // pointing at them, which is precisely what a maintainer cannot later recompute against.
+  // 20 files is over orca-fleet's cap of 8, so the witness succeeds and the gate then refuses.
+  const { dir, id, logPaths, runEvidence } = evidenceFixture(20);
+
+  const run = runEvidence();
+  assert.equal(run.status, 1, run.seen);
+  assert.match(run.seen, /would touch 20 files; cap is 8/, run.seen);
+
+  const after = ledgerAt(dir).packets[0];
+  assert.equal(after.status, "parked", "the overflow parks the packet, and that much is saved");
+  assert.equal(after.evidence, undefined, "a refusal must not write evidence");
+  for (const path of logPaths) {
+    assert.equal(exists(path), false, `${path} was written for a run the ledger refused`);
+  }
+  // The refusal is also the state the operator recovers from: nothing on disk claims a witness.
+  assert.equal(runCli(dir, ["advance", id]).status, 1);
+});
+
+test("the evidence verb does not narrate a clone it will not perform", () => {
+  // The progress line printed "cloning and running `npm test` twice" immediately before
+  // `witnessEvidence` refused a sandboxed repo without touching the network. The operator's
+  // terminal is a claim surface: a line describing work that never happened is the same defect
+  // class as a pointer nobody can follow.
+  const { dir, id, stub } = ingestFixture();
+  const run = runCli(dir, ["evidence", id, "--base", BASE, "--head", HEAD], stub, {
+    E2B_API_KEY: "",
+  });
+  assert.equal(run.status, 1, run.seen);
+  assert.doesNotMatch(run.seen, /cloning/, run.seen);
+  // ...and it still says what it is doing, and where the operator goes next.
+  assert.match(run.seen, /this CLI does not run e2b sandboxes/);
+  assert.match(run.seen, new RegExp(`attach-witness ${id} --manifest <path>`));
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
+});
+
+test("attach-witness saves the park when the compared range busts the cap", () => {
+  // The parked-state save on the ingest path was reachable by no test: deleting the
+  // `if (parked) saveFactoryState(...)` line left the suite green, and the operator would then
+  // re-run into the same refusal with no record that the packet had been parked at all.
+  // awesome-copilot's cap is 3 files; the stub reports 10.
+  const { dir, id, manifestPath, stub } = ingestFixture({}, {}, 10);
+  assert.equal(ledgerAt(dir).packets[0].status, "reviewing");
+
+  const run = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
+  assert.equal(run.status, 1, run.seen);
+  assert.match(run.seen, /would touch 10 files; cap is 3/, run.seen);
+
+  const after = ledgerAt(dir).packets[0];
+  assert.equal(after.status, "parked", "the park must survive the refusal, not vanish with the process");
+  assert.equal(after.evidence, undefined, "parked is not attached");
+  assert.match(after.parkReason ?? "", /cap is 3/);
+});
+
+test("a witness whose two logs hash the same is not a negative control", () => {
+  // `testCommand: "true"` produces no output at all, so both runs hash to sha256 of the empty
+  // string and the evidence page offers `e3b0c442…` twice as its recompute. The exit codes can
+  // still differ, so `revertExit !== 0` does not catch it — the digests have to.
+  const empty = createHash("sha256").update("").digest("hex");
+  const { state, id } = reviewingWave1();
+  const packet = state.packets[0];
+  const attached = applyAttachEvidence(
+    state,
+    id,
+    manifestWith(boundWitness("e2b", packet.repoId, id, { testLogSha: empty, revertLogSha: empty })),
+    bindingFor(packet),
+  );
+  assert.match(attached.error ?? "", /hash to the same sha256 e3b0c44/);
+  assert.equal(attached.state.packets[0].evidence, undefined);
+  // And the gate agrees, so a ledger edited around the reducer cannot promote it either.
+  const forged: FactoryState = {
+    ...state,
+    packets: state.packets.map((p) =>
+      p.id === id
+        ? {
+            ...p,
+            evidence: {
+              ...manifestWith(
+                boundWitness("e2b", packet.repoId, id, { testLogSha: empty, revertLogSha: empty }),
+              ),
+              shaVerified: true,
+            },
+          }
+        : p,
+    ),
+  };
+  assert.equal(evidenceIsReady(forged.packets[0]), false);
+});
+
+test("attach-witness refuses identical log digests even when both logs are on disk", () => {
+  // End to end, because this is the shape an honest-looking manifest takes: the two files exist,
+  // the hashes recompute correctly, `verifyWitnessLogs` is satisfied — and the pair still proves
+  // nothing. The refusal has to come from the gate, after the read succeeds.
+  const empty = createHash("sha256").update("").digest("hex");
+  const { dir, id, manifestPath, stub } = ingestFixture(
+    { testLogSha: empty, revertLogSha: empty },
+    { test: "", revert: "" },
+  );
+  const run = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
+  assert.equal(run.status, 1, run.seen);
+  assert.doesNotMatch(run.seen, /does not match the witness sha256/, "the read itself must succeed");
+  assert.match(run.seen, /hash to the same sha256/, run.seen);
+  assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
 });

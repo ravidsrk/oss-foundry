@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALLOWLIST, repoById } from "./allowlist.ts";
@@ -464,7 +464,15 @@ async function main() {
       console.error(compared.error);
       process.exit(1);
     }
-    console.error(`witnessing ${packet.repoId} ${base.slice(0, 7)}..${head.slice(0, 7)} (${repo.sandbox}) — cloning and running \`${repo.testCommand}\` twice`);
+    // Only the host path clones anything. On a sandboxed repo `witnessEvidence` refuses on the very
+    // next line without touching the network, so promising a clone here described work that never
+    // happened — the operator's terminal is a claim surface like any other.
+    const range = `${packet.repoId} ${base.slice(0, 7)}..${head.slice(0, 7)}`;
+    console.error(
+      repo.sandbox === "host"
+        ? `witnessing ${range} (host) — cloning and running \`${repo.testCommand}\` twice`
+        : `witnessing ${range} (${repo.sandbox}) — this CLI does not run ${repo.sandbox} sandboxes; checking whether it can witness at all`,
+    );
     const outcome = await witnessEvidence(
       {
         packetId: packet.id,
@@ -858,8 +866,29 @@ async function main() {
   process.exit(1);
 }
 
+/**
+ * True only when this module *is* the process entry point.
+ *
+ * Both sides are canonicalised. Node already resolves symlinks when loading a module, so
+ * `import.meta.url` is the real path, while `process.argv[1]` is whatever the operator typed —
+ * through a symlinked checkout (`~/bin/foundry -> .../factory/cli.ts`, a `pnpm link`ed tree) the
+ * two differ and a `resolve()`-only comparison silently exits 0 having done nothing. A CLI that
+ * says nothing and reports success is the exact failure mode this project exists to prevent, so
+ * the comparison is on real paths. `realpathSync` throws when the path does not exist (`node -e`,
+ * a deleted script), which is not the entry point either.
+ */
+function isProcessEntryPoint(): boolean {
+  const invoked = process.argv[1];
+  if (!invoked) return false;
+  try {
+    return realpathSync(invoked) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
 // Guarded so the module can be imported (by a test, or another verb) without the whole CLI running
 // and calling `process.exit`. Spawning `cli.ts` as the entry point still runs `main()` unchanged.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isProcessEntryPoint()) {
   await main();
 }

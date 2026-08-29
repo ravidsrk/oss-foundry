@@ -382,6 +382,13 @@ export function witnessProvenanceViolation(
   if (!w.testLogPath || !w.revertLogPath) {
     return "witness does not reference its persisted run logs — without testLogPath and revertLogPath the sha256 on the evidence page hashes something nobody can produce";
   }
+  // The negative control's claim is that the two runs differed. Identical digests say the opposite:
+  // byte-for-byte the same output green and red, which for an empty log (`e3b0c442…` twice, what a
+  // `testCommand: "true"` repo produces) is the hash of nothing offered twice as proof. The exit
+  // codes may differ while the logs do not, so this is not implied by the `revertExit` check.
+  if (w.testLogSha === w.revertLogSha) {
+    return `witness test and revert logs hash to the same sha256 ${w.testLogSha.slice(0, 12)}… — two runs that produced identical output are not a negative control, and the recompute offer on the evidence page resolves to one file's worth of nothing`;
+  }
   // Subject binding is not complete while the log paths are free: a witness whose repo and range
   // bind correctly could still point at another packet's log directory, or outside the repo.
   return witnessLogPathViolation(packet.id, w);

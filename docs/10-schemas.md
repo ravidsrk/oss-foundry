@@ -50,11 +50,14 @@ A packet without `negativeControl=red-on-revert`, real (non-placeholder) `baseSh
 
 ### Residual trust boundary (recorded, by design)
 
-Direct write access to `.foundry-state.json` remains equivalent to operator control: someone who can edit that file can write any packet in any status, and no in-process check can stop them. What changed is that this is **no longer reachable through the normal engine API**. Every path that promotes a packet — `applyAttachEvidence`, `evidenceIsReady`, `applyAdvance` — now cross-checks the witness's provider against the repo's gated sandbox and its subject against the packet, so the well-meaning operator who hits the Wave-1 refusal is pointed at `attach-witness`, not at hand-editing the ledger.
+Direct write access to `.foundry-state.json` remains equivalent to operator control: someone who can edit that file can write any packet in any status, and no in-process check can stop them. What changed is that a *forged ledger* is no longer reachable through the normal engine API. Every path that promotes a packet — `applyAttachEvidence`, `evidenceIsReady`, `applyAdvance` — now cross-checks the witness's provider against the repo's gated sandbox and its subject against the packet, so the well-meaning operator who hits the Wave-1 refusal is pointed at `attach-witness`, not at hand-editing the ledger.
 
-Two limits are deliberate and stated rather than papered over:
+That is a narrower claim than it may read as, and the difference matters. **`attach-witness` cannot tell a witness produced on the worker host from one an operator wrote by hand.** Two log files and a manifest naming them, with no `E2B_API_KEY` anywhere and no ledger access at all, take a packet to `draft-ready` through the ordinary verb — every check the ingest path runs is a consistency check (does the manifest bind to this packet, this repo, this range; do the two digests match the bytes on disk; are the two runs distinguishable), not an attestation that the run happened. What the machinery buys is **falsifiability by the reader**: the evidence page names the exact files and the exact `shasum` line, so a maintainer who suspects a fabricated witness can check it against the range it claims to cover, and a fabricated one is a deliberate lie by a named human rather than a plausible mistake. It is not a proof of execution, and nothing in this repo should be read as offering one.
+
+Three limits are deliberate and stated rather than papered over:
 
 - The engine is pure and never touches the filesystem, so it verifies that a witness **references** its logs, not that the bytes are there. Recomputation happens in `attach-witness` (`verifyWitnessLogs`) and, for the reader, in the `shasum` line on the evidence page.
+- The two digests must differ. Identical `testLogSha` / `revertLogSha` means the green and red runs produced byte-identical output — for a repo whose `testCommand` prints nothing, `e3b0c442…` offered twice — so the gate refuses it as a negative control that controls for nothing. That is a floor, not a guarantee the outputs are meaningful.
 - `loadFactoryState`'s `isWitness` still validates shape only. Shape validation cannot detect a lie; that is the gate's job, and a legacy witness that predates subject binding loads fine and is then refused at the gate rather than silently promoted.
 
 ## Allowlist repo
