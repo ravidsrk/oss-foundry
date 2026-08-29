@@ -1016,10 +1016,13 @@ function recordTerminalReview(
 ): ScorecardRow[] {
   const observed = meta.humanReview;
   if (!observed) {
+    // NAMES BOTH REASONS: this reducer cannot tell an outage from a page cap (issue #69), and the
+    // advice differs — re-running recovers one and caps again on the other. `packetChecks` does know
+    // and says which; this line must stay true WITHOUT the fact, so it carries both.
     events.push(
       ev(
         "follow-up",
-        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}; run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ...")`,
+        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}. If the read FAILED, run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ..."). If it stopped at its PAGE CAP, a re-run will cap again — read the PR by hand or raise the cap deliberately`,
         id,
       ),
     );

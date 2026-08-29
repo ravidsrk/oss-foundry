@@ -34,6 +34,7 @@ import {
   fetchRepoFile,
   listCrossReferencingOpenPulls,
   listOpenPulls,
+  MAX_LIST_PAGES,
   parsePrUrl,
   revertCheck,
   syncGithubPr,
@@ -176,6 +177,19 @@ const ARGV = process.argv.slice(2);
 // The ledger belongs to the repository, not to whatever directory the operator happened to be in.
 // A cwd-relative path silently served the committed seed as live truth from anywhere else, and a
 // mutating command forked a second state file next to it.
+/**
+ * A capped competing-work read cannot support "nothing is in flight". The gate asserts the ABSENCE
+ * of a competitor, and an absence is what a short read cannot establish — so it is refused, not
+ * warned, with its own message so a capped read stays distinguishable from a failed one (issue #69).
+ */
+function refuseIfCapped(reads: { truncated?: boolean }[], what: string): void {
+  if (!reads.some((r) => r.truncated)) return;
+  console.error(
+    `${what}: a competing-work read stopped at the ${MAX_LIST_PAGES}-page cap, so "no competing pull request" is not a fact this run can assert. Narrow the target or raise the cap deliberately.`,
+  );
+  process.exit(1);
+}
+
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const STATE_FILE_FLAG = flag(ARGV, "--state");
 const STATE_FILE = resolve(STATE_FILE_FLAG ?? resolve(REPO_ROOT, ".foundry-state.json"));
@@ -338,6 +352,7 @@ async function tickWithGithub(state: FactoryState) {
       console.error(pulls.error);
       process.exit(1);
     }
+    refuseIfCapped([pulls], repo.id);
     const agentsMd = await fetchRepoFile(repo.id, "AGENTS.md");
     const contributing =
       (await fetchRepoFile(repo.id, "CONTRIBUTING.md")) ??
@@ -378,6 +393,8 @@ async function tickWithGithub(state: FactoryState) {
         console.error(crossRefs.error);
         process.exit(1);
       }
+      // BOTH reads feeding the verdict: `pulls` alone let a capped timeline through (same fail-open).
+      refuseIfCapped([pulls, crossRefs], key);
       const verdict = classifyCompetition(
         { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
         issue.number,
@@ -546,6 +563,7 @@ async function main() {
         console.error(crossRefs.error);
         process.exit(1);
       }
+      refuseIfCapped([pulls, crossRefs], packetForFreeze.repoId);
       const verdict = classifyCompetition(
         { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
         packetForFreeze.issueNumber,
@@ -978,6 +996,7 @@ async function main() {
       console.error(!pulls.ok ? pulls.error : (crossRefs as { error: string }).error);
       process.exit(1);
     }
+    refuseIfCapped([pulls, crossRefs], packet.repoId);
     const verdict = classifyCompetition(
       { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
       packet.issueNumber,
@@ -1129,6 +1148,9 @@ async function main() {
         // Same fact the clock reads (issue #39 round 2): a page-capped commit read is not a clean
         // one, and both consumers must say so or the two verbs disagree about what was checked.
         revertTruncated: reverted?.ok ? reverted.truncated : undefined,
+        // The review read's own cap (issue #69), through the parameter both verbs already build so
+        // neither can forget it — this unit shipped that defect twice before.
+        reviewTruncated: synced.reviewTruncated,
       });
       doctrine.push(...checks.fatal);
       owed.push(...checks.advisory);
@@ -1268,6 +1290,7 @@ async function main() {
         console.error(!pulls.ok ? pulls.error : !crossRefs.ok ? crossRefs.error : "");
         process.exit(1);
       }
+      refuseIfCapped([pulls, crossRefs], packetForDraft.repoId);
       const others = pulls.pulls.filter((p) => p.number !== parsed.number);
       const otherRefs = crossRefs.urls.filter((u) => parsePrUrl(u)?.number !== parsed.number);
       const verdict = classifyCompetition(
