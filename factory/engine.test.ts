@@ -5299,47 +5299,61 @@ test("classifyCompetition treats a foreign owner's mention as no competitor at a
 
 /**
  * The wake rule is stated in four places and #48 made it conditional in code while updating two of
- * them. `factory/engine.ts`'s own `applyPrSync` docstring and `docs/SPEC.md` §7 kept asserting the
- * old unconditional re-block — the engine one being the contract on the very function whose
- * behaviour changed, and the first thing a reader of `applyPrSync` sees (issue #51).
+ * them. `applyPrSync`'s own docstring and `docs/SPEC.md` §7 kept asserting the old unconditional
+ * re-block — the engine one being the contract on the very function whose behaviour changed, and the
+ * first thing a reader of `applyPrSync` sees (issue #51).
  *
- * A drift check rather than a collapse to one source: the four statements serve different readers
- * (a reducer's contract, a normative spec, a product narrative, a station walkthrough) and merging
- * them would cost more than it saves. What must not happen is one of them saying the factory blocks
- * when it does not.
+ * A drift check rather than a collapse to one source: the four serve different readers (a reducer
+ * contract, a normative spec, a product narrative, a station walkthrough) and merging them costs
+ * more than it saves. What must not happen is one of them saying the factory blocks when it does not.
  *
- * The exception is matched by CONCEPT, not by one phrasing, because the four say it differently on
- * purpose — `repliesOwed`'s docstring says "the slot was held by a newer packet" and reads
- * perfectly. Requiring a literal would force four documents into one voice to satisfy a test.
+ * THREE things this had to get right, each found by getting it wrong first:
+ *
+ * - PER FILE, not an aggregate count. `docs/04-stations.md` states the rule without the word
+ *   "re-block" at all, so a `re-block`-only trigger never discovered it while two matches in
+ *   `engine.ts` satisfied a count of four — one of the four unvalidated, which review caught.
+ * - PROSE ONLY for `.ts`. `applyPrSync` emits a runtime event, "Maintainer activity … — answer
+ *   threads before any new tick", on the arm where the slot is NOT held; no exception belongs there
+ *   and scanning code strings would demand one.
+ * - NORMALISED. Both the docstring and SPEC.md wrap "new maintainer / activity" across lines, so a
+ *   contiguous match finds neither until the comment markers and newlines are collapsed.
+ *
+ * The exception is matched by CONCEPT, because the four say it differently on purpose —
+ * `repliesOwed` says "the slot was held by a newer packet" and reads perfectly. Requiring a literal
+ * would force four documents into one voice to satisfy a test.
  */
 test("every statement of the wake rule carries the held-slot exception", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
-  const sources = [
-    "factory/engine.ts",
-    "docs/SPEC.md",
-    "docs/PRODUCT.md",
-    "docs/04-stations.md",
-  ];
-  /** The carve-off #48 introduced, in any of the voices the four documents legitimately use. */
+  const SOURCES = ["factory/engine.ts", "docs/SPEC.md", "docs/PRODUCT.md", "docs/04-stations.md"];
+  /** Either phrasing states the rule; `docs/04-stations.md` uses only the second. */
+  const STATES_RULE = /re-block(?:s|ed|ing)?|maintainer activity/gi;
   const EXCEPTION = /newer packet|holds the in-flight slot|slot was held|already holds the slot/i;
 
-  let statements = 0;
-  for (const rel of sources) {
-    const text = readFileSync(join(root, rel), "utf8");
-    for (const match of text.matchAll(/re-block(?:s|ed|ing)?/gi)) {
-      statements += 1;
-      // A window around the claim, not the whole file: a file may state the rule once correctly and
-      // once not, and a file-wide search would let the correct one cover for the stale one.
-      const from = Math.max(0, match.index - 400);
-      const window = text.slice(from, match.index + 400);
+  for (const rel of SOURCES) {
+    const raw = readFileSync(join(root, rel), "utf8");
+    const prose = rel.endsWith(".md")
+      ? raw
+      : raw
+          .split("\n")
+          .filter((line) => /^\s*(\*|\/\/|\/\*)/.test(line))
+          .map((line) => line.replace(/^\s*(\*\/?|\/\/|\/\*\*?)/, ""))
+          .join(" ");
+    const text = prose.replace(/\s+/g, " ");
+
+    const found = [...text.matchAll(STATES_RULE)];
+    assert.ok(
+      found.length > 0,
+      `${rel} no longer states the wake rule in any recognised phrasing — either it was reworded, in which case this guard needs the new one, or the statement was lost`,
+    );
+    for (const match of found) {
+      // A window, not the whole file: a file may state the rule twice and one copy must not cover
+      // for the other.
+      const window = text.slice(Math.max(0, match.index - 400), match.index + 400);
       assert.match(
         window,
         EXCEPTION,
-        `${rel} states the wake rule near offset ${match.index} without the held-slot exception, so it claims the factory blocks when it does not:\n${window.replace(/\s+/g, " ").slice(0, 300)}`,
+        `${rel} states the wake rule without the held-slot exception, so it claims the factory blocks when it does not:\n…${window.slice(300, 560)}…`,
       );
     }
   }
-  // Not vacuous: a rename or a rewording that stopped saying "re-block" would leave this iterating
-  // over nothing. Four statements today across four files.
-  assert.ok(statements >= 4, `only ${statements} wake-rule statement(s) found — the discovery has drifted`);
 });
