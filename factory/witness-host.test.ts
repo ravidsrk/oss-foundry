@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { hostRunner, resolveToolchain } from "./witness.ts";
+import { hostRunner, resolveToolchain, witnessEvidence } from "./witness.ts";
 
 /**
  * `hostRunner` driven against a real shell — the only assertions in the repo that a fake runner
@@ -111,44 +111,112 @@ test("the toolchain probe reports a missing tool as missing rather than inventin
  *     destination path '...foundry-witness-ravidsrk_orca-fleet-1787981801727' already exists
  *
  * Observed as a red suite once in seventeen full runs, on the one surface whose entire job is to be
- * reproducible. The fix is not a wider clock — it is to stop naming the path ourselves and let the
- * OS allocate it, which removes the collision class rather than narrowing it.
+ * reproducible. A test that fails once in seventeen for reasons unrelated to the code teaches the
+ * operator to re-run rather than read, which is the habit that lets a real red through.
  *
- * THIS TEST IS THE COLLISION, not a proxy for it. A loop is not "the same millisecond" by
- * assumption: the assertion below requires that at least two of the calls genuinely landed in one
- * millisecond, so a machine slow enough to space them out reports that rather than passing
- * vacuously. Under the old naming every one of those same-millisecond calls produced an identical
- * path; under `mkdtempSync` they cannot, because it creates the directory as it names it and fails
- * rather than returning a path that already exists.
+ * THE CLOCK IS FROZEN RATHER THAN RACED. The first version of this test sampled `Date.now()` around
+ * each call and asserted that two samples matched — which makes the test itself timing-dependent: a
+ * loaded worker spaces the calls past a millisecond boundary and the suite goes red with the fix
+ * working perfectly. Adding an intermittent test to a change that exists to remove one is the wrong
+ * trade, and it was caught in review of this branch.
+ *
+ * Freezing is also the stronger statement. "Two runs in the same millisecond" is not really a claim
+ * about time; it is a claim that the name does not DEPEND on time. With `Date.now` pinned to the
+ * exact timestamp from the reported failure, the old code produces one path for every call by
+ * construction, and `mkdtempSync` cannot, because it creates the directory as it names it and fails
+ * rather than returning a path that already exists. No scheduling, no flake, and the defect is
+ * reproduced exactly rather than approximated.
  */
-test("two witness scratch directories requested in the same millisecond are distinct and real", async () => {
+const FROZEN_MS = 1787981801727; // the timestamp in the reported collision
+
+async function withFrozenClock<T>(body: () => Promise<T>): Promise<T> {
+  const real = Date.now;
+  Date.now = () => FROZEN_MS;
+  try {
+    return await body();
+  } finally {
+    Date.now = real;
+  }
+}
+
+test("the witness scratch directory does not depend on the clock: frozen time still yields distinct real dirs", async () => {
   const made: string[] = [];
   try {
-    const stamps: number[] = [];
-    for (let i = 0; i < 24; i += 1) {
-      stamps.push(Date.now());
-      const result = await hostRunner("mkdtemp", ["foundry-witness-ravidsrk_orca-fleet-"]);
-      assert.equal(result.exit, 0, `mkdtemp refused: ${result.output}`);
-      made.push(result.output);
-    }
+    await withFrozenClock(async () => {
+      for (let i = 0; i < 8; i += 1) {
+        const result = await hostRunner("mkdtemp", ["foundry-witness-ravidsrk_orca-fleet-"]);
+        assert.equal(result.exit, 0, `mkdtemp refused: ${result.output}`);
+        made.push(result.output);
+      }
+    });
 
-    const sameMillisecond = stamps.some((t, i) => i > 0 && t === stamps[i - 1]);
-    assert.ok(
-      sameMillisecond,
-      `no two of the ${stamps.length} requests shared a millisecond, so this run did not exercise the collision (stamps: ${stamps.join(",")})`,
-    );
-
-    assert.equal(new Set(made).size, made.length, `two scratch directories collided: ${made.join(", ")}`);
+    // The stub is undone, or every later test in this file inherits a frozen clock.
+    assert.notEqual(Date.now(), FROZEN_MS, "withFrozenClock leaked its stub past the body");
+    assert.equal(new Set(made).size, made.length, `scratch directories collided under a frozen clock: ${made.join(", ")}`);
     for (const dir of made) {
-      // `mkdtempSync` CREATES the directory, which is what makes the uniqueness the OS's promise
-      // rather than ours. A path that does not exist would mean the name was merely composed.
+      // `mkdtempSync` CREATES the directory, which is what makes uniqueness the OS's promise rather
+      // than ours. A path that does not exist would mean the name was merely composed.
       assert.ok(statSync(dir).isDirectory(), `${dir} was named but not created`);
-      assert.ok(dir.startsWith(join(tmpdir(), "foundry-witness-")), `${dir} is not under the tmpdir prefix it asked for`);
+      assert.ok(dir.startsWith(join(tmpdir(), "foundry-witness-")), `${dir} is not under the prefix it asked for`);
+      assert.equal(dir.includes(String(FROZEN_MS)), false, `${dir} still carries the wall clock, so the name depends on time`);
     }
   } finally {
-    // Issue #64's convention: a test that creates temp dirs removes them. Twenty-four per run would
-    // otherwise be a new instance of the very leak that issue is about.
+    // Issue #64's convention: a test that creates temp dirs removes them.
     for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The acceptance criterion in the issue's own words — "two witness runs for the same repo started
+ * in the same millisecond both succeed" — driven through `witnessEvidence` rather than through
+ * `hostRunner` alone, because the protocol is what the operator runs and the protocol is what used
+ * to fail. Raised in review of this branch: a unit test of the naming does not by itself show that
+ * the caller consumes it correctly.
+ *
+ * Hybrid runner on purpose: `mkdtemp` goes to the REAL `hostRunner`, so uniqueness is the OS's
+ * actual behaviour and not a stub's promise, while git and the test phases are faked so no network
+ * or repository is needed. This is the one assertion in the repo that needs both halves.
+ */
+test("two witness runs for the same repo under one frozen millisecond both succeed, in different dirs", async () => {
+  const dirs: string[] = [];
+  try {
+    const outcomes = await withFrozenClock(async () => {
+      const runOnce = async () => {
+        const runner = async (step: string, args: string[]) => {
+          if (step === "mkdtemp") {
+            const real = await hostRunner("mkdtemp", args);
+            if (real.exit === 0) dirs.push(real.output);
+            return real;
+          }
+          if (step === "run-tests@head") return { exit: 0, output: "ok" };
+          if (step === "run-tests@revert") return { exit: 1, output: "red" };
+          if (step === "git" && args.includes("--name-only")) return { exit: 0, output: "src/thing.ts\n" };
+          return { exit: 0, output: "" };
+        };
+        return witnessEvidence(
+          {
+            packetId: "pkt_ravidsrk_orca-fleet_71",
+            repoId: "ravidsrk/orca-fleet",
+            baseSha: "1".repeat(40),
+            headSha: "2".repeat(40),
+            testCommand: "npm test",
+            sandbox: "host",
+            wave: 0,
+          },
+          runner as never,
+          {},
+        );
+      };
+      return [await runOnce(), await runOnce()];
+    });
+
+    for (const [i, outcome] of outcomes.entries()) {
+      assert.equal(outcome.ok, true, `run ${i + 1} failed: ${outcome.ok ? "" : outcome.error}`);
+    }
+    assert.equal(dirs.length, 2, `expected two scratch dirs, got ${dirs.length}`);
+    assert.notEqual(dirs[0], dirs[1], `both witness runs used the same directory ${dirs[0]} — the #56 collision`);
+  } finally {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   }
 });
 
