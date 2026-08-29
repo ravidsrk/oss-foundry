@@ -96,6 +96,6 @@ conditions   e.g. assignment-first, human-template, labeled-issue, cla, dco
 quote        ONE verbatim statement from the source (never spliced from separate lines; an explicit absence note for silent)
 ```
 
-`conditions` must be non-empty exactly when `stance` is `conditional` — the loader refuses records that would silently drop conditions. A record is evidence, not an override: `aiPolicy` in the YAML remains the operator's call, and the
+`conditions` must be non-empty exactly when `stance` is `conditional` — the loader refuses records that would silently drop conditions. It also refuses a `silent` record whose `quote` carries a derived figure (a ratio or a percentage): that quote is written by us and renders to the maintainer as their own words, so a measurement belongs in `allowlist.yaml`'s `policyNotes`, which names its method. A record is evidence, not an override: `aiPolicy` in the YAML remains the operator's call, and the
 verdict carries the record (`PolicyVerdict.record`) so every gate decision is auditable back to a
 quoted, dated source.

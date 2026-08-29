@@ -752,8 +752,14 @@ async function main() {
       console.log("| packet | issue | PR | status | attested by |");
       console.log("|---|---|---|---|---|");
       for (const p of packets) {
+        // `#0` is the refusal fixture's placeholder for "there is no issue here", not an issue
+        // number — and this repo's doctrine is that the clock never invents issue numbers. Rendered
+        // as a link label, `matplotlib/matplotlib#0` reads exactly like one. A packet with no real
+        // issue gets a dash, the same way a packet with no PR does; the packet id still names the
+        // repo, so the dash costs the reader nothing.
+        const issue = p.issueNumber > 0 ? `[${p.repoId}#${p.issueNumber}](${p.issueUrl})` : "—";
         console.log(
-          `| ${p.id} | [${p.repoId}#${p.issueNumber}](${p.issueUrl}) | ${p.prUrl ?? "—"} | ${p.status} | ${p.humanAttest?.by ?? "—"} |`,
+          `| ${p.id} | ${issue} | ${p.prUrl ?? "—"} | ${p.status} | ${p.humanAttest?.by ?? "—"} |`,
         );
       }
       console.log("");

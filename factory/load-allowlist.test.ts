@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { canonicalRepoId, isDenied, repoById } from "./allowlist.ts";
+import { canonicalRepoId, isDenied, repoById, sameRepoId } from "./allowlist.ts";
 import { assertAllowlist, parseAllowlistYaml } from "./load-allowlist.ts";
 
 test("committed allowlist.yaml parses and keeps denylist disjoint", () => {
@@ -59,6 +59,32 @@ test("allowlist and denylist lookups agree on casing", () => {
   assert.equal(isDenied("not/on-the-list"), undefined);
   // A denied repo must not become findable on the allowlist just because casing changed.
   assert.equal(repoById("Matplotlib/MatPlotLib"), undefined);
+});
+
+/**
+ * The case-insensitivity is GitHub's, and GitHub's is ASCII. `toLowerCase` applies full Unicode case
+ * mapping, so `ravidsr\u212A/orca-fleet` — KELVIN SIGN where the `k` belongs — folded onto the
+ * roster's `ravidsrk/orca-fleet` and could be halted as it. It failed *safe* (a homoglyph maps onto
+ * a roster entry, not off one), so the typosquat probes above do not constrain it: they all pass
+ * under a Unicode fold. The direction that matters is that a string GitHub would not serve under
+ * this name is not treated as this repository.
+ */
+test("the fold is GitHub's, not Unicode's — a homoglyph is a different repo", () => {
+  const kelvin = "ravidsr\u212A/orca-fleet"; // U+212A KELVIN SIGN, which toLowerCase() maps to "k"
+  assert.equal(kelvin.toLowerCase(), "ravidsrk/orca-fleet"); // the trap, stated outright
+  assert.equal(sameRepoId(kelvin, "ravidsrk/orca-fleet"), false);
+  assert.equal(repoById(kelvin), undefined);
+  // The boundary conversion hands it back untouched, so the callers refuse it as a stranger.
+  assert.equal(canonicalRepoId(kelvin), kelvin);
+
+  // The denylist folds the same way, so a homoglyph cannot slip past a denial either.
+  assert.equal(isDenied("matplotli\u0432/matplotlib"), undefined); // CYRILLIC SMALL BE
+  assert.equal(sameRepoId("cur\u217C/curl", "curl/curl"), false); // SMALL ROMAN NUMERAL FIFTY
+
+  // The control: ASCII case-insensitivity, the behaviour actually wanted, is untouched.
+  assert.equal(sameRepoId("RavidSrk/Orca-Fleet", "ravidsrk/orca-fleet"), true);
+  assert.equal(repoById("RavidSrk/Orca-Fleet")?.id, "ravidsrk/orca-fleet");
+  assert.equal(isDenied("MatPlotLib/MatPlotLib")?.id, "matplotlib/matplotlib");
 });
 
 /**

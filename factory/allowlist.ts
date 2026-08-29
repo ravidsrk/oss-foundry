@@ -17,9 +17,21 @@ export const ALLOWLIST: AllowlistedRepo[] = parsed.repos;
  * GitHub treats `owner/repo` case-insensitively, so an operator or a live path can hand us casing
  * that does not match the YAML's. Every comparison of two repo ids goes through here so no two
  * halves of a gate can disagree about what "the same repo" means.
+ *
+ * The fold is ASCII-only because GitHub's is. `String.prototype.toLowerCase` applies full Unicode
+ * case mapping, under which U+212A KELVIN SIGN lowercases to `k` — so `ravidsrK/orca-fleet` typed
+ * with that character resolved to the roster's `ravidsrk/orca-fleet` and could be halted as it. It
+ * fails safe (the homoglyph maps *onto* a roster entry, never off one, and `isDenied` folds the
+ * same way), but it is still the wrong answer: that string is not a repository GitHub would serve
+ * under this name, and a gate that says otherwise is describing a repo that does not exist.
  */
 export function sameRepoId(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
+  return asciiFold(a) === asciiFold(b);
+}
+
+/** ASCII `A-Z` only — see `sameRepoId` for why the Unicode mapping is the wrong one here. */
+function asciiFold(id: string): string {
+  return id.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
 }
 
 /**

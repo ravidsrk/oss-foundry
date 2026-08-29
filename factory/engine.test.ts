@@ -1631,16 +1631,18 @@ test("the committed evidence page regenerates byte-identical from this tree", ()
   assert.equal(committed.includes(DISCLOSURE), true);
 });
 
-/** Drives the real binary the way the operator does. `cwd` is where `cli.ts` anchors its state file. */
-function runCli(args: string[], state?: FactoryState) {
+/**
+ * Drives the real binary against a ledger these fixtures own. It delegates to the one `runCli`
+ * helper (declared below and hoisted), which is what supplies `--state`: the ledger path is
+ * anchored to the repo root, so a spawned CLI left to its default reads the developer's real state
+ * file no matter which temp directory it was started in — and this helper's earlier form passed the
+ * state by `cwd` alone, which meant every assertion below was silently made against the seed.
+ */
+function runCliWithState(args: string[], state: FactoryState) {
   const dir = mkdtempSync(join(tmpdir(), "foundry-cli-ledger-"));
-  if (state) writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
-  const run = spawnSync(
-    process.execPath,
-    ["--experimental-strip-types", join(import.meta.dirname, "cli.ts"), ...args],
-    { cwd: dir, encoding: "utf8" },
-  );
-  return { ...run, out: `${run.stdout}${run.stderr}`, dir };
+  writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+  const run = runCli(dir, args);
+  return { ...run, out: run.seen, dir };
 }
 
 /**
@@ -1652,13 +1654,13 @@ function runCli(args: string[], state?: FactoryState) {
  */
 test("the ledger command lists every packet status counts, denials included", () => {
   const seed = seedState();
-  const status = runCli(["status"], seed);
+  const status = runCliWithState(["status"], seed);
   assert.equal(status.status, 0, status.out);
   const counted = Number(/packets=(\d+)/.exec(status.stdout)?.[1]);
   assert.equal(counted, seed.packets.length);
   assert.ok(counted > 0);
 
-  const ledger = runCli(["ledger"], seed);
+  const ledger = runCliWithState(["ledger"], seed);
   assert.equal(ledger.status, 0, ledger.out);
   const rows = ledger.stdout.split("\n").filter((l) => l.startsWith("| pkt_"));
   assert.equal(rows.length, counted, `status counted ${counted}, ledger listed ${rows.length}`);
@@ -1680,12 +1682,17 @@ test("the committed ledger GENERATED block regenerates byte-identical from this 
   const doc = readFileSync(new URL("../docs/12-ledger.md", import.meta.url), "utf8");
   const block = /<!-- GENERATED:[^\n]*-->\n([\s\S]*?)<!-- \/GENERATED -->/.exec(doc);
   assert.ok(block, "the GENERATED markers must exist or nothing is being guarded");
-  const ledger = runCli(["ledger"], seedState());
+  const ledger = runCliWithState(["ledger"], seedState());
   assert.equal(ledger.status, 0, ledger.out);
   assert.equal(block[1], ledger.stdout);
   // The two halves of the guard: the block is generated, and it is not empty boilerplate.
   assert.match(block[1], /### Off allowlist — denied or unlisted/);
   assert.match(block[1], /pkt_matplotlib_matplotlib_0/);
+  // ...and the refusal row does not render its `#0` placeholder as an issue number. This repo's
+  // doctrine is that the clock never invents issue numbers, and a `matplotlib/matplotlib#0` link
+  // label reads like one to anyone auditing the ledger.
+  assert.doesNotMatch(block[1], /matplotlib\/matplotlib#0/);
+  assert.match(block[1], /\| pkt_matplotlib_matplotlib_0 \| — \|/);
 });
 
 /**
@@ -1697,7 +1704,7 @@ test("status names the observation its quiet counter was extrapolated from", () 
   const seed = seedState();
   const inflight = seed.packets.find((p) => INFLIGHT_STATUSES.includes(p.status) && p.prMeta)!;
   assert.ok(inflight, "the seed must hold an in-flight packet carrying prMeta");
-  const status = runCli(["status"], seed);
+  const status = runCliWithState(["status"], seed);
   assert.equal(status.status, 0, status.out);
 
   const line = status.stdout.split("\n").find((l) => l.includes(inflight.id))!;

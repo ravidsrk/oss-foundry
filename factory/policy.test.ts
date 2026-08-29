@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { parsePolicyRecords, policyRecordsPath } from "./policy-records.ts";
 import { evaluatePolicy } from "./policy.ts";
 
 test("denylist always forbids matplotlib", () => {
@@ -188,4 +190,81 @@ test("an affirmative record satisfies parse-policy-first for an unknown repo; a 
   );
   assert.equal(silent.code, "DENY_UNKNOWN_POLICY");
   assert.equal(silent.record?.stance, "silent");
+});
+
+/**
+ * The invariant `docs/12-ledger.md` states for this field — "one verbatim statement from the
+ * source", rendered to the maintainer as their own words — had no enforcement, so withdrawing the
+ * unreproducible `Behaviorally open: 141 of 272 external PRs merged.` from the committed record was
+ * a convention one edit could undo silently: putting it back left the whole suite green and the
+ * evidence page quoted it back at the maintainer as if they had said it.
+ *
+ * Both directions are asserted, because a guard that refuses everything is not a guard: a `silent`
+ * quote carrying a derived figure is refused at parse, and the absence notes the committed file
+ * actually holds — dates, file paths and all — still load.
+ */
+const record = (over: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    version: 1,
+    records: {
+      "ColeMurray/background-agents": {
+        source: "CONTRIBUTING.md",
+        url: "https://github.com/ColeMurray/background-agents/blob/HEAD/CONTRIBUTING.md",
+        fetchedAt: "2026-08-28",
+        stance: "silent",
+        conditions: [],
+        quote: "No AI-contribution language in CONTRIBUTING.md, AGENTS.md, or CLAUDE.md.",
+        ...over,
+      },
+    },
+  });
+
+test("a silent quote may hold an absence note but never a derived figure", () => {
+  // Loads: the absence note the committed record carries.
+  assert.equal(
+    parsePolicyRecords(record()).get("ColeMurray/background-agents")?.stance,
+    "silent",
+  );
+  // Loads: an absence note carrying a date and paths — the guard must not fire on those.
+  assert.ok(
+    parsePolicyRecords(
+      record({
+        quote:
+          "No CONTRIBUTING.md at the root or .github/ as of 2026-08-28; the README is an examples catalog with no contribution or AI language.",
+      }),
+    ).get("ColeMurray/background-agents"),
+  );
+
+  // Refused: the exact string that was withdrawn, and the re-derived figure that replaced it.
+  for (const figure of [
+    "Behaviorally open: 141 of 272 external PRs merged.",
+    "Behaviorally open: 250/408 non-owner PRs merged.",
+    "Behaviorally open: 61% of non-owner PRs merged.",
+  ]) {
+    assert.throws(
+      () => parsePolicyRecords(record({ quote: figure })),
+      /is silent but its quote carries a derived figure/,
+      figure,
+    );
+  }
+
+  // A measurement in a maintainer's own prose is not this defect: only `silent` quotes are ours.
+  assert.ok(
+    parsePolicyRecords(
+      record({ stance: "welcome", quote: "We merge roughly 9 of 10 community pull requests." }),
+    ).get("ColeMurray/background-agents"),
+  );
+});
+
+test("the committed policy records parse under the quote guard", () => {
+  // Reads the shipped file, so restoring a figure into any silent quote turns this suite red.
+  // Deliberately not a pin on the quote *text*: a legitimate refresh — upstream finally writes a
+  // CONTRIBUTING, or the absence note is reworded — must stay green. Only the class is asserted.
+  const records = parsePolicyRecords(readFileSync(policyRecordsPath(import.meta.url), "utf8"));
+  assert.ok(records.size > 0);
+  const silent = [...records.values()].filter((r) => r.stance === "silent");
+  assert.ok(silent.length > 0, "the file must still hold a silent record or this asserts nothing");
+  for (const r of silent) {
+    assert.doesNotMatch(r.quote, /\d\s*(?:\/|of)\s*\d|\d\s*%/, `${r.repoId} quote: ${r.quote}`);
+  }
 });

@@ -35,7 +35,7 @@ Removed 2026-08-28: `kortix-ai/suna` — its documented dev/test loop is gated o
 
 - `matplotlib/matplotlib` — autonomous-agent ban.
 - `curl/curl` — maintainer request to stop agent noise.
-- `pydantic/pydantic` — welcomes AI-assisted PRs, and **reserves the right to close any pull request at its discretion**, naming mass-submission across multiple repositories as a case — behaviour that "can also result in a permanent ban from the organization." Separately, a PR fixing an existing issue without being assigned first is **automatically closed**. Denied as a poor factory fit, not as anti-AI. Source: pydantic `docs/contributing.md` §"AI policy" plus its assignment rule (the repo's root `CONTRIBUTING.md` is a one-line pointer to that file), re-read 2026-08-29. Recorded in the 2026-08-29 corrections in [12-ledger](12-ledger.md).
+- `pydantic/pydantic` — welcomes AI-assisted PRs, and **reserves the right to close any pull request at its discretion**, naming mass-submission across multiple repositories as a case — behaviour that "can also result in a permanent ban from the organization." Separately, a PR fixing an existing issue without being assigned first is **automatically closed**. Denied as a poor factory fit, not as anti-AI. Source: pydantic's `CONTRIBUTING.md` §"AI policy" plus the assignment rule under §"Pull Requests", re-read 2026-08-29. Recorded in the 2026-08-29 corrections in [12-ledger](12-ledger.md).
 - `stablyai/orca` — no AI restriction upstream; denied for conflict of interest (it is the runtime Foundry rides). Contribute through orca-fleet.
 
 A denylist hit is `DENY_FORBIDDEN`. There is no override in the operator CLI.

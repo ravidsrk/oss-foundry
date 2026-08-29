@@ -129,7 +129,9 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 
 ### Packet statuses
 
-`scouted` → `gated` → `frozen` → `approved` → `implementing` → `reviewing` → `draft-ready` → `submitted` → `followed-up` → `merged` | `parked` | `rejected`
+`scouted` → `gated` → `approved` → `implementing` → `reviewing` → `draft-ready` → `submitted` → `followed-up` → `merged` | `parked` | `rejected`
+
+`frozen` is reserved in the union and never written: `applyApprove` accepts it as a source status and `INFLIGHT_STATUSES` counts it, but no code path sets it ([10-schemas](10-schemas.md), `factory/types.ts`). In a committed ledger it means a hand edit.
 
 `hasInflight` gates: `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`, **`submitted`**. `followed-up` is **not** in-flight.
 
@@ -172,7 +174,7 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ### Wave 1
 
-- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (250/408 non-owner PRs merged, measured 2026-08-29 — method in `policy-records.json`). First issue **#1476** (in flight as #1652)
+- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (250/408 non-owner PRs merged, measured 2026-08-29 — method in `allowlist.yaml`'s `policyNotes`). First issue **#1476** (in flight as #1652)
 - `github/awesome-copilot` — Markdown content (repo language JavaScript). First issue **#2684** (skills/github-issues reference gaps, docs class); documented 🤖🤖🤖 fast track
 - `e2b-dev/e2b-cookbook` — replaces e2b-dev/E2B; genuinely silent (no CONTRIBUTING anywhere), gate holds until policy exists
 - `mcp-use/mcp-use` — policy **unknown** until CONTRIBUTING parsed

@@ -31,7 +31,7 @@ merges/closes into local state without ever releasing the in-flight slot.
 
 | packet | issue | PR | status | attested by |
 |---|---|---|---|---|
-| pkt_matplotlib_matplotlib_0 | [matplotlib/matplotlib#0](https://github.com/matplotlib/matplotlib) | — | parked | — |
+| pkt_matplotlib_matplotlib_0 | — | — | parked | — |
 
 Foundry-attested Wave 0 merges: 3 (promotion gate: 2).
 
@@ -63,29 +63,29 @@ Live verification found six factual errors in the allowlist; all corrected:
 
 ## Corrections — 2026-08-29 (issue #44)
 
-1. **background-agents merge figure re-derived.** The `141 of 272 external PRs merged` figure carried
-   in `allowlist.yaml`, `docs/03-allowlist.md` and `docs/PRODUCT.md` named no method and **does not
-   reproduce**. Re-measured 2026-08-29 via the GitHub search API —
-   `q=repo:ColeMurray/background-agents is:pr -author:ColeMurray` for the denominator and the same
-   query plus `is:merged` for the numerator: **250 of 408 non-owner PRs merged (61%)**. The figure
-   and its method live in `allowlist.yaml`'s `policyNotes`, which is what that field is for
-   (`docs/10-schemas.md`). It was briefly written into the `policy-records.json` `quote` instead;
-   that field is reserved for *one verbatim statement from the source* (`docs/SPEC.md` §3,
-   `docs/10-schemas.md`) and renders on the maintainer-facing evidence page as their own words, so
-   the quote is back to the absence note alone.
-2. **pydantic deny reason re-read at source.** Round 2 recorded pydantic's AI policy as
-   unconfirmable; that was wrong. It is in `docs/contributing.md` §"AI policy" (the repo's root
-   `CONTRIBUTING.md` is a one-line pointer to it), re-read 2026-08-29. Pydantic *welcomes* AI use,
-   reserves the right to close any PR at its discretion — mass-submission across multiple
-   repositories is a named case, and can end in a permanent ban from the organization — and
-   auto-closes PRs opened on an issue without assignment. "Bans AI PRs" overstated it; the deny
-   stands, on fit rather than on an AI ban.
-3. **Repo ids are matched case-insensitively, end to end.** GitHub treats `owner/repo` that way, and
-   the roster gate did not: `halt` typed in a maintainer's casing reported success, incremented
-   `bans`, and left the scorecard row `tone=neutral health=good` with the packet still in flight.
-   `applyHalt` and `buildPacket` now resolve to the roster's spelling at the boundary, every
-   scorecard lookup shares one comparison, and `assertAllowlist` checks disjointness the same way.
-   Bans in the block above stay 0 — no repository was actually halted by that defect.
+Three carried claims were re-checked against their sources; none held as written.
+
+1. **background-agents merge figure re-derived.** `141 of 272 external PRs merged` named no method
+   and does not reproduce. Re-measured 2026-08-29 (GitHub search
+   `q=repo:ColeMurray/background-agents is:pr -author:ColeMurray`, plus `is:merged` for the
+   numerator): **250 of 408 non-owner PRs merged (61%)**. Figure and method live in
+   `allowlist.yaml`'s `policyNotes`. The `policy-records.json` `quote` is one verbatim statement
+   from the source (`docs/SPEC.md` §3, `docs/10-schemas.md`) and renders to the maintainer as their
+   own words, so it is the absence note alone — and `parsePolicyRecords` now refuses a `silent`
+   record whose quote carries a derived figure, rather than trusting the convention.
+2. **pydantic deny reason re-read at source.** A round-2 review recorded pydantic's AI policy as
+   unconfirmable; that was wrong. It is `CONTRIBUTING.md` §"AI policy", re-read 2026-08-29 — one
+   file under two paths, since the root `CONTRIBUTING.md` is a git symlink (tree mode `120000`) to
+   `docs/contributing.md`. Pydantic *welcomes* AI use, reserves the right to close any PR at its
+   discretion (mass-submission across repositories is a named case, and can end in a permanent ban),
+   and auto-closes a PR opened on an issue without assignment. "Bans AI PRs" overstated it; the deny
+   stands on fit.
+3. **Repo ids are matched case-insensitively, end to end.** `halt` typed in a maintainer's casing
+   reported success, incremented `bans`, and left the scorecard row `tone=neutral health=good` with
+   the packet still in flight. `applyHalt` and `buildPacket` now canonicalise at the boundary and
+   every lookup shares one comparison — ASCII-only, because GitHub's own case-insensitivity is, so a
+   Unicode homoglyph is a different repo rather than a way onto the roster. Bans in the block above
+   stay 0: no repository was actually halted by the defect.
 
 ## Next
 
