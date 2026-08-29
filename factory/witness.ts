@@ -478,18 +478,10 @@ export async function witnessEvidence(
   if (revertRun.exit === 0) {
     return {
       ok: false,
-      // KNOWN DEFECT, diagnosed not undiscovered (issue #62): the "park the packet" below names a
-      // verb the operator does not have. `parked` is a status the engine writes on its own; the
-      // operator's stand-down verb is `reject`, as the corrected sibling string in
-      // `factory/sandbox.ts` already says. The wording here should read "reject the packet"; #62
-      // owns that string — delete this comment with that edit, and not before.
-      //
-      // Re-pointed from "issue #44 item 5", which is why the marker is worth keeping honest: #44
-      // closed with this item unfixed, so the pointer named a closed issue and the defect was
-      // owned by nobody. A tracking comment citing a closed issue is worse than none — it reads
-      // as accounted for.
+      // `reject` is the operator's verb; `parked` is a status the engine writes on its own.
+      // A refusal that reads as an instruction must name a button the operator has (issue #62).
       error:
-        "negative control failed — tests stayed green with the production change reverted. The proof does not bind the change; park the packet." +
+        "negative control failed — tests stayed green with the production change reverted. The proof does not bind the change; reject the packet." +
         runFailureDetail(input.testCommand, revertRun.output, toolchain),
     };
   }
