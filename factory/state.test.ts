@@ -7,6 +7,7 @@ import { buildPacket } from "./packet.ts";
 import { applyReviewToScorecard, emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
+import { evaluatePolicy } from "./policy.ts";
 
 test("missing state file loads seed and does not invent a file", () => {
   const path = join(tmp("foundry-"), "missing.json");
@@ -429,4 +430,14 @@ test("the review split and merge facts a sync records survive a round trip", () 
   const absentPath = join(tmp("foundry-"), "absent-prmeta.json");
   writeFileSync(absentPath, JSON.stringify({ ...loaded.state, packets: absent }));
   assert.equal(loadFactoryState(absentPath).ok, true, "optional must still mean optional");
+});
+
+/**
+ * docs/04-stations.md §2: deny-by-default fires only for `aiPolicy: unknown`.
+ * frontguard is owner + silent + unfetched and still ALLOW (issue #73).
+ */
+test("an owner repo with nothing fetched is ALLOW, not DENY_UNKNOWN_POLICY", () => {
+  const v = evaluatePolicy({ repoId: "ravidsrk/frontguard", issueTitle: "docs typo" });
+  assert.equal(v.record?.stance, "silent");
+  assert.equal(v.code, "ALLOW");
 });

@@ -50,7 +50,8 @@ not as the fix would have left it.
 
 Be exact about what catches a miss, because the two guards cover different cases and only one of
 them covers this one. **Deny-by-default covers the no-evidence case, not the missed-ban case.** A
-repo with nothing fetched and no affirmative record is `DENY_UNKNOWN_POLICY` and never `ALLOW` — but
+repo whose `aiPolicy` is `unknown`, with nothing fetched and no affirmative record, is
+`DENY_UNKNOWN_POLICY` and never `ALLOW` — but
 `hasParsedEvidence` is satisfied by *any* fetched document, so a `CONTRIBUTING` whose refusal the
 scanner cannot read is evidence the gate counts, and **a missed ban on a fetched document reaches
 `ALLOW`.** Verified, not assumed, and pinned in `factory/policy.test.ts` ("deny-by-default covers the
