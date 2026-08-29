@@ -133,13 +133,21 @@ scorecard read `0` forever, correct or not.
    2026-08-29, read-only `GET`: since #70's merge (`2026-08-27T07:04:52Z`) the base branch carries
    **111** commits, 100 on page 1 and 11 on page 2, and page 1's oldest is `2026-08-28T14:08:01Z` —
    a **31-hour** blind window opening at the merge, widening daily; the unread remainder contained
-   #72's own merge commit `32050a00`. Since #72's merge it is 108 commits, 100 + 8. The read now
+   #72's own merge commit `32050a00`. Since #72's merge it is 108 commits, 100 + 8. **These counts
+   are a moving target and are quoted as a dated observation, not a reproducible constant**: the
+   window has no far end (see item 8), `orca-fleet` main runs ~17 commits/day, and a re-read later
+   the same day already gave 116 and 113. What is stable, and what the item is about, is the shape —
+   over 100, so more than one page, so unreadable without following the cursor. The read now
    follows GitHub's `Link: rel="next"` cursor to a cap of 10 pages and returns a `truncated` flag
    when it stops early; `revertCheck` carries it out and `packetChecks` prints it on the same
    advisory path a failed read takes. A capped read must never be byte-identical to a clean one —
    a truncated success silently disables the FATAL, because the clock cannot fail on a revert it
-   never fetched. (Verified after the fix: both orca-fleet windows now read to the merge commit
-   itself, `truncated=false`.)
+   never fetched. (Verified after the fix: both orca-fleet windows read to the end of their cursor,
+   `truncated=false`. An earlier version of this line said they "read to the merge commit itself",
+   which is true of #70 and **false of #72**: its merge commit `32050a00` has committer date
+   `11:30:03Z`, one second *before* its `merged_at` of `11:30:04Z`, so `since` excludes it — the
+   full paginated window contains it zero times. Immaterial to the verdict, because `classifyRevert`
+   skips the merge commit anyway, but it is not what the sentence claimed.)
 6. **The remedies the operator surfaces named did not work, and one was destructive.** The clock's
    revert FATAL offered `reconcile` and `revert <id> --reason`; both end at `saveFactoryState` →
    `.foundry-state.json`, which `.gitignore` excludes and which the clock never reads — so an
@@ -151,6 +159,70 @@ scorecard read `0` forever, correct or not.
    the scorecard row and erases the `reverts: 1`** this issue exists to produce. `allowlist.yaml`
    carries `version`, `caps`, `denylist`, `repos` and nothing that touches reverts. Corrected in
    `factory/engine.ts`, both `factory/cli.ts` surfaces, `docs/PRODUCT.md` and `docs/06-v2.md`.
+
+7. **The re-read had no consumer, and the KPI was unrecoverable.** `syncGithubPr` spends 2 requests
+   on the review endpoints of every already-terminal PR, on every `reconcile` and every 6-hourly
+   tick — 6 a tick at today's ledger. The comment justifying that cost said re-reading was "the only
+   way" a `humanReview` missed by a failed endpoint ever gets filled in. It was the exact opposite.
+   `recordTerminalReview` has two call sites, both inside `applyPrSync`'s terminal *transition*
+   branches; `applyPrSync` refuses any status but `submitted`/`followed-up`; `reconcile` therefore
+   never hands it a merged packet; and `verify-ledger` never read `humanReview` at all. So for a
+   **merged** packet — 3 of the 4 seeded ones — the re-read was consumed by nothing, and a packet
+   whose review endpoints were down for the single tick that absorbed its merge was stranded at
+   "not observed" **forever**, exactly the outcome the comment claimed a transition gate would have
+   caused. The operator advice was unactionable in the same way: "re-sync once GitHub answers the
+   review endpoints" routes to `sync` → `applyPrSync` → `cannot sync PR from status merged`.
+   Fixed three ways. `applyReviewObservation` is the missing consumer: `reconcile` folds a recovered
+   observation in exactly once, guarded on the packet's own stored `prMeta.humanReview` rather than
+   on a transition nobody can replay, because these are cumulative counters and a level-triggered
+   fold would inflate them every six hours. The advice now names `reconcile` (and says plainly that
+   `sync` refuses a terminal packet). And `packetChecks` reports the gap: a terminal packet whose
+   ledger records no observation is an **ADVISORY** — the ledger asserts *less* than GitHub knows,
+   which contradicts nothing, so it is not the FATAL shape — saying that `noReview` and
+   `reviewCommentsAvg` are computed over a denominator smaller than the terminal count implies.
+   "A zero nobody observed is an invented KPI" has a second edge: so is a rate over a population
+   nobody was told was short. Nothing surfaced this before; the revert check got a "did not run"
+   advisory and the review KPI got none.
+8. **The commit read was bounded at one end against a fixed cap.** `listCommitsSince` passed
+   `since: mergedAt` with no `until`, and every merged packet is re-checked every tick with no
+   expiry — while `classifyRevert` discards anything past `mergedAt + 30 days`. The read window
+   therefore grew a day every day and never closed, and everything past the deadline was fetched,
+   paged and thrown away. Measured on `ravidsrk/orca-fleet` (read-only `GET`, 2026-08-29): `main`
+   runs ~17 commits/day (118 in 7 days), so the 30-day window holds ~505 — comfortably under the
+   1000-commit cap. The *unbounded* window is under it only for now: at that rate it crosses the cap
+   around day 60, and from then on every long-lived merged packet emits a permanent, unclearable
+   truncation advisory on every tick, about a window that closed a month earlier. That is how an
+   advisory channel gets trained into background noise — the failure this codebase cites twice as
+   its reason for edge-triggering other checks. `revertCheck` now passes `until = mergedAt + 30d`,
+   the classifier's own deadline, so the read is a fixed width from the day it opens. Deliberately
+   *not* also added: an expiry that stops re-checking a closed window. With the bound in place the
+   read is cheap and constant, and an expiry would mean a revert first observed after day 30 —
+   because the clock was down, say — is never seen at all.
+9. **`rel="next"` was unanchored in the fixture, not in the parser.** `nextPageUrl` matches the
+   literal `rel="next"` and always did, but the only fixture exercising it built
+   `` `<next>; rel="next", <next>; rel="last"` `` — both rels pointing at the same URL, `next`
+   first — and its page 2 carried no `Link` at all, so relaxing the match to `rel="[a-z]+"` left
+   the suite green. On the header GitHub actually serves for a middle page (`prev`, `next`, `last`,
+   `first`, four distinct URLs) a relaxed parser returns the **`prev`** cursor: pages 1↔2 ping-pong
+   to the cap, a false `truncated: true`, and pages ≥3 never read. A middle-page fixture now kills
+   that mutant.
+
+**The evidence for all of the above is re-runnable, not asserted.**
+`node --experimental-strip-types scripts/mutation-audit.ts` applies 27 single-line mutations to this
+surface, runs the full suite against each, restores the file from the bytes it read, and re-verifies
+the baseline. 26 must die and one — a local rebinding with no behavioural content — must survive, so
+a harness that had broken into always-reporting-killed fails its own control. It exits non-zero if
+any real mutant survives or if a mutant's anchor text has moved. Every line this round added or
+corrected is in that table with a one-sentence statement of what shipping the mutant would cost. A
+mutation score quoted in prose is not evidence; this is the same claim in a form a reviewer can
+re-derive in one command.
+
+**A correction to this section's own round-2 arithmetic.** The blind window `since`-only reads left
+on orca-fleet#72 was reported as ~39 minutes. That is wrong, and it understates it by a factor of
+40. The window is `[merged_at, page-1-oldest]` = `2026-08-27T11:30:04Z` → `2026-08-28T14:08:01Z` =
+**≈26.6 hours**. The 8 hidden commits happened to cluster in a 39-minute burst at the far end of
+that window, which is incidental to how much of it went unread. #70's figure was stated correctly:
+`07:04:52Z` → `14:08:01Z` = 31h03m, over 100 + 11 = 111 commits.
 
 Not done here: the open review-bot thread on PR #19 that first flagged the `noReview` gap.
 

@@ -1,5 +1,5 @@
 import { DISCLOSURE, DISCLOSURE_TAIL } from "./neighbor.ts";
-import { revertNote, type RevertVerdict } from "./scorecard.ts";
+import { isTerminalReviewSubject, revertNote, type RevertVerdict } from "./scorecard.ts";
 import type { FactoryState, TaskPacket } from "./types.ts";
 
 export interface LivePrLite {
@@ -152,6 +152,50 @@ export function packetChecks(packet: TaskPacket, live: LivePrLite): LedgerReconc
         `${packet.id}: the revert re-check on ${packet.repoId} hit its page cap before reaching the merge — only the commits it read were classified, and a revert in the unread remainder would go unnoticed this run`,
       );
     }
+  }
+  // (5) The review KPIs, on any packet whose PR reached a terminal outcome (issue #39 round 3).
+  //
+  // `noReview` and `reviewCommentsAvg` are written once, by `recordTerminalReview`, on the tick
+  // that absorbs the merge or the first close. A packet whose review endpoints were down for that
+  // one request carries no `humanReview` — and `recordTerminalReview` correctly refuses to write a
+  // zero it never saw, so the row simply excludes it. That is the honest thing to do to the
+  // numerator, and it silently shrinks the denominator: the scorecard reports `noReview` over
+  // fewer terminal PRs than the merge count implies, and nothing anywhere said so. Issue #39's own
+  // indictment — "a zero nobody observed is an invented KPI" — has a second edge, which is a KPI
+  // computed over a population nobody was told was short.
+  //
+  // ADVISORY, not FATAL, and the bucket is the argument. FATAL is reserved for the published
+  // ledger asserting something GitHub CONTRADICTS. Here the ledger asserts less than GitHub knows;
+  // it contradicts nothing. This is the same shape — and the same bucket — as "the revert re-check
+  // did not run" above: a check that produced no observation, reported so nobody reads its absence
+  // as a result.
+  //
+  // Read off the RECORDED packet, not off `live`: the question is what the published ledger
+  // observed, and the clock reads the committed seed.
+  //
+  // The predicate is `isTerminalReviewSubject` — the SAME function the recovery writer refuses on,
+  // not a second hand-written copy of it. That matters here more than anywhere: a `rejected` or
+  // `parked` packet can name a PR someone else closed, which the ledger never absorbed and never
+  // counted, so flagging one would report a hole in a denominator it was never in. If the writer
+  // and this reporter could disagree, one of them would be wrong about every such packet.
+  //
+  // No live field is threaded in for this. It was, briefly, so the line could say whether the
+  // review endpoints answer on this pass — and it was unreachable in both verbs: `reconcile`
+  // RECOVERS the observation before it checks, so it can only reach this line when the endpoints
+  // were down (and the live split is therefore absent anyway), and the clock reads a committed seed
+  // whose merged packets all carry one. A branch neither verb can enter is a branch no test can
+  // pin, which is how the last two rounds of this unit went wrong. The line is derived from the
+  // packet and from fields both call sites already supply, so surfacing it takes no new agreement
+  // between them and cannot be switched off by forgetting a field at one of the two.
+  //
+  // Live agreement IS required on top of the predicate, from those same already-supplied fields:
+  // while the ledger and GitHub disagree about the outcome there is a FATAL above, and that is the
+  // sentence the operator should be reading rather than this one.
+  const liveTerminal = live.merged || live.state === "closed";
+  if (isTerminalReviewSubject(packet) && liveTerminal && packet.prUrl && !packet.prMeta?.humanReview) {
+    advisory.push(
+      `${packet.id}: the ledger records no human-review observation for a terminal PR — ${packet.repoId}'s noReview and reviewCommentsAvg are computed WITHOUT it, so the KPI's denominator is smaller than the terminal count suggests. Run \`reconcile\` on a pass where GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet), then promote the recovered row into factory/seed.ts`,
+    );
   }
   return { fatal: out, advisory };
 }

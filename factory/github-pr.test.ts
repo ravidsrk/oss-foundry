@@ -13,9 +13,11 @@ import {
   listCrossReferencingOpenPulls,
   listOpenPulls,
   MAX_COMMIT_PAGES,
+  nextPageUrl,
   revertCheck,
   syncGithubPr,
 } from "./github-pr.ts";
+import { REVERT_WINDOW_DAYS } from "./scorecard.ts";
 
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
@@ -525,6 +527,72 @@ function pagedResponse(body: unknown, next?: string): Response {
   return new Response(JSON.stringify(body), { status: 200, headers });
 }
 
+/**
+ * The `Link` header GitHub actually serves for a MIDDLE page — `prev` first, then `next`, `last`,
+ * `first`, all four with different URLs.
+ *
+ * `pagedResponse` above cannot express this, and that is the whole point: it emits `next` first and
+ * points every rel at the same URL, so a parser that ignored the rel name entirely would still
+ * return the right cursor from it. Page 2 in that fixture carries no `Link` at all, so no assertion
+ * anywhere reached a header with a competing rel. Against this one, a relaxed match returns `prev`
+ * and the read ping-pongs between pages 1 and 2 to the cap: a false `truncated: true`, and pages 3
+ * onward never read — the far end of the revert window, silently unexamined.
+ */
+function middlePageResponse(body: unknown, rels: { prev: string; next: string; last: string; first: string }): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      Link: `<${rels.prev}>; rel="prev", <${rels.next}>; rel="next", <${rels.last}>; rel="last", <${rels.first}>; rel="first"`,
+    },
+  });
+}
+
+test("the next cursor is the one rel named next, on the header GitHub serves for a middle page", async () => {
+  const base = "https://api.github.com/repositories/1298943477/commits?per_page=100";
+  const rels = { prev: `${base}&page=1`, next: `${base}&page=3`, last: `${base}&page=9`, first: `${base}&page=1` };
+
+  // The unit, first: four rels, `prev` ahead of `next`, and only one right answer.
+  assert.equal(nextPageUrl(middlePageResponse([], rels).headers.get("link")), rels.next);
+  // Order must not matter either. Same four rels, `next` last.
+  assert.equal(
+    nextPageUrl(`<${rels.first}>; rel="first", <${rels.prev}>; rel="prev", <${rels.last}>; rel="last", <${rels.next}>; rel="next"`),
+    rels.next,
+  );
+  // The last page names prev/first/last and no next. That is the read's only stop signal.
+  assert.equal(
+    nextPageUrl(`<${rels.prev}>; rel="prev", <${rels.first}>; rel="first", <${rels.last}>; rel="last"`),
+    undefined,
+  );
+
+  // And end to end, because a parser bug shows up as a page the read never asked for. Three pages,
+  // each a real middle page except the last; a relaxed match would follow `prev` back to page 1 and
+  // spin there until the cap, reporting `truncated: true` over commits it never saw.
+  const seen: string[] = [];
+  const page = (n: number) => `${base}&page=${n}`;
+  const walked = await listCommitsSince("ravidsrk/orca-fleet", { since: "2026-08-27T07:04:52Z" }, async (url) => {
+    const u = String(url);
+    seen.push(u);
+    const n = Number(new URL(u).searchParams.get("page") ?? "1");
+    const body = [{ sha: `p${n}`, commit: { message: `page ${n}`, committer: { date: "2026-08-28T09:00:00Z" } } }];
+    if (n >= 3) {
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json", Link: `<${page(2)}>; rel="prev", <${page(1)}>; rel="first"` },
+      });
+    }
+    return middlePageResponse(body, { prev: page(Math.max(1, n - 1)), next: page(n + 1), last: page(3), first: page(1) });
+  });
+  assert.equal(walked.ok, true);
+  if (walked.ok) {
+    assert.deepEqual(walked.commits.map((c) => c.sha), ["p1", "p2", "p3"], "the read must go forwards");
+    assert.equal(walked.truncated, false, "a read that reached the last page is not a short one");
+  }
+  assert.equal(seen.length, 3, `following the prev cursor would spin to the page cap instead:\n${seen.join("\n")}`);
+  assert.equal(seen[1], page(2));
+  assert.equal(seen[2], page(3));
+});
+
 test("listCommitsSince follows GitHub's next link, and says so when it stops short", async () => {
   // GitHub serves commits newest-first, so page 1 is the FAR end of the `since` window and a
   // one-page read hides the hours right after the merge — the hours a revert is most likely to
@@ -576,6 +644,11 @@ test("listCommitsSince follows GitHub's next link, and says so when it stops sho
     assert.equal(capped.commits.length, MAX_COMMIT_PAGES);
   }
   assert.equal(calls, MAX_COMMIT_PAGES);
+  // The VALUE, not just the constant. Both assertions above read `MAX_COMMIT_PAGES`, so `10 → 2`
+  // and `10 → 100` both keep them true while changing what the cap actually is — a cap of 2 makes
+  // almost every revert window a short read, and a cap of 100 is 10,000 commits per merged packet
+  // per tick against the AUP's bulk-activity line. One literal is what pins the number itself.
+  assert.equal(MAX_COMMIT_PAGES, 10, "1000 commits per revert re-check; changing it is a doctrine change");
 
   // A failure on a later page is a failure, not a short read dressed as a clean one.
   const brokeLate = await listCommitsSince("ravidsrk/orca-fleet", { since: "2026-08-27T07:04:52Z" }, async (url) =>
@@ -583,6 +656,63 @@ test("listCommitsSince follows GitHub's next link, and says so when it stops sho
   );
   assert.equal(brokeLate.ok, false);
   if (!brokeLate.ok) assert.match(brokeLate.error, /502/);
+});
+
+test("the revert read is bounded at both ends, so it cannot outgrow its own page cap", async () => {
+  // `since: mergedAt` with no `until` reads [merge, now] — a window that grows a day every day and
+  // never closes — while `classifyRevert` throws away everything past `mergedAt + 30 days`. So the
+  // extra pages are fetched, paged, and discarded. Measured on ravidsrk/orca-fleet (read-only GET,
+  // 2026-08-29): main runs ~17 commits/day (118 in the last 7 days), so the 30-day window holds
+  // ~505 — under the 1000-commit cap. The UNBOUNDED window is under it only for now: at that rate
+  // it crosses the cap around day 60, and from then on every long-lived merged packet emits a
+  // truncation advisory on every tick, permanently, about a window that closed a month earlier and
+  // that no commit anywhere can clear. That is how an advisory channel is trained into background
+  // noise — the failure ledger-check.ts cites twice as its reason for edge-triggering other checks.
+  const MERGE = "36d0f23708adbdf911e4df050ed516821278a9fc";
+  const MERGED_AT = "2026-08-27T07:04:52Z";
+  // A NON-default base on purpose. Every seed packet merges to `main`, so an assertion written
+  // against `main` cannot tell "the branch we asked for" from "the branch GitHub defaults to" —
+  // and dropping `sha: meta.baseRef` would search a release branch's revert on the default branch
+  // and return a silent clean bill of health on a SPEC.md §7 MUST.
+  let seen = "";
+  await revertCheck(
+    "ravidsrk/orca-fleet",
+    { mergeCommitSha: MERGE, mergedAt: MERGED_AT, baseRef: "release/2.0" },
+    async (url) => {
+      seen = String(url);
+      return pagedResponse([]);
+    },
+  );
+  const query = new URL(seen).searchParams;
+  assert.equal(query.get("since"), MERGED_AT, "the near end is the merge");
+  // 100 is the page size the 10-page cap is a bound over. At `per_page=1` the cap is 10 commits
+  // and every window is a short read; the two numbers only mean "1000 commits" together.
+  assert.equal(query.get("per_page"), "100");
+  // The far end is the classifier's own deadline, not "now" — the same constant `classifyRevert`
+  // measures against, so the read and the classification can never disagree about the window.
+  const expected = new Date(Date.parse(MERGED_AT) + REVERT_WINDOW_DAYS * 86_400_000).toISOString();
+  assert.equal(query.get("until"), expected, `the far end must be mergedAt + ${REVERT_WINDOW_DAYS}d`);
+  assert.equal(expected, "2026-09-26T07:04:52.000Z", "and that is a fixed instant, not a moving one");
+  assert.equal(query.get("sha"), "release/2.0", "the revert must be searched on the PR's own base");
+
+  // A packet merged long ago reads exactly the same window it always did — the property the bound
+  // buys. Without `until` this read would span years and truncate forever.
+  let old = "";
+  await revertCheck(
+    "ravidsrk/orca-fleet",
+    { mergeCommitSha: MERGE, mergedAt: "2020-01-01T00:00:00Z", baseRef: "main" },
+    async (url) => {
+      old = String(url);
+      return pagedResponse([]);
+    },
+  );
+  const oldQuery = new URL(old).searchParams;
+  assert.equal(oldQuery.get("until"), "2020-01-31T00:00:00.000Z");
+  assert.equal(
+    Date.parse(oldQuery.get("until")!) - Date.parse(oldQuery.get("since")!),
+    REVERT_WINDOW_DAYS * 86_400_000,
+    "the window is a fixed width from the day it opens, whatever today is",
+  );
 });
 
 test("revertCheck sees a revert GitHub served on the second page, and never fetches with nothing to check", async () => {

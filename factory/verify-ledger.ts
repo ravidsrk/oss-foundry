@@ -26,7 +26,8 @@ for (const packet of withPr) {
   // only thing that runs unattended (.github/workflows/oss-tick.yml, every 6h). The clock cannot
   // write the ledger — it reads the committed seed — but it can refuse to call a ledger reconciled
   // while GitHub says our merge commit was reverted and the record says otherwise (issue #39).
-  // One extra request, and only for a merged packet.
+  // Only for a merged packet, and no longer one request: since the read follows GitHub's `Link`
+  // cursor it costs 1..MAX_COMMIT_PAGES (10) requests, one per page of the bounded revert window.
   const reverted =
     packet.status === "merged" ? await revertCheck(packet.repoId, synced.meta) : undefined;
   if (reverted && !reverted.ok) {

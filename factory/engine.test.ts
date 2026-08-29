@@ -14,6 +14,7 @@ import {
   applyAttachEvidence,
   applyHalt,
   applyPrSync,
+  applyReviewObservation,
   applyQueueLive,
   applyReject,
   applyRevert,
@@ -52,6 +53,7 @@ import {
   applyPacketToScorecard,
   applyReviewToScorecard,
   classifyRevert,
+  isTerminalReviewSubject,
   emptyScorecard,
   health,
   revertNote,
@@ -1545,7 +1547,14 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
 test("an absorbed close is at rest: reconcile-style re-diff reports no divergence", () => {
   const state = seedState();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
-  const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
+  // A close a real sync absorbed, which means the review endpoints answered: `syncGithubPr` reads
+  // them for any terminal PR, and `recordTerminalReview` folds the result into the scorecard on the
+  // closedUnmerged transition. A fixture that omits it is not an absorbed close — it is an absorbed
+  // close with a hole in it, which is the subject of the second half of this test.
+  const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", {
+    state: "closed",
+    humanReview: { reviews: 1, comments: 2 },
+  });
   const absorbed = applyPrSync(state, submitted.id, closedMeta, {
     threadsAnswered: false,
     at: "2026-09-02T00:00:00.000Z",
@@ -1561,6 +1570,30 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
   assert.deepEqual(packetDivergences(after, live), []);
   const unabsorbed = packetDivergences(submitted, live);
   assert.equal(unabsorbed.some((d) => d.includes(`sync ${submitted.id}`)), true);
+
+  // The same absorbed close with the review endpoints down for that one request (issue #39 round
+  // 3). `recordTerminalReview` correctly refuses to write a zero it never saw, so the scorecard
+  // counts the closedUnmerged and excludes it from noReview's denominator — a KPI computed over a
+  // population nobody was told was short. It is still not a DIVERGENCE (the ledger contradicts
+  // nothing GitHub says), and it must not be silent either.
+  const blindMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
+  const blind = applyPrSync(state, submitted.id, blindMeta, {
+    threadsAnswered: false,
+    at: "2026-09-02T00:00:00.000Z",
+  });
+  const unobserved = blind.state.packets.find((p) => p.id === submitted.id)!;
+  const checks = packetChecks(unobserved, live);
+  assert.deepEqual(checks.fatal, [], "an unobserved review KPI is not the ledger contradicting GitHub");
+  assert.equal(
+    checks.advisory.some((a) => a.includes(submitted.id) && /no human-review observation/.test(a)),
+    true,
+    `a terminal outcome outside the KPI's denominator must be said out loud:\n${checks.advisory.join("\n")}`,
+  );
+  // And the control: the observed close above raises no such line, or the advisory means nothing.
+  assert.equal(
+    packetChecks(after, live).advisory.some((a) => /no human-review observation/.test(a)),
+    false,
+  );
 });
 
 test("a rejected packet with a still-open PR never rots invisibly in the ledger check", () => {
@@ -3862,6 +3895,163 @@ test("a terminal transition with no observed review split records nothing and sa
     messages.some((m) => m.includes("no human review")),
     false,
     "'not observed' must not be reported with the same words as 'nobody reviewed it'",
+  );
+  // The remedy it names has to be one that works (issue #39 round 3). This line said "re-sync",
+  // and `sync` routes through `applyPrSync`, whose status guard answers `cannot sync PR from
+  // status merged` — the operator was being sent at a verb that refuses the packet by design. The
+  // same defect class this unit had already fixed once, reintroduced in the commit that fixed it.
+  const gap = messages.find((m) => m.includes("Human review not observed"))!;
+  assert.match(gap, /run `reconcile`/, `the advice must name the verb that recovers it:\n${gap}`);
+  assert.equal(
+    /re-sync/.test(gap),
+    false,
+    `\`sync\` refuses a terminal packet, so naming it is advice that cannot be followed:\n${gap}`,
+  );
+  // Not a claim about the wording — a claim about the verb. `sync` really does refuse this packet.
+  const refused = applyPrSync(
+    merged.state,
+    submitted.id,
+    prMetaAt("2026-09-03T00:00:00.000Z", { merged: true, state: "closed" }),
+    { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" },
+  );
+  assert.match(
+    refused.error ?? "",
+    /cannot sync PR from status merged/,
+    "if this ever starts succeeding, the advice above should change back",
+  );
+  // And `reconcile`'s writer is the one that does work on the very same packet.
+  const recovered = applyReviewObservation(merged.state, submitted.id, { reviews: 1, comments: 2 });
+  assert.equal(recovered.error, undefined, recovered.error);
+  assert.equal(recovered.recorded, true, "the named remedy must actually move the KPI");
+  assert.equal(scorecardRow(recovered.state.scorecard, submitted.repoId)!.humanReviewedPrs, 1);
+});
+
+test("the review-KPI writer and reporter share one predicate, so they cannot disagree", () => {
+  // Three times in issue #39 one consumer of a fact was pinned and its sibling was not. The
+  // structural answer is that `applyReviewObservation` (which WRITES a cumulative counter) and
+  // `packetChecks` (which REPORTS the gap) ask `isTerminalReviewSubject` rather than each carrying
+  // a hand-written copy of "is this packet in the KPI's population". This asserts the agreement on
+  // the case where two plausible hand-written copies come apart: a packet whose PR someone else
+  // closed, which this ledger never absorbed and never counted as a terminal outcome.
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const rejected = applyReject(state, submitted.id, "operator mis-typed reject").state;
+  const packet = rejected.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(packet.status, "rejected");
+  assert.equal(packet.prMeta?.state, "open", "the ledger never absorbed a close for this packet");
+
+  // The predicate says no...
+  assert.equal(isTerminalReviewSubject(packet), false);
+  // ...so the writer refuses to fold it into `noReview`'s denominator, even though GitHub says the
+  // PR is closed. A fold here would count a terminal outcome the scorecard never recorded.
+  const wrote = applyReviewObservation(rejected, packet.id, { reviews: 0, comments: 0 });
+  assert.match(wrote.error ?? "", /still open/);
+  assert.deepEqual(wrote.state.scorecard, rejected.scorecard);
+  // ...and the reporter stays quiet about it, on the same GitHub answer.
+  const closedLive = {
+    state: "closed" as const,
+    merged: false,
+    draft: packet.prMeta!.draft,
+    headSha: packet.prMeta!.headSha,
+    body: VERBATIM_BODY,
+  };
+  assert.equal(
+    packetChecks(packet, closedLive).advisory.some((a) => /no human-review observation/.test(a)),
+    false,
+    "nagging about a denominator this packet was never in is noise on the channel",
+  );
+
+  // And the complement, so neither half above passes by being uniformly silent: once the ledger
+  // HAS absorbed a terminal outcome, the predicate says yes, the reporter speaks, and the writer
+  // accepts. Same packet, same live answer — only the stored meta changed.
+  const absorbed = {
+    ...rejected,
+    packets: rejected.packets.map((p) =>
+      p.id === packet.id ? { ...p, prMeta: { ...p.prMeta!, state: "closed" as const } } : p,
+    ),
+  };
+  const now = absorbed.packets.find((p) => p.id === packet.id)!;
+  assert.equal(isTerminalReviewSubject(now), true);
+  assert.equal(
+    packetChecks(now, closedLive).advisory.some((a) => /no human-review observation/.test(a)),
+    true,
+  );
+  assert.equal(applyReviewObservation(absorbed, now.id, { reviews: 0, comments: 0 }).recorded, true);
+});
+
+test("a merge sha too short to identify a commit is not matched against, it is refused", () => {
+  // `classifyRevert` matches by prefix in BOTH directions — `merge.startsWith(named) ||
+  // named.startsWith(merge)` — because a `git revert` message may abbreviate the sha it names. That
+  // is what makes a too-short recorded sha dangerous rather than merely useless: with `mergeCommitSha
+  // = "a"`, every revert commit on the base branch that names any sha beginning with `a` matches,
+  // and SPEC.md §7 halts a repository on a revert of somebody else's patch. The length guard is the
+  // only thing stopping it, and it deleted green.
+  const commits = [
+    {
+      sha: "ffff1110000000000000000000000000000000aa",
+      message: 'Revert "someone else\'s change"\n\nThis reverts commit abcdef1234567.',
+      committedAt: "2026-08-28T09:00:00Z",
+    },
+  ];
+  const tooShort = classifyRevert({ mergeCommitSha: "abcdef", mergedAt: "2026-08-27T07:04:52Z", commits });
+  assert.equal(tooShort.reverted, false, "six characters cannot identify a commit");
+  assert.match(tooShort.why, /nothing to revert/, `it must refuse, not silently not-match:\n${tooShort.why}`);
+  // The control: one more character and the very same input is a match, so the refusal above is
+  // about the LENGTH and not about the fixture failing to match for some other reason.
+  const longEnough = classifyRevert({ mergeCommitSha: "abcdef1", mergedAt: "2026-08-27T07:04:52Z", commits });
+  assert.equal(longEnough.reverted, true, "seven characters is git's own abbreviation floor");
+});
+
+test("applyReviewObservation refuses everything that is not a one-time terminal recovery", () => {
+  // The recovery writer folds into CUMULATIVE counters and runs on every reconcile, forever. Its
+  // refusals are the only thing between `noReview`/`reviewCommentsAvg` and a KPI that grows once
+  // every six hours on its own, so each refusal is asserted rather than assumed.
+  const state = seedState();
+  const merged = state.packets.find((p) => p.status === "merged")!;
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+
+  assert.match(
+    applyReviewObservation(state, "pkt_nope", { reviews: 1, comments: 1 }).error ?? "",
+    /unknown packet/,
+  );
+
+  // An OPEN PR: `noReview` and `reviewCommentsAvg` are defined over terminal outcomes only, so
+  // folding one in would put a PR still under review into a mean of finished ones.
+  const open = applyReviewObservation(state, submitted.id, { reviews: 1, comments: 1 });
+  assert.match(open.error ?? "", /still open/);
+  assert.equal(open.recorded, false);
+
+  // A packet with no PR at all has nothing to attach an observation to.
+  const parked = state.packets.find((p) => p.status === "parked")!;
+  assert.match(
+    applyReviewObservation(state, parked.id, { reviews: 1, comments: 1 }).error ?? "",
+    /no recorded PR/,
+  );
+
+  // Already observed: a no-op, and NOT an error — this is the common case on every tick forever.
+  const again = applyReviewObservation(state, merged.id, { reviews: 9, comments: 9 });
+  assert.equal(again.error, undefined);
+  assert.equal(again.recorded, false, "a second fold would inflate a cumulative counter");
+  assert.deepEqual(again.state.scorecard, state.scorecard, "and it must not have touched the row");
+
+  // The one path that does work, and its guard closing behind it.
+  const blind = {
+    ...state,
+    packets: state.packets.map((p) =>
+      p.id === merged.id ? { ...p, prMeta: { ...p.prMeta!, humanReview: undefined } } : p,
+    ),
+  };
+  const before = scorecardRow(blind.scorecard, merged.repoId)!;
+  const first = applyReviewObservation(blind, merged.id, { reviews: 1, comments: 2 });
+  assert.equal(first.recorded, true);
+  const after = scorecardRow(first.state.scorecard, merged.repoId)!;
+  assert.equal(after.humanReviewedPrs, before.humanReviewedPrs + 1);
+  assert.equal(after.humanReviewComments, before.humanReviewComments + 2);
+  assert.equal(applyReviewObservation(first.state, merged.id, { reviews: 1, comments: 2 }).recorded, false);
+  // The event says where the number has to be promoted to, because local state is gitignored.
+  assert.match(
+    first.state.events.map((e) => e.message).join("\n"),
+    /Human review recovered .*factory\/seed\.ts/s,
   );
 });
 

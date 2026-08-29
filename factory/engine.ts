@@ -9,6 +9,7 @@ import {
   applyPacketToScorecard,
   applyReviewToScorecard,
   health,
+  isTerminalReviewSubject,
   REVERT_NOTE_PREFIX,
   revertNote,
   scorecardRow,
@@ -999,7 +1000,7 @@ function recordTerminalReview(
     events.push(
       ev(
         "follow-up",
-        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}; re-sync once GitHub answers the review endpoints`,
+        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}; run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ...")`,
         id,
       ),
     );
@@ -1246,6 +1247,87 @@ export function applyRevert(
       ev(
         "score",
         `REVERT recorded (${input.source}) on ${packet.repoId} for ${id}: ${detail}. SPEC.md §7 — the repo is now a scorecard stop (health() gates on reverts > 0) and stays unselectable while the ledger records it; only a human editing the scorecard row in factory/seed.ts changes that. NOT allowlist.yaml: the scorecard rows are built from the roster, so removing the repo there deletes this row and erases the revert with it.`,
+        id,
+      ),
+    ),
+    recorded: true,
+  };
+}
+
+/**
+ * Recover the two review KPIs for a packet that reached a terminal outcome without them
+ * (issue #39 round 3).
+ *
+ * **Why this exists.** `recordTerminalReview` is called from exactly two places, both inside
+ * `applyPrSync`'s terminal *transition* branches, and `applyPrSync` refuses any packet whose status
+ * is not `submitted`/`followed-up`. So the KPI has exactly one chance to be written: the tick that
+ * absorbs the merge (or the first close). If GitHub's review endpoints were down for that one
+ * request, `meta.humanReview` arrived ABSENT, `recordTerminalReview` correctly declined to invent a
+ * zero — and nothing could ever fill it in. `reconcile` skips merged packets when it calls
+ * `applyPrSync`; the clock never reads `humanReview` at all. The 2 requests/PR that
+ * `fetchHumanReview` spends on every already-terminal PR, every tick, had no consumer whatsoever
+ * for the merged case, which is 3 of the 4 seeded packets. This is that consumer.
+ *
+ * **Why it cannot double-count.** The two scorecard fields are cumulative counters, so a
+ * level-triggered writer that ran every tick would inflate them forever — the exact bug
+ * `applyPrSync`'s `firstClose` guard exists to prevent for `closedUnmerged`. The guard here is the
+ * packet's own record: the observation is written into `prMeta.humanReview` (a snapshot, not a
+ * counter) and this refuses to run at all when one is already there. So the fold into the scorecard
+ * happens at most once per packet, keyed on a fact stored beside the packet rather than on a
+ * transition nobody can replay.
+ *
+ * **Both terminal halves, one predicate — and it is SHARED.** `recordTerminalReview` fires on merged
+ * AND on the first close, because docs/08-operations.md defines `noReview`/`reviewCommentsAvg` over
+ * terminal outcomes, both buckets. A closed-unmerged packet is stranded by the same mechanism (after
+ * the close is absorbed, `prMeta.state === "closed"` makes `firstClose` false forever). The
+ * condition is `isTerminalReviewSubject`, the same function `packetChecks` reports from, so this
+ * writer and that reporter cannot drift into disagreeing about which packets are in the population.
+ *
+ * The write lands in `.foundry-state.json`, which is gitignored and which the 6-hour clock never
+ * reads. Clearing the clock's advisory still takes the documented promotion into `factory/seed.ts`,
+ * exactly like a recorded revert.
+ */
+export function applyReviewObservation(
+  state: FactoryState,
+  id: string,
+  observed: { reviews: number; comments: number },
+): { state: FactoryState; error?: string; recorded?: boolean } {
+  const packet = state.packets.find((p) => p.id === id);
+  if (!packet) return { state, error: `unknown packet ${id}`, recorded: false };
+  const meta = packet.prMeta;
+  if (!meta) {
+    return {
+      state,
+      error: `cannot record a review observation on ${id} — it has no recorded PR to attach one to`,
+      recorded: false,
+    };
+  }
+  if (!isTerminalReviewSubject(packet)) {
+    return {
+      state,
+      error: `cannot record a review observation on ${id} — its PR is still open, and noReview/reviewCommentsAvg are defined over terminal outcomes only`,
+      recorded: false,
+    };
+  }
+  // Already observed. Not an error — the common case, every tick, forever — and emphatically not a
+  // re-fold: these are cumulative counters and this is the only thing standing between them and a
+  // count that grows once every six hours.
+  if (meta.humanReview) return { state, recorded: false };
+
+  const next = bump(packet, { prMeta: { ...meta, humanReview: observed } });
+  const scorecard = applyReviewToScorecard(state.scorecard, packet.repoId, observed);
+  const withPacket: FactoryState = {
+    ...state,
+    packets: state.packets.map((p) => (p.id === id ? next : p)),
+    scorecard,
+  };
+  const row = scorecardRow(scorecard, packet.repoId);
+  return {
+    state: appendEvent(
+      withPacket,
+      ev(
+        "score",
+        `Human review recovered for ${id} on ${packet.repoId}: ${observed.reviews} review(s), ${observed.comments} comment(s) — the terminal transition recorded none, so the KPI was outside noReview and reviewCommentsAvg until now. noReview=${row?.noReview ?? 0}, reviewCommentsAvg=${row?.reviewCommentsAvg ?? 0} over ${row?.humanReviewedPrs ?? 0} reviewed PR(s). This wrote local state only, and .foundry-state.json is gitignored: promote it into factory/seed.ts or the 6-hour clock keeps reading a seed that never observed it.`,
         id,
       ),
     ),

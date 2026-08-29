@@ -399,4 +399,34 @@ test("the review split and merge facts a sync records survive a round trip", () 
   const badPath = join(mkdtempSync(join(tmpdir(), "foundry-")), "bad-prmeta.json");
   writeFileSync(badPath, JSON.stringify({ ...loaded.state, packets: broken }));
   assert.equal(loadFactoryState(badPath).ok, false);
+
+  // The other three fields this unit added, each one at a time. Only `humanReview` was pinned, so
+  // all three `optional(...)` guards deleted green — and these are not decorative: a hand-edited
+  // `mergeCommitSha: 12345` reaches `classifyRevert`, which calls `.toLowerCase()` on it, and a
+  // non-string `baseRef` goes into the commit query as the branch the revert is searched on.
+  for (const [field, bad] of [
+    ["mergeCommitSha", 12345],
+    ["mergedAt", 20260827],
+    ["baseRef", { name: "main" }],
+  ] as const) {
+    const corrupt = loaded.state.packets.map((p) =>
+      p.prMeta ? { ...p, prMeta: { ...p.prMeta, [field]: bad } } : p,
+    );
+    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), `bad-${field}.json`);
+    writeFileSync(path, JSON.stringify({ ...loaded.state, packets: corrupt }));
+    assert.equal(
+      loadFactoryState(path).ok,
+      false,
+      `a hand-edited ${field} of the wrong type must make the ledger refuse to load`,
+    );
+  }
+  // The control: absent is legal for all three — they post-date the seed's older packets.
+  const absent = loaded.state.packets.map((p) =>
+    p.prMeta
+      ? { ...p, prMeta: { ...p.prMeta, mergeCommitSha: undefined, mergedAt: undefined, baseRef: undefined } }
+      : p,
+  );
+  const absentPath = join(mkdtempSync(join(tmpdir(), "foundry-")), "absent-prmeta.json");
+  writeFileSync(absentPath, JSON.stringify({ ...loaded.state, packets: absent }));
+  assert.equal(loadFactoryState(absentPath).ok, true, "optional must still mean optional");
 });

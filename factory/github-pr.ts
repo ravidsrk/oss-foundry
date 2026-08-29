@@ -1,4 +1,4 @@
-import { classifyRevert, type RevertVerdict } from "./scorecard.ts";
+import { classifyRevert, REVERT_WINDOW_DAYS, type RevertVerdict } from "./scorecard.ts";
 import type { PrMeta } from "./types.ts";
 
 export type { PrMeta } from "./types.ts";
@@ -384,10 +384,17 @@ export function countHumanReview(input: {
  * The practical cost is 2 extra requests per already-terminal PR on every `reconcile` and every
  * 6-hourly clock tick, forever — at today's ledger, 6 requests a tick against a 5000/hour budget.
  *
- * That is a deliberate trade, not an oversight. A terminal PR is not frozen: a maintainer can leave
- * a review comment days after closing it, and — more importantly — a sync whose review endpoints
- * 500ed records `humanReview` as ABSENT, and re-reading on the next pass is the only way that ever
- * gets filled in. A transition-gated fetch would strand such a packet at "not observed" forever.
+ * That trade is only worth paying because something CONSUMES the re-read, and for a merged packet
+ * nothing did until issue #39 round 3. Stated precisely, because the earlier version of this
+ * comment got it backwards: `recordTerminalReview` has exactly two call sites, both inside
+ * `applyPrSync`'s terminal *transition* branches; `applyPrSync` refuses any status that is not
+ * `submitted`/`followed-up`; `reconcile` therefore never hands it a merged packet; and
+ * `verify-ledger` never reads `humanReview` at all. So a merged packet whose review endpoints
+ * 500ed on the one tick that absorbed the merge WAS stranded at "not observed" forever — not by a
+ * transition-gated fetch, but by the shipped code — and the 6 requests/tick this paragraph budgets
+ * bought exactly nothing. `reconcile` now calls `applyReviewObservation` with what this returns,
+ * which is what makes the re-read worth its cost; the same call is what a maintainer's review
+ * comment landing days after the close is picked up by.
  * An OPEN PR is still skipped: `noReview` and `reviewCommentsAvg` are defined over terminal
  * outcomes and an open PR has none, so it costs exactly the one request it always did.
  *
@@ -433,7 +440,7 @@ export function nextPageUrl(link: string | null | undefined): string | undefined
 /**
  * How many pages of commits one revert re-check may read: 1000 commits, ten requests. A bound is
  * needed because this runs unattended every six hours over every merged packet, and an unbounded
- * follow on a busy base branch is exactly the "excessive automated activity" the AUP names.
+ * follow on a busy base branch is exactly the "excessive automated bulk activity" the AUP names (docs/07-github-app.md).
  */
 export const MAX_COMMIT_PAGES = 10;
 
@@ -453,6 +460,10 @@ export const MAX_COMMIT_PAGES = 10;
  * and page 1's oldest commit is `2026-08-28T14:08:01Z` against a merge at `2026-08-27T07:04:52Z`:
  * a ~31-hour blind window opening at the merge, widening every day.
  *
+ * **Bounded at both ends by its caller.** `revertCheck` passes `until = mergedAt + 30 days`, the
+ * classifier's own deadline, so the window is a fixed size from the day it opens instead of one
+ * that grows a day every day against a fixed page cap. See `revertCheck` for the arithmetic.
+ *
  * The `truncated` flag exists because a short read and a clean read return the same commits and the
  * same verdict. Every consumer already shouts about a read that FAILED; nothing could tell them
  * about one that merely stopped early, and a capped read must never be indistinguishable from a
@@ -460,7 +471,7 @@ export const MAX_COMMIT_PAGES = 10;
  */
 export async function listCommitsSince(
   repoId: string,
-  opts: { since: string; sha?: string },
+  opts: { since: string; until?: string; sha?: string },
   fetchImpl: typeof fetch = fetch,
 ): Promise<
   | { ok: true; commits: { sha: string; message: string; committedAt: string }[]; truncated: boolean }
@@ -469,6 +480,9 @@ export async function listCommitsSince(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   const query = new URLSearchParams({ since: opts.since, per_page: "100" });
+  // The far end of the window, and the reason the read does not grow without bound — see
+  // `revertCheck` below, which is the only caller that can compute it.
+  if (opts.until) query.set("until", opts.until);
   if (opts.sha) query.set("sha", opts.sha);
   let url = `https://api.github.com/repos/${owner}/${repo}/commits?${query}`;
   const commits: { sha: string; message: string; committedAt: string }[] = [];
@@ -527,7 +541,27 @@ export async function revertCheck(
       verdict: { reverted: false, why: `no merge commit recorded for ${repoId} — nothing to revert` },
     };
   }
-  const listed = await listCommitsSince(repoId, { since: meta.mergedAt, sha: meta.baseRef }, fetchImpl);
+  // BOTH ends of the window, deliberately (issue #39 round 3). `since` alone reads [mergedAt, now],
+  // which grows by a day every day and never closes — while `classifyRevert` discards anything past
+  // `mergedAt + REVERT_WINDOW_DAYS`, so every commit beyond that is fetched, paged, and thrown away.
+  // Measured on ravidsrk/orca-fleet (read-only GET, 2026-08-29): main runs ~17 commits/day, so the
+  // 30-day window holds ~505 — comfortably under the 1000-commit cap. The unbounded read is under
+  // it only for now: at that rate it crosses the cap around day 60, and from then on every
+  // long-lived merged packet emits a truncation advisory on every tick, permanently, about a window
+  // that closed a month earlier. Nothing could ever clear it. That is how an advisory channel gets
+  // trained into background noise — the exact failure this file's siblings cite as their reason for
+  // edge-triggering (ledger-check.ts). Bounding at the classifier's own deadline makes the read a
+  // fixed size forever and keeps a truncation advisory meaning what it says.
+  const windowEnd = Date.parse(meta.mergedAt) + REVERT_WINDOW_DAYS * 86_400_000;
+  const listed = await listCommitsSince(
+    repoId,
+    {
+      since: meta.mergedAt,
+      until: Number.isFinite(windowEnd) ? new Date(windowEnd).toISOString() : undefined,
+      sha: meta.baseRef,
+    },
+    fetchImpl,
+  );
   if (!listed.ok) return { ok: false, error: listed.error };
   return {
     ok: true,

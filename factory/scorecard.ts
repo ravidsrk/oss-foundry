@@ -127,6 +127,30 @@ export function applyReviewToScorecard(
 }
 
 /**
+ * Is this packet's PR at a terminal outcome the review KPIs are defined over? (issue #39 round 3.)
+ *
+ * ONE predicate, deliberately, read by both the writer (`applyReviewObservation`) and the reporter
+ * (`packetChecks`). Two hand-written copies is how this unit shipped the same defect three times:
+ * one consumer pinned and its sibling not. If these two could disagree, `reconcile` could fold an
+ * observation into a cumulative counter for a packet the reporter says is not in the population, or
+ * the reporter could nag about a packet the writer refuses to fix — and either is worse than the
+ * gap they exist to close.
+ *
+ * Read off the STORED `prMeta`, not off the packet's status and not off the live PR. It is exactly
+ * `recordTerminalReview`'s own trigger condition — `meta.merged`, or `meta.state === "closed"` —
+ * expressed against the meta the ledger kept, so "should this packet have a review observation?"
+ * has the same answer here as it had on the tick that absorbed the outcome. Status is the wrong key:
+ * `applyPrSync` writes `closedUnmerged` and leaves the packet `followed-up`, from where `park` or
+ * `reject` can move it later without changing what the scorecard already counted. The live PR is
+ * the wrong key too: a `rejected` packet can name a PR someone else closed, which the ledger never
+ * absorbed and never counted.
+ */
+export function isTerminalReviewSubject(packet: TaskPacket): boolean {
+  const meta = packet.prMeta;
+  return meta !== undefined && (meta.merged || meta.state === "closed");
+}
+
+/**
  * Prefix on the follow-up note a recorded revert writes. Also its dedupe key, and the way the
  * clock tells "GitHub says our patch was reverted" from "…and the ledger already says so".
  */

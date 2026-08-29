@@ -111,7 +111,11 @@ export function seedState(): FactoryState {
       reviewComments: 0,
       issueComments: 0,
       headSha: "09882b0075d7bb8f99a76c2526504b9194ce380d",
-      updatedAt: "2026-08-28T06:40:44.000Z",
+      // The PR's own last activity, which is NOT its merge instant: GitHub stamps `updated_at` when
+      // the merge finishes writing, a beat after `merged_at`. Both values here were the merge
+      // instant, copied into the wrong field; re-read live 2026-08-29 (read-only GET) they are
+      // 06:40:45Z here and 11:30:08Z on orca-fleet#72.
+      updatedAt: "2026-08-28T06:40:45.000Z",
       syncedAt: "2026-08-29T00:00:00.000Z",
       baseRef: "main",
       mergeCommitSha: "4375afc98341e6b991544df592f2b7fa7441ca7e",
@@ -176,9 +180,13 @@ export function seedState(): FactoryState {
       reviewComments: 0,
       issueComments: 0,
       headSha: "8c7068a5467a283de524c88e549dfa66782eeec2",
-      updatedAt: "2026-08-27T11:30:04.000Z",
+      updatedAt: "2026-08-27T11:30:08.000Z",
       syncedAt: "2026-08-29T00:00:00.000Z",
       baseRef: "main",
+      // Note the ordering: this merge COMMIT is stamped 11:30:03Z, one second BEFORE `merged_at`,
+      // so a `since: mergedAt` read excludes it. Harmless — `classifyRevert` skips the merge commit
+      // anyway — but it is why "the read reaches the merge commit itself" is true of #70 and not of
+      // this one.
       mergeCommitSha: "32050a009299df3608f5e67d9db3362c0a9ab4bb",
       mergedAt: "2026-08-27T11:30:04Z",
       // Read live 2026-08-29: no reviews and no review comments at all. This is a `noReview` row.

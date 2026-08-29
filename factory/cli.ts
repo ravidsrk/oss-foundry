@@ -10,6 +10,7 @@ import {
   applyHalt,
   applyReject,
   applyPrSync,
+  applyReviewObservation,
   applyRevert,
   applyTick,
   bindingFromCompare,
@@ -884,6 +885,12 @@ async function main() {
     // revert is neither — it is a live safety event on a repository (SPEC.md §7). Overloading
     // either word would teach it two meanings, which is the thing the split above exists to avoid.
     const reverts: string[] = [];
+    // And a fourth bucket, for the same reason. A recovered review KPI is not a divergence (the
+    // ledger contradicted nothing), not a debt the operator owes (it is already paid), and not a
+    // safety event. It is a scorecard number that just changed, and it needs promoting into the
+    // seed exactly like a recorded revert — so it gets its own word rather than being read as one
+    // of the other three.
+    const reviews: string[] = [];
     for (const packet of state.packets) {
       if (!packet.prUrl) continue;
       const synced = await syncGithubPr({ url: packet.prUrl });
@@ -906,6 +913,33 @@ async function main() {
         // record merges/closes but never release the in-flight slot.
         const applied = applyPrSync(next, packet.id, synced.meta, { threadsAnswered: false });
         if (!applied.error) next = applied.state;
+      }
+      // The review-KPI recovery (issue #39 round 3), and the reason `syncGithubPr` keeps paying 2
+      // requests per already-terminal PR: before this, for a MERGED packet, those requests bought
+      // nothing at all. `applyPrSync` refuses a merged packet, `recordTerminalReview` is only
+      // reachable from inside it, and the clock never reads `humanReview` — so a packet whose
+      // review endpoints were down on the one tick that absorbed the merge stayed at "not
+      // observed" forever, with its terminal outcome silently outside noReview's denominator.
+      // Safe to call on every packet, every tick, and the safety is NOT in this call site: it is
+      // `applyReviewObservation`'s own refusal to write over a stored `prMeta.humanReview`. That
+      // matters to state plainly, because an earlier draft of this line also tested
+      // `isTerminalReviewSubject` here and a comment claimed the test was what prevented a double
+      // count on the tick that absorbs a merge. It was not — with or without it the writer's guard
+      // is what refuses, and both mutants survived the suite. The condition below is only the cheap
+      // one: `syncGithubPr` populates `humanReview` for terminal PRs alone, so an open packet costs
+      // nothing here. An error is still reported rather than swallowed, because a writer that
+      // starts refusing for a new reason should be visible rather than silently skipped.
+      if (synced.meta.humanReview) {
+        const observed = synced.meta.humanReview;
+        const recovered = applyReviewObservation(next, packet.id, observed);
+        if (recovered.error) {
+          owed.push(`${packet.id}: could not record the human-review observation — ${recovered.error}`);
+        } else if (recovered.recorded) {
+          next = recovered.state;
+          reviews.push(
+            `${packet.id}: human review recovered on ${packet.repoId} (${observed.reviews} review(s), ${observed.comments} comment(s)) — noReview/reviewCommentsAvg had been computed without it`,
+          );
+        }
       }
       // The revert re-check (issue #39). It belongs here and not in `applyPrSync`, whose status
       // guard has always refused a merged packet — which is precisely why nothing could ever
@@ -950,13 +984,18 @@ async function main() {
     // here and not there would teach two different meanings for one word.
     for (const a of owed) console.error(`ADVISORY ${a}`);
     for (const d of doctrine) console.error(`DIVERGENCE ${d}`);
+    for (const r of reviews) {
+      console.error(
+        `REVIEW ${r}. Recorded in local state only; promote the scorecard row into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that never observed this PR's review.`,
+      );
+    }
     for (const r of reverts) {
       console.error(
         `REVERT ${r} — SPEC.md §7: the repo is now a scorecard stop and stays unselectable while the ledger records it. Recorded in local state only; promote it into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that says reverts=0. Not allowlist.yaml — removing the repo there deletes the scorecard row that holds the count.`,
       );
     }
     console.log(
-      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length} reverts=${reverts.length}`,
+      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length} reverts=${reverts.length} reviews=${reviews.length}`,
     );
     return;
   }

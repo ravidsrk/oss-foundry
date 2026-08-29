@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { ALLOWLIST } from "./allowlist.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
+import { packetChecks } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket } from "./packet.ts";
 import { emptyScorecard } from "./scorecard.ts";
@@ -169,6 +170,12 @@ interface LivePr {
   /** What `GET /pulls/{n}/reviews` and `/comments` answer. Bots included — filtering is the code's job. */
   reviews?: { login: string; type?: string }[];
   reviewComments?: { login: string; type?: string }[];
+  /**
+   * GitHub 500s both review endpoints. The fail-closed input for the human-review split: the sync
+   * then records `humanReview` as ABSENT, which is "not observed" and emphatically not "nobody
+   * reviewed it" — the distinction the two review KPIs are built on (issue #39).
+   */
+  reviewsUnreadable?: boolean;
 }
 
 /** What `GET /repos/{owner}/{repo}/commits?since=…` answers, keyed by repo id. */
@@ -266,8 +273,10 @@ globalThis.fetch = async (url) => {
   if (!pr) return json(404, { message: "unstubbed " + url });
   // The two review surfaces the human-review split is read from (issue #39). Sub-resources of the
   // pull, so they are matched before the pull itself.
-  if (parts[5] === "reviews") return json(200, actors(pr.reviews));
-  if (parts[5] === "comments") return json(200, actors(pr.reviewComments));
+  if (parts[5] === "reviews" || parts[5] === "comments") {
+    if (pr.reviewsUnreadable) return json(500, { message: "review endpoints unavailable" });
+    return json(200, actors(parts[5] === "reviews" ? pr.reviews : pr.reviewComments));
+  }
   return json(200, {
     html_url: "https://github.com/" + path,
     title: "stub",
@@ -1369,6 +1378,19 @@ test("reconcile re-checks merged packets for a revert of our merge commit and re
   const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
   const row = after.scorecard.find((r) => r.repoId === repoId)!;
   assert.equal(row.reverts, 1, "the scorecard row is the thing the KPI is read from");
+  // WHICH half of the definition found it. `reconcile` reads a commit; `revert --reason` records a
+  // maintainer's prose. Recording a machine-detected revert as `(operator)` would put words in a
+  // maintainer's mouth in the permanent record — and `source: "commit"` flipped to `"operator"`
+  // here, or the event's `${input.source}` hardcoded in `applyRevert`, both left the suite green.
+  const recorded = after.packets.find((p) => p.id === REVERTED)!;
+  const note = recorded.followUps!.find((f) => f.body.startsWith("revert:"))!;
+  assert.match(note.body, /^revert: \(commit\)/, `a commit-detected revert is not operator-stated:\n${note.body}`);
+  const scoreEvent = after.events.filter((e) => e.message.startsWith("REVERT recorded")).at(-1)!;
+  assert.match(
+    scoreEvent.message,
+    /^REVERT recorded \(commit\)/,
+    `the event carries the same provenance as the note, or the two records disagree:\n${scoreEvent.message}`,
+  );
   // The sibling merged packet on the same repo names a different merge commit; a re-check that
   // matched on "some revert happened here" would have counted it twice.
   assert.equal(after.packets.filter((p) => p.followUps?.some((f) => f.body.startsWith("revert:"))).length, 1);
@@ -1557,6 +1579,297 @@ test("sync counts a silently merged PR as noReview, and the ledger prints it", (
     ledger.stdout,
     new RegExp(`- ${inflight.repoId}: opened=\\d+ merged=\\d+ closedUnmerged=\\d+ noReview=1 `),
     `the ledger's noReview column must carry the computed value:\n${ledger.stdout}`,
+  );
+});
+
+/**
+ * The seed with one merged packet's review observation stripped — the shape a packet is left in
+ * when GitHub's review endpoints were down for the single tick that absorbed its merge.
+ */
+function reviewBlindState(id: string): FactoryState {
+  const seed = seedState();
+  const before = seed.packets.find((p) => p.id === id)!;
+  assert.ok(before.prMeta?.humanReview, `${id} must start observed or the strip proves nothing`);
+  return {
+    ...seed,
+    packets: seed.packets.map((p) =>
+      p.id === id ? { ...p, prMeta: { ...p.prMeta!, humanReview: undefined } } : p,
+    ),
+  };
+}
+
+test("a merged packet's review KPI is recoverable, and both verbs say so until it is", () => {
+  // Issue #39 round 3. `recordTerminalReview` gets exactly one chance per packet: the tick that
+  // absorbs the merge, inside `applyPrSync`, which refuses every status but submitted/followed-up.
+  // If the review endpoints 500ed for that one request the KPI was written nowhere and could be
+  // written nowhere afterwards — `reconcile` skips merged packets when it calls `applyPrSync`, and
+  // the clock never read `humanReview` at all. Three of the four seeded packets are merged, so the
+  // 2 requests/PR/tick `syncGithubPr` spends re-reading the review endpoints of an already-terminal
+  // PR bought literally nothing for the majority case, while the scorecard reported noReview over a
+  // denominator quietly short by one. "A zero nobody observed is an invented KPI" (issue #39) has a
+  // second edge: so is a rate over a population nobody was told was short.
+  const BLIND = "pkt_ravidsrk_frontguard_195";
+  const blind = reviewBlindState(BLIND);
+  const repoId = blind.packets.find((p) => p.id === BLIND)!.repoId;
+  const before = blind.scorecard.find((r) => r.repoId === repoId)!;
+
+  // The clock first: it cannot write, and it reads the COMMITTED SEED — so this half is asserted
+  // through `packetChecks` against the stripped packet, which is what the seed would look like.
+  const stranded = blind.packets.find((p) => p.id === BLIND)!;
+  const seen = packetChecks(stranded, {
+    state: "closed",
+    merged: true,
+    draft: stranded.prMeta!.draft,
+    headSha: stranded.prMeta!.headSha,
+    body: stranded.prBody ?? "",
+    revert: { reverted: false, why: "nothing" },
+  });
+  assert.deepEqual(seen.fatal, [], "a KPI the ledger never observed contradicts nothing GitHub says");
+  assert.match(
+    seen.advisory.join("\n"),
+    new RegExp(`${BLIND}: the ledger records no human-review observation for a terminal PR`),
+    `an unobserved KPI must not be silent:\n${seen.advisory.join("\n")}`,
+  );
+  // The remedy has to name the verb that works. `sync` does not: it goes through `applyPrSync`,
+  // whose status guard answers `cannot sync PR from status merged`.
+  assert.match(seen.advisory.join("\n"), /Run `reconcile` on a pass where GitHub answers/);
+  assert.match(seen.advisory.join("\n"), /NOT `sync`, which refuses a terminal packet/);
+
+  // And `reconcile`, the verb that verb names, actually recovers it.
+  const path = writeState(blind);
+  const run = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [stranded.prUrl!]: { reviews: [{ login: "maintainer" }], reviewComments: [{ login: "maintainer" }, { login: "dependabot[bot]", type: "Bot" }] },
+      }),
+    ),
+  });
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.out,
+    new RegExp(`^REVIEW ${BLIND}: human review recovered on ${repoId} \\(1 review\\(s\\), 1 comment\\(s\\)\\)`, "m"),
+    `the bot's review comment is not a human's, and the recovery must name what it folded:\n${run.out}`,
+  );
+  assert.match(run.out, /^REVIEW .*factory\/seed\.ts/m, `local state is gitignored; the seed is the edit:\n${run.out}`);
+  assert.match(run.stdout, /reviews=1/, `the summary counter must follow the bucket:\n${run.stdout}`);
+
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const row = after.scorecard.find((r) => r.repoId === repoId)!;
+  assert.deepEqual(
+    after.packets.find((p) => p.id === BLIND)!.prMeta!.humanReview,
+    { reviews: 1, comments: 1 },
+    "the observation is stored on the packet, which is what makes the fold idempotent",
+  );
+  assert.equal(row.humanReviewedPrs, before.humanReviewedPrs + 1, "the denominator grew by exactly one");
+  assert.equal(row.humanReviewComments, before.humanReviewComments + 1);
+
+  // Idempotent. These are cumulative counters and this runs every six hours forever, so a
+  // level-triggered fold that did not refuse a second time would inflate the KPI on its own.
+  const twice = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [stranded.prUrl!]: { reviews: [{ login: "maintainer" }], reviewComments: [{ login: "maintainer" }] },
+      }),
+    ),
+  });
+  assert.equal(twice.code, 0, twice.out);
+  assert.match(twice.stdout, /reviews=0/, `a second pass must recover nothing:\n${twice.stdout}`);
+  const settled = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const settledRow = settled.scorecard.find((r) => r.repoId === repoId)!;
+  assert.equal(settledRow.humanReviewedPrs, row.humanReviewedPrs, "a re-fold would grow this forever");
+  assert.equal(settledRow.humanReviewComments, row.humanReviewComments);
+  // And the advisory is gone from the recovered ledger — a line that never clears is noise.
+  assert.equal(
+    packetChecks(settled.packets.find((p) => p.id === BLIND)!, {
+      state: "closed",
+      merged: true,
+      draft: stranded.prMeta!.draft,
+      headSha: stranded.prMeta!.headSha,
+      body: stranded.prBody ?? "",
+      revert: { reverted: false, why: "nothing" },
+    }).advisory.some((a) => /no human-review observation/.test(a)),
+    false,
+  );
+});
+
+test("a merge reconcile absorbs in the same run is counted once, by the transition, not twice", () => {
+  // The recovery and `recordTerminalReview` both fold into the same cumulative counters, and on the
+  // tick that absorbs a merge BOTH are reachable in one pass of the loop: `applyPrSync` runs the
+  // terminal transition, and the recovery then sees a packet that is now merged with a live review
+  // split in hand. Folding twice would put one PR into `noReview`'s denominator twice — the same
+  // double-count `firstClose` exists to prevent for `closedUnmerged`, arriving by a new door.
+  //
+  // The guard is that the recovery tests the packet as the ledger held it BEFORE this run, so a
+  // transition `applyPrSync` is about to handle is never also "recovered".
+  const seed = seedState();
+  const submitted = seed.packets.find((p) => p.status === "submitted")!;
+  const before = seed.scorecard.find((r) => r.repoId === submitted.repoId)!;
+  const path = writeState(seed);
+
+  const run = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [submitted.prUrl!]: {
+          state: "closed",
+          merged: true,
+          draft: false,
+          reviews: [{ login: "maintainer" }],
+          reviewComments: [{ login: "maintainer" }, { login: "maintainer" }],
+        },
+      }),
+    ),
+  });
+  assert.equal(run.code, 0, run.out);
+
+  const after = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(after.packets.find((p) => p.id === submitted.id)!.status, "merged", "the merge was absorbed");
+  const row = after.scorecard.find((r) => r.repoId === submitted.repoId)!;
+  assert.equal(
+    row.humanReviewedPrs,
+    before.humanReviewedPrs + 1,
+    `one terminal PR, one place in the denominator:\n${run.out}`,
+  );
+  assert.equal(row.humanReviewComments, before.humanReviewComments + 2);
+  // And the transition is what recorded it, so the recovery bucket stays empty. If both had fired
+  // the counters above would be doubled AND this line would name the packet.
+  assert.match(run.stdout, /reviews=0/, `the transition owns this write, not the recovery:\n${run.out}`);
+  assert.equal(
+    /^REVIEW /m.test(run.out),
+    false,
+    `a merge absorbed in this very run is not a recovery:\n${run.out}`,
+  );
+  assert.match(
+    after.events.map((e) => e.message).join("\n"),
+    /human review comment\(s\) on .*reviewCommentsAvg now/,
+    "the transition's own event is the one that should be in the ledger",
+  );
+});
+
+test("the review-KPI advisory reaches BOTH verbs' terminals, not just the one it was written in", () => {
+  // `verify-ledger.ts` and `reconcile` are two hand-written call sites into one `packetChecks`
+  // split, and this unit has now shipped the same defect twice — a fact one call site supplied and
+  // the other did not, with the suite green because only one verb was exercised (`revert` in round
+  // 1, `revertTruncated` in round 2). Under `--experimental-strip-types` a dropped field is a
+  // runtime `undefined`, never a compile error.
+  //
+  // The structural answer, taken here, is that this advisory needs NO new field: it is derived from
+  // the packet plus `merged`/`state`, which both call sites have always supplied and which many
+  // existing assertions already pin. So there is nothing to forget at one site. What is asserted
+  // below is that both verbs do in fact print it, which is the claim, not the mechanism.
+  const BLIND = "pkt_ravidsrk_frontguard_195";
+  const blind = reviewBlindState(BLIND);
+  const stranded = blind.packets.find((p) => p.id === BLIND)!;
+
+  // The operator's terminal, on the pass where the endpoints are still down — the only pass on
+  // which `reconcile` can reach the advisory at all, because when they answer it RECOVERS instead.
+  const cli = runCli(["reconcile", "--state", writeState(blind)], tmpdir(), {
+    preload: prFactsStub(livePrs({ [stranded.prUrl!]: { reviewsUnreadable: true } })),
+  });
+  assert.equal(cli.code, 0, cli.out);
+  assert.match(
+    cli.out,
+    new RegExp(`^ADVISORY ${BLIND}: the ledger records no human-review observation`, "m"),
+    `reconcile must print it too, not only the clock:\n${cli.out}`,
+  );
+  assert.match(cli.stdout, /reviews=0/, `nothing was recoverable on this pass:\n${cli.stdout}`);
+
+  // The clock's terminal. It reads the COMMITTED SEED, so the only run available is the control:
+  // every merged packet there carries an observation, so the line must be silent. That silence is
+  // only evidence if the premise holds, so the premise is asserted rather than assumed.
+  const clock = runClock(livePrs());
+  assert.equal(clock.code, 0, clock.out);
+  assert.equal(
+    /no human-review observation/.test(clock.out),
+    false,
+    `every merged packet in the committed seed is observed, so the clock must stay quiet:\n${clock.out}`,
+  );
+  for (const packet of seedState().packets.filter((p) => p.status === "merged")) {
+    assert.ok(
+      packet.prMeta?.humanReview,
+      `${packet.id} carries no human-review observation in the committed seed — the clock's silence above would be a hole, not a control`,
+    );
+  }
+});
+
+test("reconcile says so when the commit read fails, and when it merely stops short", () => {
+  // The clock's sibling, and the reason it is a separate test rather than a line in that one.
+  // `verify-ledger.ts` and `reconcile` are two hand-written call sites into the same `packetChecks`
+  // split, and each has to supply `revertTruncated` itself — a field `--experimental-strip-types`
+  // turns into a runtime `undefined` when it is dropped, never a compile error. So the clock's
+  // assertion protects the clock and nothing else: with only that test, deleting the field from
+  // `cli.ts`, hardcoding it `false`, deleting reconcile's failed-read advisory, or moving that
+  // advisory into the DIVERGENCE bucket each left the whole suite green while the two verbs
+  // disagreed about what was checked — the exact thing reconcile's own comment forbids.
+  const seed = seedState();
+
+  const unreadable = runCli(["reconcile", "--state", writeState(seed)], tmpdir(), {
+    preload: prFactsStub(livePrs(), {}, { fail: ["ravidsrk/frontguard"] }),
+  });
+  assert.equal(unreadable.code, 0, `an unreadable commit list is a debt, not a divergence:\n${unreadable.out}`);
+  assert.match(
+    unreadable.out,
+    /^ADVISORY pkt_ravidsrk_frontguard_195: could not read ravidsrk\/frontguard commits since the merge — a revert would go unnoticed this run/m,
+    `a failed read must name the packet and the risk, on reconcile too:\n${unreadable.out}`,
+  );
+  // The bucket, not just the text. Moving this line into `doctrine` would print it as a DIVERGENCE
+  // and teach that word a second meaning — the split's whole reason for existing.
+  assert.equal(
+    /^DIVERGENCE .*could not read/m.test(unreadable.out),
+    false,
+    `a read that failed is not the ledger contradicting GitHub:\n${unreadable.out}`,
+  );
+
+  // A capped read: GitHub answers 200 with a `Link: rel="next"` that never runs out, so the commits
+  // and the verdict are byte-identical to a clean run. Only the flag differs, and only if reconcile
+  // passes it on.
+  const capped = runCli(["reconcile", "--state", writeState(seed)], tmpdir(), {
+    preload: prFactsStub(livePrs(), {}, { truncate: ["ravidsrk/frontguard"] }),
+  });
+  assert.equal(capped.code, 0, `a short read is a debt, not a divergence:\n${capped.out}`);
+  assert.match(
+    capped.out,
+    /^ADVISORY pkt_ravidsrk_frontguard_195: the revert re-check on ravidsrk\/frontguard hit its page cap/m,
+    `a page-capped read must not read as a clean one on reconcile either:\n${capped.out}`,
+  );
+  assert.equal(
+    /^DIVERGENCE .*page cap/m.test(capped.out),
+    false,
+    `a short read is not the ledger contradicting GitHub:\n${capped.out}`,
+  );
+
+  // The COUNT, which is what a `revertTruncated: false` hardcode changes when the text alone would
+  // still match some other advisory. Three merged packets in the seed, and the truncated repo owns
+  // two of them — plus the standing re-witness debt on the in-flight packet.
+  const cleanRun = runCli(["reconcile", "--state", writeState(seed)], tmpdir(), {
+    preload: prFactsStub(livePrs(), {}),
+  });
+  assert.equal(cleanRun.code, 0, cleanRun.out);
+  const count = (out: string): number => Number(/advisories=(\d+)/.exec(out)?.[1] ?? -1);
+  assert.ok(count(cleanRun.stdout) >= 0, `the summary must carry a count:\n${cleanRun.stdout}`);
+  assert.equal(
+    count(capped.stdout),
+    count(cleanRun.stdout) + 1,
+    `a capped read must move the advisory count, or the flag is decorative:\n${capped.stdout}\n${cleanRun.stdout}`,
+  );
+  // A failed read is doubly loud, and deliberately: `revertCheck` returning `ok: false` leaves
+  // `revert` undefined, so `packetChecks` ALSO reports the doctrine check as one that did not run.
+  // Two sentences, two different facts — why the read produced nothing, and what its absence costs.
+  assert.equal(
+    count(unreadable.stdout),
+    count(cleanRun.stdout) + 2,
+    `a failed read must move the advisory count too:\n${unreadable.stdout}\n${cleanRun.stdout}`,
+  );
+  assert.match(
+    unreadable.out,
+    /^ADVISORY pkt_ravidsrk_frontguard_195: the revert re-check did not run/m,
+    `a failed read also turns the doctrine check off, and that must be said:\n${unreadable.out}`,
+  );
+
+  // And the control: a commit list GitHub serves in full says neither thing.
+  assert.equal(
+    /could not read|page cap/.test(cleanRun.out),
+    false,
+    `a complete read must stay quiet or both advisories mean nothing:\n${cleanRun.out}`,
   );
 });
 
