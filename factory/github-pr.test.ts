@@ -393,6 +393,14 @@ test("countHumanReview drops the bots from both review surfaces and keeps them a
     comments: [{ user: { login: "greptile-apps[bot]", type: "Bot" } }],
   });
   assert.deepEqual(botsOnly, { reviews: 0, comments: 0 });
+
+  // The two lists are filtered independently, so a bot review plus a human line-comment is
+  // {reviews: 0, comments: 1} on the live path — not unreachable (issue #76).
+  const commentOnBot = countHumanReview({
+    reviews: [{ user: { login: "greptile-apps[bot]", type: "Bot" } }],
+    comments: [{ user: { login: "ravidsrk", type: "User" } }],
+  });
+  assert.deepEqual(commentOnBot, { reviews: 0, comments: 1 });
 });
 
 test("syncGithubPr reads the human review split for a terminal PR, and says nothing when it cannot", async () => {
