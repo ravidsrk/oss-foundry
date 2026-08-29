@@ -484,6 +484,18 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "We cannot merge your work until the CLA is signed.", want: "required", why: "cannot-merge framing" },
   { doc: "Your PR will not be reviewed without a DCO sign-off.", want: "required", why: "'without' is a requirement context, never a waiver" },
 
+  // PLURALS. A P1 fail-open in the first version of this change, found in review: `\bcla\b` does
+  // not match `CLAs`, so the first row below waived the DCO, saw nothing about the CLA, and reached
+  // ALLOW. The second and third matched NOTHING AT ALL. Same defect as the issue, new spelling.
+  { doc: "No DCO. CLAs are mandatory.", want: "required", why: "plural acronym after a waived sibling" },
+  { doc: "CLAs are required for all contributors.", want: "required", why: "plural acronym, was silent" },
+  { doc: "We require DCOs on every commit.", want: "required", why: "plural DCO, was silent" },
+  { doc: "Contributor license agreements are required from every contributor.", want: "required", why: "plural spelled-out form" },
+  { doc: "No DCO. Contributor agreements are mandatory.", want: "required", why: "plural short form after a waiver" },
+  // ...and the plural must not swallow an ordinary English word: `\bclas?\b` cannot match "class",
+  // because the optional s still needs a word boundary after it.
+  { doc: "Add a class for the parser and document the class hierarchy.", want: "silent", why: "'class' is not a plural CLA" },
+
   // --- No signature instrument at all. These must be SILENT: matching them is the over-block. ---
   { doc: "you signal your agreement with the Code of Conduct", want: "silent", why: "#52 mutation 2: a bare /agreement/i would hold this" },
   { doc: "By contributing you agree to the terms of the licence.", want: "silent", why: "agree + licence, no instrument" },

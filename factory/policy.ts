@@ -59,10 +59,25 @@ const HUMAN_REVIEW_STATEMENTS: RegExp[] = [
  * phrases — a real signature requirement the scanner could not see at all.
  */
 const SIGNATURE_FAMILIES: { family: string; token: string }[] = [
-  { family: "CLA", token: String.raw`(?:\bcla\b|contributor\s+licen[cs]e\s+agreement|contributor\s+agreement)` },
+  /**
+   * The acronyms are PLURAL-TOLERANT, and that was a P1 fail-open in the first version of this
+   * change: `\bcla\b` does not match `CLAs`, so "No DCO. CLAs are mandatory." waived the DCO, saw
+   * nothing about the CLA, and reached ALLOW for a repository that demands a signature — the exact
+   * defect this issue exists to close, reintroduced in its own fix in a new spelling. Measured:
+   * "CLAs are required for all contributors." and "We require DCOs on every commit." were both
+   * SILENT, matching nothing at all.
+   *
+   * `\bclas?\b` cannot match "class": the optional `s` still needs a word boundary after it, and
+   * "class" has another letter there. The spelled-out forms already matched inside their own plurals
+   * by substring; the explicit `s?` says so rather than leaving it to be rediscovered.
+   */
+  {
+    family: "CLA",
+    token: String.raw`(?:\bclas?\b|contributor\s+licen[cs]e\s+agreements?|contributor\s+agreements?)`,
+  },
   {
     family: "DCO",
-    token: String.raw`(?:\bdco\b|developer\s+certificate\s+of\s+origin|signed[-\s]?off[-\s]?by|sign[-\s]?offs?\b)`,
+    token: String.raw`(?:\bdcos?\b|developer\s+certificates?\s+of\s+origin|signed[-\s]?off[-\s]?by|sign[-\s]?offs?\b)`,
   },
 ];
 
