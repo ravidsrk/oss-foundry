@@ -53,7 +53,7 @@ repos:
     wave: 1
     language: TypeScript
     aiPolicy: unknown
-    policyNotes: "No written AI-contribution policy in CONTRIBUTING, AGENTS.md, or CLAUDE.md as of 2026-08-28. Behaviorally open (141 of 272 external PRs merged). Unknown until policy text exists - see issue 3."
+    policyNotes: "No written AI-contribution policy in CONTRIBUTING, AGENTS.md, or CLAUDE.md as of 2026-08-28. Behaviorally open - 250 of 408 non-owner PRs merged (61%), GitHub search is:pr -author:ColeMurray, measured 2026-08-29. Unknown until policy text exists - see issue 3."
     testCommand: npm test
     maxFiles: 6
     maxDiffLines: 280

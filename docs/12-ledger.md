@@ -27,6 +27,12 @@ merges/closes into local state without ever releasing the in-flight slot.
 |---|---|---|---|---|
 | pkt_OpenHands_OpenHands_16907 | [OpenHands/OpenHands#16907](https://github.com/OpenHands/OpenHands/issues/16907) | — | parked | — |
 
+### Off allowlist — denied or unlisted
+
+| packet | issue | PR | status | attested by |
+|---|---|---|---|---|
+| pkt_matplotlib_matplotlib_0 | [matplotlib/matplotlib#0](https://github.com/matplotlib/matplotlib) | — | parked | — |
+
 Foundry-attested Wave 0 merges: 3 (promotion gate: 2).
 
 ### Scorecard

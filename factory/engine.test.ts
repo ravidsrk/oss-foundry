@@ -572,9 +572,41 @@ test("tick skips issues that already have a competing PR", () => {
   assert.ok(ticked.packet);
   assert.notEqual(`${ticked.packet.repoId}#${ticked.packet.issueNumber}`, "ravidsrk/orca-fleet#71");
 
-  const queued = applyQueueLive(blank(), live("ravidsrk/orca-fleet", 80), undefined, true);
+  const queued = applyQueueLive(blank(), live("ravidsrk/orca-fleet", 80), undefined, {
+    kind: "competing",
+    url: "https://github.com/ravidsrk/orca-fleet/pull/2",
+    why: "closing-keyword",
+  });
   assert.equal(queued.packet, null);
   assert.equal(queued.reason, "already-has-pr");
+});
+
+/**
+ * `applyTick` carries the two-tier verdict (`competingKeys` stand down, `adjacentKeys` hold for
+ * human triage). `applyQueueLive` took a single `competingPr: boolean`, which can only say "stand
+ * down" or "go" — an adjacent mention had to be flattened into one of those, and flattening it to
+ * `false` queues the packet and loses the taste gate silently. The queue path is not wired into
+ * `cli.ts` today, so nothing was broken; the point is that wiring it later must not be able to
+ * lose the distinction (issue #44 item 8).
+ */
+test("applyQueueLive keeps the two-tier competing verdict instead of one boolean", () => {
+  const issue = live("ravidsrk/orca-fleet", 80);
+
+  const adjacent = applyQueueLive(blank(), issue, undefined, {
+    kind: "adjacent",
+    url: "https://github.com/ravidsrk/orca-fleet/pull/3",
+    why: "plain-mention",
+  });
+  assert.equal(adjacent.packet, null, "an adjacent mention is a hold, not a green light");
+  assert.equal(adjacent.reason, "adjacent-hold");
+  assert.notEqual(adjacent.reason, "already-has-pr", "a hold is not a stand-down");
+  assert.match(adjacent.state.events[0].message, /human triage/i);
+
+  const clear = applyQueueLive(blank(), issue, undefined, { kind: "clear" });
+  assert.equal(clear.packet?.issueNumber, 80);
+
+  const unchecked = applyQueueLive(blank(), issue);
+  assert.equal(unchecked.packet?.issueNumber, 80);
 });
 
 test("tick uses fetched AGENTS.md instead of YAML notes alone", () => {

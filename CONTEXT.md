@@ -23,7 +23,7 @@ A trust tier on an allowlisted repo: `0` own, `1` AI-welcome external, `2` adjac
 The deterministic gate result for a packet (`ALLOW`, `DENY_*`, `HOLD_*`). Grok does not vote.
 
 **Freeze**:
-The human attest that a packet may move from gate to implement. Wave 1+ never auto-freezes.
+The human attest that a packet may move from gate to implement. Nothing auto-freezes at any wave — there is no `autoFreeze` code path, and the first-20 counter is an odometer, not a gate that opens ([04-stations](docs/04-stations.md)).
 
 **In-flight**:
 A packet whose status is `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`, or `submitted`. At most one. `followed-up`, `merged`, `parked`, and `rejected` are not in-flight.

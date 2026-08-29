@@ -45,7 +45,7 @@ import { renderEvidencePage, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
-import { foundryAttestedWave0Merges } from "./status.ts";
+import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
 import {
   parseWitnessManifest,
@@ -163,7 +163,9 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
   if (inflight.length) {
     console.log("in flight:");
     for (const p of inflight) {
-      const quiet = p.prMeta ? `  quiet=${quietDaysOf(p.prMeta, new Date().toISOString())}d/${QUIET_RELEASE_DAYS}` : "";
+      const quiet = p.prMeta
+        ? `  ${quietLabel(quietDaysOf(p.prMeta, new Date().toISOString()), QUIET_RELEASE_DAYS, p.prMeta.syncedAt)}`
+        : "";
       console.log(`  ${p.id}  ${p.status}  ${p.repoId}#${p.issueNumber}  ${p.prUrl ?? ""}${quiet}`);
     }
   } else {
@@ -740,10 +742,9 @@ async function main() {
 
   if (cmd === "ledger") {
     // Emits the generated block for docs/12-ledger.md — paste between the GENERATED markers.
-    const waves: [number, string][] = [[0, "Wave 0"], [1, "Wave 1"], [2, "Wave 2"]];
-    for (const [wave, title] of waves) {
-      const packets = state.packets.filter((p) => repoById(p.repoId)?.wave === wave);
-      if (packets.length === 0) continue;
+    // Grouping runs through `ledgerSections`, not `repoById(...)?.wave`: an off-allowlist packet has
+    // no wave, so the old filter dropped the denied scout the ledger most needs to show (issue #44).
+    for (const { title, packets } of ledgerSections(state.packets)) {
       console.log(`### ${title}`);
       console.log("");
       console.log("| packet | issue | PR | status | attested by |");

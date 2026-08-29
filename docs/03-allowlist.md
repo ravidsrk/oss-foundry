@@ -19,7 +19,7 @@ The allowlist is the product. Everything else is a pipeline. Sole source: [`allo
 
 ### Wave 1 — low-risk external
 
-- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy anywhere (CONTRIBUTING, AGENTS.md, CLAUDE.md); behaviorally open, 141/272 external PRs merged. [#1476](https://github.com/ColeMurray/background-agents/issues/1476) → [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **draft** since 2026-08-28). Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) closed. **In flight.**
+- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy anywhere (CONTRIBUTING, AGENTS.md, CLAUDE.md); behaviorally open — 250/408 non-owner PRs merged (61%), GitHub search `is:pr -author:ColeMurray`, measured 2026-08-29. [#1476](https://github.com/ColeMurray/background-agents/issues/1476) → [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) (open, **draft** since 2026-08-28). Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) closed. **In flight.**
 - `github/awesome-copilot` — docs catalog, tiny diffs. Documented AI-agent fast track in CONTRIBUTING (🤖🤖🤖 title marker). First issue named: [#2684](https://github.com/github/awesome-copilot/issues/2684) (skills/github-issues reference gaps — docs class).
 - `e2b-dev/e2b-cookbook` — replaces `e2b-dev/E2B` (its docs/examples surface left that repo, E2B#1769). Genuinely silent: no CONTRIBUTING anywhere; the gate holds until upstream writes policy or the record turns affirmative. External merges current.
 - `mcp-use/mcp-use` — policy unknown until CONTRIBUTING is fetched. Gate holds.
@@ -35,7 +35,7 @@ Removed 2026-08-28: `kortix-ai/suna` — its documented dev/test loop is gated o
 
 - `matplotlib/matplotlib` — autonomous-agent ban.
 - `curl/curl` — maintainer request to stop agent noise.
-- `pydantic/pydantic` — welcomes AI-assisted PRs; bans mass submission across repos and unassigned PRs. Denied as a poor factory fit, not as anti-AI.
+- `pydantic/pydantic` — welcomes AI-assisted PRs; **reserves the right to close any PR at its discretion**, naming mass submission across repos as a case, and **auto-closes** PRs opened against an issue without being assigned first. Denied as a poor factory fit, not as anti-AI. Re-confirmed 2026-08-29 against pydantic's live `CONTRIBUTING.md` (§"AI policy" and the assignment rule); a round-2 review recorded this as unconfirmable, which was wrong. "Bans" overstated it by a notch and is corrected here — the deny reason in `allowlist.yaml` already carried the precise wording (issue #44 item 7).
 - `stablyai/orca` — no AI restriction upstream; denied for conflict of interest (it is the runtime Foundry rides). Contribute through orca-fleet.
 
 A denylist hit is `DENY_FORBIDDEN`. There is no override in the operator CLI.

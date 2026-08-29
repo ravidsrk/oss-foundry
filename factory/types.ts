@@ -27,6 +27,13 @@ export type Station =
 export type PacketStatus =
   | "scouted"
   | "gated"
+  /**
+   * Reserved, never written. `applyApprove` accepts it as a source status and `INFLIGHT_STATUSES`
+   * counts it, but no code path sets it — packets go `gated` → `approved` on the operator's attest.
+   * It is kept so a future explicit freeze step (separating "the human has read it" from "the human
+   * has attested it") lands without a state migration. In a committed ledger it means a hand edit.
+   * See docs/04-stations.md §3 (issue #44 item 1).
+   */
   | "frozen"
   | "approved"
   | "implementing"

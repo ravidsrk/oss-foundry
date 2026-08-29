@@ -99,22 +99,44 @@ export function applyTick(
   return { state: next, packet, reason: packet.policy.allow ? "gated" : packet.policy.code };
 }
 
+/**
+ * Queue one already-chosen live issue. Kept beside `applyTick` — which picks a candidate itself —
+ * because it is the single-issue entry point; `cli.ts` uses `applyTick` via `tickWithGithub`, so
+ * nothing calls this in production today (issue #44 item 8).
+ *
+ * `verdict` takes the same two-tier `CompetitionVerdict` that `classifyCompetition` produces and
+ * `applyTick` carries as separate `competingKeys` / `adjacentKeys`. It replaced a `competingPr:
+ * boolean`, which could only say "stand down" or "go": an adjacent mention had to be flattened into
+ * one of those, and flattening it to `false` queues the packet and drops the taste gate without a
+ * word. Nothing was broken while this path stayed unwired — the point is that wiring it later must
+ * not be able to lose the human-triage tier.
+ */
 export function applyQueueLive(
   state: FactoryState,
   issue: LiveIssue,
   docs?: { agentsMd?: string; contributing?: string },
-  competingPr = false,
+  verdict: CompetitionVerdict = { kind: "clear" },
 ): { state: FactoryState; packet: TaskPacket | null; reason: string } {
   if (hasInflight(state.packets)) {
     const next = appendEvent(state, ev("tick", "Queue blocked — a packet is already in flight."));
     return { state: next, packet: null, reason: "in-flight" };
   }
-  if (competingPr) {
+  if (verdict.kind === "competing") {
     const next = appendEvent(
       state,
       ev("tick", `Queue refused ${issue.repoId}#${issue.number}: an open PR already covers the issue.`),
     );
     return { state: next, packet: null, reason: "already-has-pr" };
+  }
+  if (verdict.kind === "adjacent") {
+    const next = appendEvent(
+      state,
+      ev(
+        "tick",
+        `Queue held ${issue.repoId}#${issue.number} — adjacent PR ${verdict.url} (${verdict.why}) mentions the issue; taste gate, human triage before scouting.`,
+      ),
+    );
+    return { state: next, packet: null, reason: "adjacent-hold" };
   }
   const existing = state.packets.find((p) => p.repoId === issue.repoId && p.issueNumber === issue.number);
   if (existing) return { state, packet: existing, reason: "duplicate" };

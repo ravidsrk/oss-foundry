@@ -54,7 +54,9 @@ Actions: `approve` (attest) or `reject` (park). Denied, halted, and unlisted pac
 
 `reject` has its own scope. A `merged` packet **cannot** be rejected: it is terminal and already counted toward `mergedTotal` and the attested Wave 0 merges, so a late reject would desync the promotion gate from the ledger. A `submitted` packet **can** — that is the documented halt-everything path (`docs/08-operations.md`) — but reject does not close the PR, so when the packet names a live PR the CLI prints an `open pr:` warning naming it and the packet record says which PR was left open. Until a human closes it, `reconcile` keeps flagging it as an abandoned live PR.
 
-The first 20 factory-wide approvals decrement a visible counter. At zero, Wave 0 may auto-freeze only if policy is `owner` and lighting stays `lit`. Wave 1+ never auto-freeze.
+The first 20 factory-wide approvals decrement a visible counter (`humanApprovalsRemaining`, printed by `status`). It is an odometer on the first-20 freeze budget, not a gate that ever opens: **no packet auto-freezes, at any wave, at any count.** Nothing reads the counter as a condition and there is no `autoFreeze` code path. An earlier draft of this page promised Wave 0 auto-freeze at zero when policy was `owner` and lighting stayed `lit`; that mechanism was never built, and the claim is deleted rather than implemented — building it would weaken a human gate that is currently doing its job (issue #44 item 1).
+
+`approve` accepts a packet in status `gated` or `frozen`, but no code path ever *writes* `frozen`: packets go `gated` → `approved` on the operator's attest. `frozen` is reserved in `PacketStatus` and counted as in-flight so that a future explicit freeze step — one that separates "the human has read it" from "the human has attested it" — can land without a state migration. Until that step exists, reading `frozen` in a committed ledger means the file was hand-edited.
 
 ## 4. Implementer
 

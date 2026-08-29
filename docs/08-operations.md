@@ -66,9 +66,13 @@ Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in fli
 
 Silence is the modal outcome for external agent PRs, so every KPI names its denominator.
 
-- **Merge rate** = merged / opened drafts that reached a terminal state (merged, closed-unmerged,
-  or stale-closed under the quiet-day rule). Stale-closed counts **against** the rate. A draft still
-  open and in follow-up is not yet in the denominator.
+- **Merge rate** = merged / opened drafts that reached a terminal state. There are exactly **two**
+  terminal buckets — `merged` and `closedUnmerged` (`terminalCount` in `factory/scorecard.ts`); there
+  is no third "stale-closed" field, and earlier wording here implied one. A draft the quiet-day rule
+  has aged is *not* terminal by itself: at 45 quiet days it gets a stale-intent note, and it enters
+  the denominator as `closedUnmerged` only once a human actually closes it and `sync` observes the
+  close. So a stale draft that a human closes does count **against** the rate; one nobody ever closes
+  stays out of the denominator, along with any draft still open and in follow-up.
 - **Review-comment average** = mean **human, non-bot** review comments, computed **only over PRs
   with ≥ 1 human review comment**. The `noReview` counter is reported beside it — opened drafts that
   reached a terminal state with **zero** human review activity (a still-open silent draft is not yet

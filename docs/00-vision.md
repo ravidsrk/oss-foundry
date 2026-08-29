@@ -6,7 +6,7 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 ## Why this exists
 
-2026 made unattended OSS agents radioactive. curl’s HackerOne shutdown, matplotlib’s agent-interaction ban, and OpenClaw-style maintainer attacks all taught the same lesson: volume without governance is vandalism. (Pydantic, often cited alongside these, actually welcomes AI-assisted PRs — what it bans is factory-pattern mass submission; see the denylist reason.)
+2026 made unattended OSS agents radioactive. curl’s HackerOne shutdown, matplotlib’s agent-interaction ban, and OpenClaw-style maintainer attacks all taught the same lesson: volume without governance is vandalism. (Pydantic, often cited alongside these, actually welcomes AI-assisted PRs — what it reserves the right to close is factory-pattern mass submission; see the denylist reason.)
 
 Foundry's durable claim is **re-admission**: not "help agents contribute more," but the process a
 burned project could require before saying yes to agents again — parsed policy with quoted
@@ -48,7 +48,7 @@ Foundry adds what `oss-contribute` does not have: an **always-on clock**, a **ha
 After 90 days (operational definitions in [08-operations.md](08-operations.md)):
 
 - ≥ 1 merged PR on a Wave 1 repo that is not ours.
-- Merge rate ≥ 60% on opened drafts that reached a terminal state; stale-closed counts against.
+- Merge rate ≥ 60% on opened drafts that reached a terminal state; a stale draft a human closes counts against.
 - Review-comment average ≤ 4 over human-reviewed PRs, with the no-review count (terminal-state drafts that never got a human review) reported alongside.
 - **Bans = 0. Reverts = 0.** A revert is an explicit revert of our merge commit — or a maintainer-stated rollback naming the PR — within 30 days; post-merge rework is not a revert.
 - The first 20 packets each have a human attest in the ledger.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { isDenied, repoById } from "./allowlist.ts";
 import { assertAllowlist, parseAllowlistYaml } from "./load-allowlist.ts";
 
 test("committed allowlist.yaml parses and keeps denylist disjoint", () => {
@@ -38,4 +39,26 @@ test("a denylist id among repos fails assertion", () => {
   );
   const parsed = parseAllowlistYaml(leaked);
   assert.throws(() => assertAllowlist(parsed), /leaked into repos: stablyai\/orca/);
+});
+
+/**
+ * The two roster lookups must agree on casing. `isDenied` lowercased both sides; `repoById`
+ * compared raw strings, so a live path carrying GitHub's own casing rather than the YAML's fell
+ * through `maySelectRepo` as "not on the allowlist". That fails *closed*, so it was never
+ * exploitable — but a gate whose two halves disagree is a gate held up by the accident that live
+ * paths happen to echo the file. Normalize both (issue #44 item 10). Deny is still checked first
+ * in `maySelectRepo`, so the denylist keeps winning under any casing.
+ */
+test("allowlist and denylist lookups agree on casing", () => {
+  assert.equal(isDenied("matplotlib/matplotlib")?.id, "matplotlib/matplotlib");
+  assert.equal(isDenied("Matplotlib/MatPlotLib")?.id, "matplotlib/matplotlib");
+
+  assert.equal(repoById("ravidsrk/orca-fleet")?.id, "ravidsrk/orca-fleet");
+  assert.equal(repoById("RavidSrk/Orca-Fleet")?.id, "ravidsrk/orca-fleet");
+  assert.equal(repoById("OPENHANDS/OPENHANDS")?.id, "OpenHands/OpenHands");
+
+  assert.equal(repoById("not/on-the-list"), undefined);
+  assert.equal(isDenied("not/on-the-list"), undefined);
+  // A denied repo must not become findable on the allowlist just because casing changed.
+  assert.equal(repoById("Matplotlib/MatPlotLib"), undefined);
 });

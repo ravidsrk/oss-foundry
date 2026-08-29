@@ -15,6 +15,18 @@ export interface LiveIssue {
   contributing?: string;
 }
 
+/**
+ * Rank open issues across the Wave 0/1 roster. **Not wired into `cli.ts` and not on any live path**
+ * — `tick` goes through `tickWithGithub`, which walks each repo's *named* `firstIssues` instead of
+ * discovering issues, because "the factory will not invent work" is the doctrine `applyTick`'s idle
+ * branch enforces. This is kept as the discovery half of that seam, deliberately unwired.
+ *
+ * The precondition for ever wiring it: it returns ranked issues with **no competing-work check**.
+ * Nothing here calls `classifyCompetition`, so feeding its output straight into `applyTick` /
+ * `applyQueueLive` would scout over a maintainer's open PR. `tickWithGithub` is the reference — it
+ * classifies every candidate first and splits the verdict into `competingKeys` (stand down) and
+ * `adjacentKeys` (hold for human triage) before anything is queued (issue #44 item 8).
+ */
 export async function scoutGithub(data: { maxPerRepo?: number } = {}) {
   const maxPerRepo = Math.min(Math.max(data.maxPerRepo ?? 5, 1), 8);
   const found: Omit<LiveIssue, "scout">[] = [];
