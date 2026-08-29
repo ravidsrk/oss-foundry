@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { hasDerivedFigure, parsePolicyRecords, policyRecordsPath } from "./policy-records.ts";
-import { evaluatePolicy } from "./policy.ts";
+import { evaluatePolicy, scanPolicyText } from "./policy.ts";
 
 test("denylist always forbids matplotlib", () => {
   const v = evaluatePolicy({
@@ -389,4 +389,185 @@ test("deny-by-default covers the no-evidence case, not the missed-ban case", () 
     evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: "" }).code,
     "DENY_UNKNOWN_POLICY",
   );
+});
+
+/**
+ * ISSUE #52 — the CLA/DCO fail-open, and the corpus that has to keep it closed.
+ *
+ * WHAT WAS BROKEN ON `main`, measured rather than described. All five of the realistic
+ * "waive the DCO, assert the CLA" documents below did produce a hold — and every one of them did it
+ * through `human=["DCO"]`, with nothing matched about the CLA at all. `HUMAN_STATEMENTS` had no bare
+ * `\bcla\b`; its only CLA-acronym patterns were `sign(?:ing)?\s+the\s+cla` and
+ * `\bcla\s+(?:is\s+)?required\b`, both defeated by an interposed "not". So the correct verdict was an
+ * ACCIDENT of an un-negated `\bdco\b` sitting in the same sentence. Making the DCO negation-aware —
+ * which the repo needs, because "No CLA. No DCO. Conventional commits." is the live Wave-1 seed text
+ * and was being parked — removes the accident, and 8 of 10 such documents fail open with nothing to
+ * replace it. That is what happened to the previous attempt.
+ *
+ * Two further holes the same measurement turned up, neither in the issue:
+ *   - "All commits must carry a Signed-off-by line." reached ALLOW with EMPTY matched phrases. A
+ *     plain signature requirement the scanner could not see.
+ *   - "No DCO, contributor agreement required." held only via the DCO accident; the short form
+ *     `contributor agreement` was unmatched.
+ *
+ * CORPUS PROVENANCE, which is the part issue #37's park note says to settle before touching a
+ * regex. Not one row below is derived from a constant in `policy.ts`. They come from: the documents
+ * quoted in #52 and #50, ordinary CONTRIBUTING.md phrasing, and deliberate paraphrase of each into
+ * shapes the implementation does not name. A corpus drawn from the code under test measures whether
+ * the code does what it does.
+ */
+type Polarity = "required" | "waived" | "silent";
+
+const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
+  // --- The five from #52. Each waives one instrument and asserts the other. ---
+  { doc: "We do not require a DCO. You must sign a CLA before your first PR.", want: "required", why: "#52 row 1" },
+  { doc: "No DCO is required. All contributors need a CLA on file.", want: "required", why: "#52 row 2" },
+  { doc: "There is no DCO. Our CLA must be signed before we can merge.", want: "required", why: "#52 row 3" },
+  { doc: "DCO: not required. CLA: required.", want: "required", why: "#52 row 4" },
+  { doc: "No DCO. CLA mandatory.", want: "required", why: "#52 row 5" },
+
+  // --- The comma boundary. One sentence, a waiver and a requirement. ---
+  { doc: "No DCO, contributor agreement required.", want: "required", why: "#52: the comma case a code comment claimed and no test asserted" },
+  { doc: "No CLA, DCO sign-off required.", want: "required", why: "the same shape with the families swapped" },
+  { doc: "CLA required, DCO not required.", want: "required", why: "requirement first, waiver second" },
+  // TWO TOKENS OF ONE FAMILY, waiver first. This is the row that pins the comma in `clausesOf`:
+  // without the split the whole sentence is one clause, the first CLA match is the one inside
+  // "No CLA", its waiver fires, and the requirement later in the sentence is never evaluated —
+  // a fail-open. Every other corpus row survives losing the comma, because the waiver patterns are
+  // token-anchored; this one does not.
+  { doc: "No CLA, a contributor license agreement is required.", want: "required", why: "same family twice, waiver first — pins the comma split" },
+
+  // --- Blanket waivers. These must NOT hold: over-blocking parks a legitimate packet. ---
+  { doc: "No CLA. No DCO. Conventional commits.", want: "waived", why: "the live Wave-1 seed text, parked on main" },
+  { doc: "No DCO is required.", want: "waived", why: "blanket waiver with the requirement word inside it" },
+  { doc: "A CLA is not required.", want: "waived", why: "post-token negation" },
+  { doc: "We do not require a CLA.", want: "waived", why: "active-voice waiver" },
+  { doc: "We don't require a DCO sign-off on contributions.", want: "waived", why: "#52 names this as forced by cla|dco in the filler" },
+  { doc: "There is no DCO.", want: "waived", why: "existential waiver" },
+  { doc: "There is no CLA to sign.", want: "waived", why: "#52 predicted this would flip to a hold; waiver-first ordering keeps it" },
+  { doc: "Contributors do not need to sign a contributor license agreement.", want: "waived", why: "spelled-out form, waived" },
+  { doc: "No contributor agreement is necessary.", want: "waived", why: "short form, alternate requirement word" },
+  { doc: "We will not ask for a CLA.", want: "waived", why: "future-tense waiver" },
+  // The scope limiter is read from the SENTENCE, so the sentence boundary has to be real. Without
+  // it the whole document is one span, this "except" — which is about spam, not about the CLA —
+  // reaches the waiver, and a blanket waiver reads as scoped. Fail-closed rather than fail-open, but
+  // it parks a legitimate packet, which is the over-block half of this issue.
+  { doc: "No CLA is required. All patches are welcome, except spam.", want: "waived", why: "an 'except' in a LATER sentence must not scope this waiver — pins the sentence splitter" },
+
+  // --- Escape-hatch denials. "no X bypass" asserts X, it does not waive it. ---
+  { doc: "There is no DCO bypass.", want: "required", why: "#52: escape-hatch framing" },
+  { doc: "There is no CLA exception for small patches.", want: "required", why: "exception framing" },
+  { doc: "No CLA waiver is available.", want: "required", why: "waiver-of-the-waiver" },
+  { doc: "There is no way around the DCO.", want: "required", why: "paraphrased escape hatch" },
+
+  // --- Scoped waivers: it is required somewhere, so it holds. ---
+  { doc: "A CLA is not required except for new dependencies.", want: "required", why: "#50 comment: scoped waiver" },
+  { doc: "No DCO is needed unless you are adding a new module.", want: "required", why: "unless-scoped" },
+  // The limiter across a clause boundary. The first draft of `signaturePolarity` read the limiter
+  // from the CLAUSE, so a comma before "except" hid it and a scoped requirement came out a blanket
+  // waiver — this issue's own fail-open class, reproduced inside its fix and caught before shipping.
+  { doc: "A CLA is not required, except for new dependencies.", want: "required", why: "limiter behind a comma" },
+  { doc: "No DCO is needed, unless you are adding a new module.", want: "required", why: "limiter behind a comma" },
+  { doc: "No CLA is required, other than for vendored code.", want: "required", why: "limiter behind a comma" },
+  { doc: "A CLA is not required; except for new dependencies.", want: "required", why: "limiter behind a semicolon" },
+
+  // --- Plain requirements, in the phrasings a real CONTRIBUTING.md uses. ---
+  { doc: "Pull requests without a signed Contributor License Agreement will be closed.", want: "required", why: "#50: the phrasing most likely to appear for real" },
+  { doc: "We require a DCO sign-off.", want: "required", why: "plain DCO requirement" },
+  { doc: "All commits must carry a Signed-off-by line.", want: "required", why: "reached ALLOW on main with empty phrases" },
+  { doc: "Please sign the CLA before opening a pull request.", want: "required", why: "imperative" },
+  { doc: "Every contributor must sign our Contributor Licence Agreement.", want: "required", why: "British spelling of licence" },
+  { doc: "Contributions are accepted once the CLA is on file.", want: "required", why: "on-file phrasing" },
+  { doc: "You will be asked to sign a contributor agreement by our CLA bot.", want: "required", why: "bot-mediated" },
+  { doc: "The Developer Certificate of Origin applies to all patches.", want: "required", why: "spelled-out DCO, no requirement verb but an assertion" },
+  { doc: "Sign-off is mandatory for every commit.", want: "required", why: "sign-off as the subject" },
+  { doc: "We cannot merge your work until the CLA is signed.", want: "required", why: "cannot-merge framing" },
+  { doc: "Your PR will not be reviewed without a DCO sign-off.", want: "required", why: "'without' is a requirement context, never a waiver" },
+
+  // --- No signature instrument at all. These must be SILENT: matching them is the over-block. ---
+  { doc: "you signal your agreement with the Code of Conduct", want: "silent", why: "#52 mutation 2: a bare /agreement/i would hold this" },
+  { doc: "By contributing you agree to the terms of the licence.", want: "silent", why: "agree + licence, no instrument" },
+  { doc: "Please be kind in code review.", want: "silent", why: "ordinary prose" },
+  { doc: "Run the linter before submitting.", want: "silent", why: "a 'before submitting' with no instrument" },
+  { doc: "Squash your commits and sign your work with a clear message.", want: "silent", why: "'sign your work' without naming DCO or a sign-off line" },
+  { doc: "This project uses a licence agreement with its vendors.", want: "silent", why: "'licence agreement' without 'contributor'" },
+  { doc: "Maintainers must review every pull request.", want: "silent", why: "a human gate, but not a signature — HOLD_HUMAN's territory" },
+  { doc: "Documentation changes need no special treatment.", want: "silent", why: "'need no' with no instrument" },
+
+  // --- The documented cost of failing closed on an undecided mention. ---
+  { doc: "See our CLA for details.", want: "required", why: "undecided reads as required: a false hold costs one look, a false allow forges a signature" },
+  { doc: "We dropped the CLA requirement.", want: "required", why: "same fail-closed default; a phrasing the waiver list does not name" },
+];
+
+test("the signature corpus classifies every phrasing correctly, in both directions", () => {
+  const wrong: string[] = [];
+  for (const { doc, want, why } of SIGNATURE_CORPUS) {
+    const s = scanPolicyText(doc);
+    const got: Polarity =
+      s.signatureRequired.length > 0 ? "required" : s.signatureWaived.length > 0 ? "waived" : "silent";
+    if (got !== want) wrong.push(`want ${want}, got ${got}: ${JSON.stringify(doc)} (${why})`);
+  }
+  assert.deepEqual(wrong, [], `\n${wrong.join("\n")}`);
+});
+
+/**
+ * Size floors, and they are not decoration. Issue #37's round 3 shipped `suite ok`, exit 0, with its
+ * headline corpus EMPTIED and a known regression reintroduced, because `CORPUS` had no floor while
+ * `LEXICON` did. Emptying a roster has to cost a second visible edit.
+ *
+ * Both directions are floored separately, because a corpus that is all must-hold rows measures only
+ * recall and would let the over-block class back in — which is how round 1 of #37 failed.
+ */
+test("the signature corpus cannot be quietly emptied or made one-sided", () => {
+  assert.ok(SIGNATURE_CORPUS.length >= 40, `corpus has ${SIGNATURE_CORPUS.length} rows; the floor is 40`);
+  const count = (p: Polarity) => SIGNATURE_CORPUS.filter((r) => r.want === p).length;
+  assert.ok(count("required") >= 15, `only ${count("required")} must-hold rows`);
+  assert.ok(count("waived") >= 10, `only ${count("waived")} must-waive rows`);
+  assert.ok(count("silent") >= 6, `only ${count("silent")} must-be-silent rows`);
+  // Distinct documents: duplicating one row must not be a way to satisfy the floor.
+  assert.equal(new Set(SIGNATURE_CORPUS.map((r) => r.doc)).size, SIGNATURE_CORPUS.length, "corpus holds duplicate documents");
+});
+
+/**
+ * The verdict CODE, not just the polarity. #52's acceptance is that these hold as `HOLD_CLA`, and
+ * the code used to be re-derived by substring-testing the matched phrase for "cla", "dco" or
+ * "certificate" — which is why "Contributor License Agreement" landed in `HOLD_HUMAN`: those three
+ * letters never appear consecutively in it (issue #50's root cause, reached from here).
+ */
+test("an asserted signature holds as HOLD_CLA, and a human-review gate stays HOLD_HUMAN", () => {
+  for (const doc of SIGNATURE_CORPUS.filter((r) => r.want === "required").map((r) => r.doc)) {
+    const v = evaluatePolicy({ repoId: "mcp-use/mcp-use", contributing: doc, issueTitle: "docs fix" });
+    assert.equal(v.code, "HOLD_CLA", `${JSON.stringify(doc)} produced ${v.code}`);
+  }
+  // The spelled-out phrasing specifically, called out by name in #50.
+  const spelled = evaluatePolicy({
+    repoId: "mcp-use/mcp-use",
+    contributing: "Pull requests without a signed Contributor License Agreement will be closed.",
+    issueTitle: "docs fix",
+  });
+  assert.equal(spelled.code, "HOLD_CLA");
+
+  // A human gate that is not a signature keeps its own code: erasing the distinction is #52's
+  // third mutation, and the codes are not cosmetic — HOLD_CLA carries "never forge".
+  const review = evaluatePolicy({
+    repoId: "mcp-use/mcp-use",
+    contributing: "Every pull request must be reviewed by a human maintainer.",
+    issueTitle: "docs fix",
+  });
+  assert.equal(review.code, "HOLD_HUMAN");
+});
+
+test("a waived signature does not park the packet", () => {
+  // The over-block half. This exact string is the live Wave-1 packet's policy text.
+  const v = evaluatePolicy({
+    repoId: "ravidsrk/orca-fleet",
+    contributing: "No CLA. No DCO. Conventional commits.",
+    issueTitle: "[P2] CHANGELOG Unreleased",
+  });
+  assert.equal(v.code, "ALLOW", `${v.code}: ${v.matchedPhrases.join(" | ")}`);
+  // ...and the read is still visible: the waiver is reported, not silently dropped, so a freeze can
+  // show the operator what was read and dismissed rather than an unexplained absence.
+  const scanned = scanPolicyText("No CLA. No DCO. Conventional commits.");
+  assert.equal(scanned.signatureWaived.length, 2, JSON.stringify(scanned));
+  assert.equal(scanned.signatureRequired.length, 0);
 });
