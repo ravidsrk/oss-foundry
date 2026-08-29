@@ -55,10 +55,15 @@ test("negative-control refusal tells the operator to reject, not to press a verb
 });
 
 /**
- * A tracking comment that names a closed issue reads as accounted for — which is how this
- * defect was orphaned when #44 closed (issue #62).
+ * A tracking comment that names an issue reads as accounted for, and it outlives the issue: that is
+ * exactly how this defect was orphaned when #44 closed with the item unfixed (issue #62).
+ *
+ * The rule is "no issue pointer at all", not "no CLOSED issue pointer", and the name says so. A test
+ * cannot tell open from closed without the network, and it should not try — the tracker is the
+ * tracker. Forbidding the pointer outright is both testable and the stronger rule, and it fires on
+ * an OPEN citation too, which was verified rather than assumed.
  */
-test("no KNOWN DEFECT comment in factory/ cites a closed issue", () => {
+test("no KNOWN DEFECT comment in factory/ carries an issue pointer", () => {
   const factory = fileURLToPath(new URL(".", import.meta.url));
   const hits: string[] = [];
   for (const name of readdirSync(factory)) {
