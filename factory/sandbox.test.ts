@@ -55,24 +55,40 @@ test("negative-control refusal tells the operator to reject, not to press a verb
 });
 
 /**
- * The `//` that starts a trailing comment, or -1. String contents are masked to the same width
- * first, so the `//` in a URL inside a string literal cannot fabricate a comment — inventing one is
- * how a scan starts reporting violations that are not there, which is the whole subject of #99.
+ * The `//` that starts a trailing comment, or -1. String contents are blanked first, so the `//` in
+ * a URL inside a string literal cannot fabricate a comment — inventing one is how a scan starts
+ * reporting violations that are not there, which is the whole subject of #99.
+ *
+ * The mask is a copy of the line with characters overwritten in place, never a string built up by
+ * concatenation. Width is then preserved by construction rather than by getting the arithmetic right
+ * at every branch, and the returned index is an index into the real line.
  */
 function trailingCommentAt(line: string): number {
-  let masked = "";
+  const masked = [...line];
   let quote = "";
-  for (const char of line) {
+  for (let at = 0; at < line.length; at += 1) {
+    const char = line[at];
     if (quote === "") {
       if (char === '"' || char === "'" || char === "`") quote = char;
-      masked += char;
       continue;
     }
-    // Inside a literal: keep the width, drop the content, and let the closing quote through.
-    masked += char === quote ? char : " ";
-    if (char === quote) quote = "";
+    // Inside a literal. A backslash escapes the next character, so an escaped quote does NOT close
+    // the literal. Miss this and the literal ends early, `const s = "a \\" // KNOWN DEFECT: issue
+    // #1";` yields a comment carrying both a marker and a pointer, and the guard reports a violation
+    // against correct source — the same false-positive class this whole change exists to remove.
+    if (char === "\\") {
+      masked[at] = " ";
+      if (at + 1 < line.length) masked[at + 1] = " ";
+      at += 1;
+      continue;
+    }
+    if (char === quote) {
+      quote = "";
+      continue;
+    }
+    masked[at] = " ";
   }
-  return masked.indexOf("//");
+  return masked.join("").indexOf("//");
 }
 
 /**
@@ -182,6 +198,24 @@ test("the KNOWN DEFECT scan reads one comment at a time, not a 200-character win
     ["// see issue #12"],
     "the real trailing comment is still found on a line that also contains a URL",
   );
+  // An escaped quote does not end the literal. Without this the literal ends early and the rest of
+  // the string reads as a comment carrying BOTH a marker and a pointer — a violation reported
+  // against correct source, which is the defect class this change exists to remove. Reproduced
+  // before the fix, so this is a regression test and not a hypothetical.
+  assert.deepEqual(
+    commentsIn(String.raw`const s = "a \" // KNOWN DEFECT: tracked in issue #12";` + "\n"),
+    [],
+    "an escaped quote does not end the literal, so nothing after it is a comment",
+  );
+  // The same line with a genuine trailing note still yields exactly that note, so the escape
+  // handling closes the hole without blinding the scan to the case it is for.
+  assert.deepEqual(
+    commentsIn(String.raw`const s = "a \" b";  // KNOWN DEFECT: tracked in issue #12` + "\n"),
+    ["// KNOWN DEFECT: tracked in issue #12"],
+    "a real note after a literal containing an escaped quote is still found",
+  );
+  // A trailing backslash cannot walk the mask off the end of the line.
+  assert.deepEqual(commentsIn('const s = "a \\\n'), [], "a literal ending in a backslash is safe");
 
   // ...and the direction issue #99 is about: two SEPARATE comments, neither of which tracks
   // anything. The old window matched across the gap and reported a violation that was not one.
