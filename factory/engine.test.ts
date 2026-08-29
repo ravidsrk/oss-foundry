@@ -5198,3 +5198,101 @@ test("applyReviewToScorecard finds an off-canonical row, and only that row", () 
     "the observation landed on more than the row it was for",
   );
 });
+
+/**
+ * Issue #60: the owner-prefix lookbehind excluded `\w` and `/` but not `-` or `.`, so a DIFFERENT
+ * GitHub owner whose name ends with ours bound our issue by suffix. `fork-ravidsrk` and
+ * `evil.ravidsrk` are valid owners and neither is `ravidsrk`.
+ *
+ * Bounded rather than exploitable — `compareCommits` has already pinned the range to the packet's
+ * repo before the binding check runs, the PR-body tier requires a closing keyword and refuses it
+ * anyway, and the message is one the operator authored. It is still a matcher answering "same repo"
+ * when the truth is "a repo whose owner name ends with the same characters".
+ *
+ * Asserted in BOTH directions, because the fix is a widened exclusion and the way to get that wrong
+ * is to start refusing legitimate references. Only the PREFIXED lookbehind changed — the bare `#N`
+ * one is untouched, since the character before `#` there is the last letter of the repo name and
+ * `\w` already blocks this class. The markdown bullet forms below were checked against the widened
+ * bare version before it was reverted, and are kept as the standing guard on the legitimate side.
+ */
+test("a foreign owner whose name ends with ours does not bind our issue", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const repo = "ravidsrk/orca-fleet";
+  const refs = (text: string) => referencesIssue(text, 71, url, repo);
+
+  for (const foreign of [
+    "fork-ravidsrk/orca-fleet#71",
+    "evil.ravidsrk/orca-fleet#71",
+    "my.ravidsrk/orca-fleet#71",
+    "x-ravidsrk/orca-fleet#71",
+  ]) {
+    assert.equal(refs(foreign), false, `${foreign} is a different owner and must not bind our issue`);
+    // The PR-body tier refused it before this fix and must still: its closing keyword anchors the
+    // match, so the owner prefix can never be absorbed by leading whitespace.
+    assert.equal(mentionsIssue(`Closes ${foreign}`, 71, url, repo), false, foreign);
+  }
+  // Already refused by `\w`, kept as the control that the class was never about all prefixes.
+  assert.equal(refs("notravidsrk/orca-fleet#71"), false);
+  assert.equal(refs("other-owner/other-repo#71"), false);
+
+  // ...and every legitimate form still binds. The two markdown bullets are the ones the widened
+  // `bare` lookbehind could plausibly have broken.
+  for (const legit of [
+    "#71",
+    "- #71",
+    "* #71",
+    "(issue #71)",
+    "[#71]",
+    "PR #71",
+    "ravidsrk/orca-fleet#71",
+    "See ravidsrk/orca-fleet#71.",
+    url,
+    `${url}#issuecomment-1`,
+    `${url}/`,
+    `${url}?x=1`,
+    `see ${url}.`,
+  ]) {
+    assert.equal(refs(legit), true, `${legit} is a legitimate reference and must still bind`);
+  }
+  // The digit guard #42 added is untouched, on BOTH `#N` forms. The prefixed one was uncovered
+  // until this audit: removing `(?!\d)` from it alone left the suite green, because every existing
+  // longer-number case went through the bare pattern.
+  assert.equal(refs("#710"), false);
+  assert.equal(refs("ravidsrk/orca-fleet#710"), false);
+  assert.equal(refs(`${url}0`), false);
+});
+
+test("classifyCompetition treats a foreign owner's mention as no competitor at all", () => {
+  // The predicate's other consumer. Refusing a foreign owner here is CORRECT rather than a lost
+  // hold: a PR in someone else's fork is not competing work on our issue, so the right verdict is
+  // `clear` and not `adjacent`.
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const repo = "ravidsrk/orca-fleet";
+  const verdict = classifyCompetition(
+    {
+      pulls: [
+        {
+          title: "unrelated work",
+          body: "tracks fork-ravidsrk/orca-fleet#71 in a fork",
+          url: "https://github.com/ravidsrk/orca-fleet/pull/9",
+        },
+      ],
+    },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(verdict.kind, "clear", `a fork's issue must not raise a hold on ours: ${JSON.stringify(verdict)}`);
+
+  // ...and the adjacent tier still fires for a real mention of OUR issue, so this is not just an
+  // assertion that the tier stopped working.
+  const ours = classifyCompetition(
+    {
+      pulls: [{ title: "refactor", body: "see also #71", url: "https://github.com/ravidsrk/orca-fleet/pull/3" }],
+    },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(ours.kind, "adjacent");
+});
