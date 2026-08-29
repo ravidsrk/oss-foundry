@@ -66,7 +66,12 @@ The CLI dry-run **plans** sandbox commands. It does not stamp `harvested` with e
 
 Build-blind. Sees the diff, the test command, the negative control. Does not see the implementer’s chain of thought. Reviewed SHA must equal head SHA at draft time.
 
-Evidence is attached by the operator (`attachEvidence`). The engine will not invent `deadbeef` SHAs or auto-set `red-on-revert`.
+Evidence is attached by the operator (`attachEvidence`), from a run the operator did not perform by
+hand: `evidence` witnesses on the host (Wave 0 only), and `attach-witness` ingests a manifest
+produced on the worker host (Wave 1+). The engine will not invent `deadbeef` SHAs or auto-set
+`red-on-revert`, and it refuses a witness whose provider is illegal for the repo's sandbox, or whose
+bound repo/range — or pair of log paths — is not this packet's own. Provenance is settled at the
+gate, not by CLI convention.
 
 ## 6. Draft
 

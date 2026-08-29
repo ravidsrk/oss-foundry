@@ -14,11 +14,19 @@ TypeScript modules for the Foundry control plane. No operator web UI lives in th
 | `sandbox.ts` | Dry-run plan. Does not stamp harvested/exit 0 |
 | `scorecard.ts` | Halt rules; engine consults `health()` |
 | `seed.ts` | Ledger seed. Keep in sync with GitHub |
+| `run-tests.ts` | The suite's own oracle — see below. Discovers every `factory/*.test.ts`; nothing to register |
+| `witness.ts` | Executes the evidence protocol; parses and re-checks ingested witnesses |
 
 ```
 node --experimental-strip-types factory/cli.ts status
-node --experimental-strip-types --test factory/*.test.ts
+node --experimental-strip-types factory/run-tests.ts
 node --experimental-strip-types factory/validate-allowlist.ts
 ```
+
+Do not replace the runner with a bare `node --test`. Its exit code is not a trustworthy oracle
+here: a test file whose *process* exits mid-run — anything a module-scope `process.exit()` can
+reach through an import — is reported as a passing top-level entry with zero subtests, and the run
+still exits 0. That silently deleted 71 of 113 tests once. `run-tests.ts` asserts one `test:summary`
+per declared file and refuses a run where any file reported none.
 
 Never put a token in this repo.

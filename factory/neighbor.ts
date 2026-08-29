@@ -2,6 +2,13 @@ export const DISCLOSURE = `This patch was prepared by Foundry (ravidsrk/oss-foun
 A human reviewed the packet, the diff, and the tests before this draft was opened.
 The factory does not merge. Maintainers own the merge.`;
 
+/**
+ * Where Foundry's own tree lives (docs/PRODUCT.md). The evidence page is written for an upstream
+ * maintainer who has their checkout, not this one, so anything the page asks them to go look at has
+ * to say which repository it is in.
+ */
+export const FOUNDRY_REPO_URL = "https://github.com/ravidsrk/oss-foundry";
+
 /** Per-repo commit-disclosure convention. `Co-authored-by` designates a person in Git's reading — never an agent. */
 export type DisclosureTrailer = "assisted-by" | "generated-by" | "pr-body-only";
 

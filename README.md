@@ -30,7 +30,7 @@ Live GitHub scout (user-initiated), E2B dry-run labeled as dry-run, follow-up PR
 Node 22+:
 
 ```
-node --experimental-strip-types --test factory/*.test.ts
+node --experimental-strip-types factory/run-tests.ts
 ```
 
 ## Do not

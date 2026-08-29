@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALLOWLIST, repoById } from "./allowlist.ts";
 import {
@@ -45,8 +46,14 @@ import { health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
-import { INFLIGHT_STATUSES, type EvidenceManifest, type FactoryState } from "./types.ts";
-import { witnessEvidence, type WitnessRunner } from "./witness.ts";
+import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
+import {
+  parseWitnessManifest,
+  verifyWitnessLogs,
+  witnessEvidence,
+  type WitnessLogs,
+  type WitnessRunner,
+} from "./witness.ts";
 
 const hostRunner: WitnessRunner = (step, args, opts) =>
   new Promise((resolveRun) => {
@@ -61,6 +68,34 @@ const hostRunner: WitnessRunner = (step, args, opts) =>
       resolveRun({ exit, output: `${stdout}${stderr}` });
     });
   });
+
+/**
+ * The sha256 on the evidence page is only proof if the maintainer can recompute it. Write the two
+ * run logs at the repo-root-relative paths the witness names, so the digest is checkable on disk.
+ * `root` exists so this is drivable against a scratch tree instead of the operator's checkout.
+ */
+export function persistWitnessLogs(
+  witness: EvidenceWitness,
+  logs: WitnessLogs,
+  root = ".",
+): void {
+  for (const [path, text] of [
+    [witness.testLogPath, logs.test],
+    [witness.revertLogPath, logs.revert],
+  ] as const) {
+    const full = resolve(root, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, text);
+  }
+}
+
+function readIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(resolve(path), "utf8");
+  } catch {
+    return undefined;
+  }
+}
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -223,7 +258,11 @@ async function tickWithGithub(state: FactoryState) {
 
 const [cmd, ...rest] = ARGV;
 
-if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
+/**
+ * Kept inside `main()` rather than at module scope: this used to `console.log` + `process.exit(0)`
+ * on import, which made the module impossible to import from anywhere — including a test.
+ */
+function usage(): void {
   console.log(`Foundry operator loop
 
   status
@@ -232,7 +271,8 @@ if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
   reject <packetId> --reason <text>
   halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
   advance <packetId>
-  evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested)
+  evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
+  attach-witness <packetId> --manifest <path>   (ingest a witness produced on the worker host; provenance and log hashes re-checked here)
   body <packetId>
   attach-draft <packetId> <prUrl>
   open-draft <packetId> --head <forkOwner:branch>   (machine-account PAT; draft-only; one create per run)
@@ -247,10 +287,13 @@ State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry
 Disclosure:
 ${DISCLOSURE}
 `);
-  process.exit(0);
 }
 
 async function main() {
+  if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
+    usage();
+    return;
+  }
   const { state, source } = mustLoad();
 
   if (cmd === "status") {
@@ -421,9 +464,18 @@ async function main() {
       console.error(compared.error);
       process.exit(1);
     }
-    console.error(`witnessing ${packet.repoId} ${base.slice(0, 7)}..${head.slice(0, 7)} (${repo.sandbox}) — cloning and running \`${repo.testCommand}\` twice`);
+    // Only the host path clones anything. On a sandboxed repo `witnessEvidence` refuses on the very
+    // next line without touching the network, so promising a clone here described work that never
+    // happened — the operator's terminal is a claim surface like any other.
+    const range = `${packet.repoId} ${base.slice(0, 7)}..${head.slice(0, 7)}`;
+    console.error(
+      repo.sandbox === "host"
+        ? `witnessing ${range} (host) — cloning and running \`${repo.testCommand}\` twice`
+        : `witnessing ${range} (${repo.sandbox}) — this CLI does not run ${repo.sandbox} sandboxes; checking whether it can witness at all`,
+    );
     const outcome = await witnessEvidence(
       {
+        packetId: packet.id,
         repoId: packet.repoId,
         baseSha: base,
         headSha: head,
@@ -447,7 +499,7 @@ async function main() {
       negativeControl: outcome.witness.revertExit !== 0 ? "red-on-revert" : "failed",
       filesChanged: compared.filesChanged,
       diffLines: compared.diffLines,
-      notes: [`witnessed via CLI (${outcome.witness.provider}); logs sha256 ${outcome.witness.testLogSha.slice(0, 12)}/${outcome.witness.revertLogSha.slice(0, 12)}`],
+      notes: [`witnessed via CLI (${outcome.witness.provider}); logs sha256 ${outcome.witness.testLogSha.slice(0, 12)}/${outcome.witness.revertLogSha.slice(0, 12)} kept at ${outcome.witness.testLogPath} and ${outcome.witness.revertLogPath}`],
       witness: outcome.witness,
     };
     const result = applyAttachEvidence(state, id, evidence, bindingFromCompare(compared));
@@ -457,8 +509,85 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
+    // Only now: a refusal above must not leave two orphan logs on disk with no ledger entry
+    // pointing at them, which is exactly what a maintainer would later fail to recompute.
+    persistWitnessLogs(outcome.witness, outcome.logs);
     persist(result.state);
     console.log(`evidence attached ${id}`);
+    return;
+  }
+
+  if (cmd === "attach-witness") {
+    const id = rest[0];
+    const manifestPath = flag(rest, "--manifest");
+    if (!id || !manifestPath) {
+      console.error("attach-witness requires <packetId> --manifest <path>");
+      process.exit(1);
+    }
+    const packet = state.packets.find((p) => p.id === id);
+    if (!packet) {
+      console.error(`unknown packet ${id}`);
+      process.exit(1);
+    }
+    const repo = repoById(packet.repoId);
+    if (!repo?.testCommand) {
+      console.error("no testCommand for this repo");
+      process.exit(1);
+    }
+    const raw = readIfPresent(manifestPath);
+    if (raw === undefined) {
+      console.error(`cannot read witness manifest ${manifestPath}`);
+      process.exit(1);
+    }
+    const parsed = parseWitnessManifest(raw, packet.id);
+    if (!parsed.ok) {
+      console.error(parsed.error);
+      process.exit(1);
+    }
+    const { witness, testCommand, notes } = parsed.manifest;
+    if (testCommand !== repo.testCommand) {
+      console.error(
+        `witness ran \`${testCommand}\`, but ${repo.id}'s oracle is \`${repo.testCommand}\` — a different command is not this repo's evidence`,
+      );
+      process.exit(1);
+    }
+    // The hashes must cover logs that exist here, or the digest on the evidence page proves nothing.
+    const logs = verifyWitnessLogs(witness, readIfPresent);
+    if (!logs.ok) {
+      console.error(logs.error);
+      process.exit(1);
+    }
+    console.error(
+      `ingesting ${witness.provider} witness for ${packet.repoId} ${witness.baseSha.slice(0, 7)}..${witness.headSha.slice(0, 7)} — log hashes recomputed from disk; verifying the range upstream`,
+    );
+    const compared = await compareCommits(packet.repoId, witness.baseSha, witness.headSha);
+    if (!compared.ok) {
+      console.error(compared.error);
+      process.exit(1);
+    }
+    const evidence: EvidenceManifest = {
+      baseSha: witness.baseSha,
+      headSha: witness.headSha,
+      testCommand,
+      testExit: witness.testExit,
+      negativeControl: witness.revertExit !== 0 ? "red-on-revert" : "failed",
+      filesChanged: compared.filesChanged,
+      diffLines: compared.diffLines,
+      notes: [
+        `ingested ${witness.provider} witness produced ${witness.ranAt}; logs sha256 ${witness.testLogSha.slice(0, 12)}/${witness.revertLogSha.slice(0, 12)} recomputed from ${witness.testLogPath} and ${witness.revertLogPath}`,
+        ...notes,
+      ],
+      witness,
+    };
+    const result = applyAttachEvidence(state, id, evidence, bindingFromCompare(compared));
+    if (result.error) {
+      const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
+      if (parked) persist(result.state);
+      console.error(result.error);
+      process.exit(1);
+    }
+    persist(result.state);
+    console.log(`witness ingested ${id} (${witness.provider})`);
     return;
   }
 
@@ -737,4 +866,29 @@ async function main() {
   process.exit(1);
 }
 
-await main();
+/**
+ * True only when this module *is* the process entry point.
+ *
+ * Both sides are canonicalised. Node already resolves symlinks when loading a module, so
+ * `import.meta.url` is the real path, while `process.argv[1]` is whatever the operator typed —
+ * through a symlinked checkout (`~/bin/foundry -> .../factory/cli.ts`, a `pnpm link`ed tree) the
+ * two differ and a `resolve()`-only comparison silently exits 0 having done nothing. A CLI that
+ * says nothing and reports success is the exact failure mode this project exists to prevent, so
+ * the comparison is on real paths. `realpathSync` throws when the path does not exist (`node -e`,
+ * a deleted script), which is not the entry point either.
+ */
+function isProcessEntryPoint(): boolean {
+  const invoked = process.argv[1];
+  if (!invoked) return false;
+  try {
+    return realpathSync(invoked) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+// Guarded so the module can be imported (by a test, or another verb) without the whole CLI running
+// and calling `process.exit`. Spawning `cli.ts` as the entry point still runs `main()` unchanged.
+if (isProcessEntryPoint()) {
+  await main();
+}

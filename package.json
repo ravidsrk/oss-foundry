@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test factory/*.test.ts",
+    "test": "node --experimental-strip-types factory/run-tests.ts",
     "validate": "node --experimental-strip-types factory/validate-allowlist.ts",
     "foundry": "node --experimental-strip-types factory/cli.ts"
   }
