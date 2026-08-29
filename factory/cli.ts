@@ -14,9 +14,9 @@ import {
   isBoundSha,
   findCompetingPull,
   hasInflight,
-  INFLIGHT_STATUSES,
   QUIET_RELEASE_DAYS,
   quietDaysOf,
+  repliesOwed,
 } from "./engine.ts";
 import {
   compareCommits,
@@ -36,7 +36,7 @@ import { renderEvidencePage, renderPrBody } from "./packet.ts";
 import { health } from "./scorecard.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
-import type { EvidenceManifest } from "./types.ts";
+import { INFLIGHT_STATUSES, type EvidenceManifest } from "./types.ts";
 import { witnessEvidence, type WitnessRunner } from "./witness.ts";
 
 const hostRunner: WitnessRunner = (step, args, opts) =>
@@ -84,10 +84,24 @@ function printStatus(state: ReturnType<typeof mustLoad>) {
     console.log("in flight: none — tick is allowed");
   }
   const following = state.packets.filter((p) => p.status === "followed-up" && p.prMeta?.state === "open");
+  // The re-block is conditional, so the line must be too: `applyPrSync` reclaims `submitted` only
+  // when the slot is free. While a newer packet holds it, maintainer activity records a reply owed
+  // and the packet stays `followed-up` — printing "re-blocks the tick" there is simply false.
+  const slotHeld = hasInflight(state.packets);
   for (const p of following) {
+    const rule = slotHeld
+      ? "(slot held — maintainer activity records a reply owed, it does not re-block the tick)"
+      : "(maintainer activity re-blocks the tick)";
     console.log(
-      `  following ${p.repoId}#${p.issueNumber}  quiet=${quietDaysOf(p.prMeta!, new Date().toISOString())}d  (maintainer activity re-blocks the tick)`,
+      `  following ${p.repoId}#${p.issueNumber}  quiet=${quietDaysOf(p.prMeta!, new Date().toISOString())}d  ${rule}`,
     );
+    // A reply owed re-blocks nothing and closes no thread, so nothing else nags about it: this is
+    // the operator-facing surface for it. Same "proceed but say so out loud" duty as reject.
+    for (const owed of repliesOwed(p)) {
+      console.log(
+        `    reply owed: ${owed.url ?? p.prUrl ?? ""} — maintainer activity ${owed.at.slice(0, 10)} arrived while another packet held the slot; answer it by hand`,
+      );
+    }
   }
   console.log("scorecard:");
   for (const row of state.scorecard) {
@@ -272,6 +286,9 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
+    // Reject still succeeds (it is the documented halt-everything path) but it does not go quiet:
+    // an abandoned live PR is named on the terminal, not only in parkReason and the event log.
+    if (result.warning) console.error(result.warning);
     saveFactoryState(STATE_FILE, result.state);
     console.log(`rejected ${id}`);
     return;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import {
   applyHalt,
   applyPrSync,
   applyQueueLive,
+  applyReject,
   applyTick,
   bindingFromCompare,
   branchMentionsIssue,
@@ -37,7 +39,7 @@ import { emptyScorecard, health } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
-import type { FactoryState } from "./types.ts";
+import { inflightCount, type FactoryState } from "./types.ts";
 
 function blank(): FactoryState {
   return {
@@ -198,6 +200,36 @@ test("approve cannot green-light a denied packet", () => {
   assert.match(result.error, /DENY_FORBIDDEN/);
   assert.equal(result.state.packets[0].status, "gated");
   assert.equal(result.state.packets[0].humanAttest, undefined);
+});
+
+test("reject refuses a merged packet instead of desyncing the promotion gate", () => {
+  const seed = seedState();
+  const merged = seed.packets.find((p) => p.status === "merged")!;
+  const before = seed.mergedTotal;
+  const result = applyReject(seed, merged.id, "typo'd reject");
+  assert.ok(result.error);
+  assert.match(result.error, /merged/i);
+  // Refused outright: state is untouched, not just the one packet.
+  assert.equal(result.state, seed);
+  assert.equal(result.state.packets.find((p) => p.id === merged.id)?.status, "merged");
+  assert.equal(result.state.mergedTotal, before);
+});
+
+test("reject stays legal on a submitted packet (the documented halt-everything path) but names the still-open PR", () => {
+  const seed = seedState();
+  const submitted = seed.packets.find((p) => p.status === "submitted")!;
+  assert.ok(submitted.prUrl);
+  const result = applyReject(seed, submitted.id, "operator halt");
+  assert.equal(result.error, undefined);
+  const after = result.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(after.status, "rejected");
+  // Loud: the packet record itself names the abandoned PR...
+  assert.ok(after.parkReason?.includes(submitted.prUrl!));
+  // ...and so does the event a human or the ledger reads afterward.
+  assert.equal(result.state.events[0].packetId, submitted.id);
+  assert.ok(result.state.events[0].message.includes(submitted.prUrl!));
+  // Rejecting a still-open PR must not pretend it is closed.
+  assert.equal(hasInflight(result.state.packets), false);
 });
 
 test("advance does not stamp placeholder SHA or auto-harvest", () => {
@@ -823,6 +855,61 @@ test("maintainer activity on a followed-up packet re-blocks the factory", () => 
   assert.equal(hasInflight(woken.state.packets), true);
 });
 
+test("wake does not reclaim submitted when another packet already holds the in-flight slot", () => {
+  // Reproduces issue #34 vector (b): A quiet-releases, B gets ticked into the freed slot, then
+  // maintainer activity on A must not double the in-flight count.
+  const state = seedState();
+  const a = state.packets.find((p) => p.status === "submitted")!;
+  const released = applyPrSync(state, a.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-20T00:00:00.000Z",
+  });
+  assert.equal(released.state.packets.find((p) => p.id === a.id)?.status, "followed-up");
+  assert.equal(hasInflight(released.state.packets), false);
+
+  const b = buildPacket({
+    repoId: "github/awesome-copilot",
+    issueNumber: 2684,
+    issueTitle: "operator ticked this while A was quiet",
+    issueUrl: "https://github.com/github/awesome-copilot/issues/2684",
+  });
+  const withB: FactoryState = {
+    ...released.state,
+    packets: [{ ...b, status: "gated", station: "freeze" }, ...released.state.packets],
+  };
+  assert.equal(hasInflight(withB.packets), true);
+  assert.equal(inflightCount(withB.packets), 1);
+
+  const woken = applyPrSync(withB, a.id, prMetaAt("2026-09-21T08:00:00.000Z", { issueComments: 2 }), {
+    threadsAnswered: false,
+    at: "2026-09-21T09:00:00.000Z",
+  });
+  assert.equal(woken.error, undefined);
+  const afterA = woken.state.packets.find((p) => p.id === a.id)!;
+  const afterB = woken.state.packets.find((p) => p.id === b.id)!;
+  // A stays followed-up: the newer in-flight packet (B) keeps priority, the slot is not doubled.
+  assert.equal(afterA.status, "followed-up");
+  assert.equal(afterB.status, "gated");
+  assert.equal(inflightCount(woken.state.packets), 1);
+  // The maintainer activity is not silently dropped: it is recorded as a reply owed on A.
+  // `review-reply` means a reply that was made; a reply still owed is a prefixed note.
+  assert.equal(
+    afterA.followUps?.some((f) => f.kind === "note" && f.body.startsWith("reply-owed:")),
+    true,
+  );
+  assert.equal(afterA.followUps?.some((f) => f.kind === "review-reply"), false);
+  // The event must distinguish the held-slot wake from the ordinary one. A loose /reply|maintainer
+  // activity/ matched the pre-fix text too, so it proved nothing: both messages open with
+  // "Maintainer activity on <url>". Pin what changed — the reply is owed, the packet did NOT
+  // reclaim the slot — and forbid the pre-fix claim, which would be false here: no tick was blocked.
+  const wake = woken.state.events.find((e) => e.packetId === a.id && e.kind === "follow-up");
+  assert.ok(wake, "no follow-up event was recorded for the woken packet");
+  assert.match(wake.message, /reply owed/i);
+  assert.match(wake.message, /in-flight slot is held by another packet/i);
+  assert.match(wake.message, new RegExp(`${a.id} stays followed-up`));
+  assert.doesNotMatch(wake.message, /before any new tick/i);
+});
+
 test("merged and closed syncs write the scorecard and end follow-up", () => {
   const state = seedState();
   const submitted = state.packets.find((p) => p.status === "submitted");
@@ -1026,6 +1113,182 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
   assert.deepEqual(packetDivergences(after, live), []);
   const unabsorbed = packetDivergences(submitted, live);
   assert.equal(unabsorbed.some((d) => d.includes(`sync ${submitted.id}`)), true);
+});
+
+test("a rejected packet with a still-open PR never rots invisibly in the ledger check", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const rejected = applyReject(state, submitted.id, "operator mis-typed reject").state.packets.find(
+    (p) => p.id === submitted.id,
+  )!;
+  assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.prUrl, submitted.prUrl);
+
+  const stillLive = packetDivergences(rejected, {
+    state: "open",
+    merged: false,
+    draft: submitted.prMeta?.draft ?? true,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.equal(
+    stillLive.some((d) => d.includes(rejected.id) && d.includes(rejected.prUrl!)),
+    true,
+  );
+
+  // Once the abandoned PR is actually closed on GitHub, there is nothing left to flag.
+  const nowClosed = packetDivergences(rejected, {
+    state: "closed",
+    merged: false,
+    draft: submitted.prMeta?.draft ?? true,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.deepEqual(nowClosed, []);
+});
+
+test("a parked packet with a still-open PR never rots invisibly in the ledger check", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  assert.ok(submitted.prUrl);
+  // applyHalt parks whatever is in flight — including a submitted packet still holding a live
+  // draft. `parked` is the other half of the abandoned-PR surface; `rejected` alone is not enough.
+  const halted = applyHalt(state, submitted.repoId, "maintainer asked the factory to stop");
+  const parked = halted.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(parked.status, "parked");
+  assert.equal(parked.prUrl, submitted.prUrl);
+
+  const stillLive = packetDivergences(parked, {
+    state: "open",
+    merged: false,
+    draft: submitted.prMeta?.draft ?? true,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.equal(
+    stillLive.some(
+      (d) => d.includes(parked.id) && d.includes(parked.prUrl!) && d.includes("parked"),
+    ),
+    true,
+  );
+
+  // Once the abandoned PR is actually closed on GitHub, there is nothing left to flag.
+  const nowClosed = packetDivergences(parked, {
+    state: "closed",
+    merged: false,
+    draft: submitted.prMeta?.draft ?? true,
+    headSha: submitted.prMeta?.headSha ?? "",
+  });
+  assert.deepEqual(nowClosed, []);
+});
+
+test("the reject warning reaches the operator's terminal, not only the ledger", () => {
+  // The reducer-level assertions above all passed while the CLI printed nothing but `rejected <id>`
+  // — the exact silence issue #34 opens with. This drives the real binary and reads its streams.
+  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-"));
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  assert.ok(submitted.prUrl);
+  writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+
+  const cli = join(import.meta.dirname, "cli.ts");
+  const reject = (id: string) =>
+    spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", cli, "reject", id, "--reason", "typo, meant a different id"],
+      { cwd: dir, encoding: "utf8" },
+    );
+
+  const loud = reject(submitted.id);
+  // Reject is the documented halt-everything path: it still succeeds and still exits 0.
+  assert.equal(loud.status, 0, `${loud.stdout}${loud.stderr}`);
+  assert.match(loud.stdout, new RegExp(`rejected ${submitted.id}`));
+  const seen = `${loud.stdout}${loud.stderr}`;
+  assert.ok(seen.includes(submitted.prUrl!), seen);
+  assert.match(seen, /still open on GitHub/);
+  assert.match(seen, /close it by hand/);
+
+  // ...and it is a warning, not boilerplate: a packet with no live PR rejects quietly.
+  const quiet = reject(state.packets.find((p) => !p.prUrl)!.id);
+  assert.equal(quiet.status, 0, `${quiet.stdout}${quiet.stderr}`);
+  assert.doesNotMatch(`${quiet.stdout}${quiet.stderr}`, /still open on GitHub/);
+});
+
+test("the reject warning is scoped to submitted, not to every packet that names a PR", () => {
+  // The `prUrl` half of the condition is pinned both ways by the test above; this pins the `status`
+  // half, which was one-directional — widening `status === "submitted" && prUrl` to `prUrl` alone
+  // left the suite green. A `followed-up` packet still names a live PR, but it has already released
+  // the slot, so rejecting it is not the halt-everything path abandoning an in-flight draft.
+  // (`reconcile` still flags the open PR afterward via `packetDivergences` — that is unchanged.)
+  const seed = seedState();
+  const submitted = seed.packets.find((p) => p.status === "submitted")!;
+  const released = applyPrSync(seed, submitted.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-20T00:00:00.000Z",
+  });
+  const followedUp = released.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(followedUp.status, "followed-up");
+  assert.ok(followedUp.prUrl, "the followed-up packet must still name a PR or this binds nothing");
+
+  const result = applyReject(released.state, submitted.id, "superseded upstream");
+  assert.equal(result.error, undefined);
+  assert.equal(result.warning, undefined);
+  const after = result.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(after.status, "rejected");
+  // Nothing leaked into the stored record either: the park reason is the operator's reason, verbatim.
+  assert.equal(after.parkReason, "superseded upstream");
+  assert.equal(result.state.events[0].message, "superseded upstream");
+});
+
+test("status does not claim a re-block that the held slot already prevented", () => {
+  // Driven at the reducer level, the reply-owed note was recorded and nothing surfaced it: `status`
+  // printed "(maintainer activity re-blocks the tick)" for a packet whose maintainer activity had
+  // just re-blocked nothing, and `reconcile` reported divergences=0. Drive the real binary.
+  const dir = mkdtempSync(join(tmpdir(), "foundry-cli-status-"));
+  const cli = join(import.meta.dirname, "cli.ts");
+  const statusIn = (state: FactoryState) => {
+    writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+    const run = spawnSync(process.execPath, ["--experimental-strip-types", cli, "status"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
+    return `${run.stdout}${run.stderr}`;
+  };
+
+  const seed = seedState();
+  const a = seed.packets.find((p) => p.status === "submitted")!;
+  const released = applyPrSync(seed, a.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
+    threadsAnswered: true,
+    at: "2026-09-20T00:00:00.000Z",
+  });
+
+  // Control: slot free, nothing owed — the original claim is true, and still printed.
+  const free = statusIn(released.state);
+  assert.match(free, /\(maintainer activity re-blocks the tick\)/);
+  assert.doesNotMatch(free, /reply owed:/);
+
+  // Now B takes the freed slot and maintainer activity lands on A.
+  const b = buildPacket({
+    repoId: "github/awesome-copilot",
+    issueNumber: 2684,
+    issueTitle: "operator ticked this while A was quiet",
+    issueUrl: "https://github.com/github/awesome-copilot/issues/2684",
+  });
+  const withB: FactoryState = {
+    ...released.state,
+    packets: [{ ...b, status: "gated", station: "freeze" }, ...released.state.packets],
+  };
+  const woken = applyPrSync(withB, a.id, prMetaAt("2026-09-21T08:00:00.000Z", { issueComments: 2 }), {
+    threadsAnswered: false,
+    at: "2026-09-21T09:00:00.000Z",
+  });
+  assert.equal(woken.state.packets.find((p) => p.id === a.id)?.status, "followed-up");
+
+  const held = statusIn(woken.state);
+  // The false claim is gone...
+  assert.doesNotMatch(held, /\(maintainer activity re-blocks the tick\)/);
+  assert.match(held, /does not re-block the tick/);
+  // ...and the reply the operator now owes is named, with the PR to answer.
+  assert.match(held, /reply owed:/);
+  assert.ok(held.includes(a.prUrl!), held);
 });
 
 function fakeRunner(script: Record<string, { exit: number; output: string }>) {

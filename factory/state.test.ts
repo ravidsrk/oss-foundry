@@ -164,3 +164,30 @@ test("stored packet with dark-eligible lighting is refused", () => {
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, false);
 });
+
+test("a hand-edited state file with more in-flight packets than the cap is refused, not trusted", () => {
+  // issue #34: the loader validated shapes only, so a drifted file with two concurrent in-flight
+  // packets loaded happily even though the one-packet-in-flight invariant forbids it.
+  const seed = seedState();
+  assert.equal(seed.packets.filter((p) => p.status === "submitted").length, 1);
+  const secondInflightId = seed.packets.find((p) => p.status === "merged")!.id;
+  const packets = seed.packets.map((p) =>
+    p.id === secondInflightId ? { ...p, status: "gated" as const, station: "freeze" as const } : p,
+  );
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "overcap.json");
+  writeFileSync(path, JSON.stringify({ ...seed, packets }));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, false);
+  if (loaded.ok) return;
+  assert.match(loaded.error, /in.flight/i);
+  assert.match(loaded.error, /will not overwrite with seed/);
+});
+
+test("a state file at exactly the in-flight cap still loads", () => {
+  const seed = seedState();
+  assert.equal(seed.packets.filter((p) => p.status === "submitted").length, 1);
+  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "atcap.json");
+  writeFileSync(path, JSON.stringify(seed));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, true);
+});

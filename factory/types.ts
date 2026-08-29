@@ -38,6 +38,33 @@ export type PacketStatus =
   | "parked"
   | "rejected";
 
+/**
+ * The statuses that occupy the one in-flight slot. docs/PRODUCT.md, "Packet statuses": "`hasInflight`
+ * gates: `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`, **`submitted`**.
+ * `followed-up` is **not** in-flight." `followed-up` is deliberately absent: the slot releases once
+ * threads are answered and the PR goes quiet.
+ *
+ * The list lives here rather than in `engine.ts` because `state.ts` needs the same set when it loads
+ * a ledger, and it needs a *different predicate* over it: `engine.ts`'s `hasInflight` asks "is the
+ * slot full?" — `inflightCount(packets) >= CAPS.in_flight` — while the loader asks "is this file
+ * over the cap?" — `> CAPS.in_flight`, because a ledger sitting exactly at the cap is legal and must
+ * still load. Different questions, so `hasInflight` was not reusable; the reusable piece is the
+ * count. Reading `CAPS` is not what divides them — `state.ts` imports it directly.
+ */
+export const INFLIGHT_STATUSES: PacketStatus[] = [
+  "gated",
+  "frozen",
+  "approved",
+  "implementing",
+  "reviewing",
+  "draft-ready",
+  "submitted",
+];
+
+export function inflightCount(packets: TaskPacket[]): number {
+  return packets.filter((p) => INFLIGHT_STATUSES.includes(p.status)).length;
+}
+
 /** Every Foundry packet is independently reviewed. The historical `dark-eligible` value is not representable. */
 export type Lighting = "lit";
 

@@ -110,7 +110,7 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 |---|---|---|
 | 1 | Scout | Allowlist issues only. Drop denylist, RFC/meta, issues with an in-flight maintainer PR. Heuristic rank. Clock / CLI never invent issue numbers |
 | 2 | Policy | Deterministic. Grok has no vote |
-| 3 | Freeze | Operator `approve` (attest) or `reject` (park). Denied / halted packets cannot be approved |
+| 3 | Freeze | Operator `approve` (attest) or `reject` (park). Denied / halted packets cannot be approved. `merged` packets cannot be rejected — terminal, and a late reject desyncs the promotion-gate counters. Rejecting a `submitted` packet is the halt-everything path, but it never closes the PR: the CLI names the one left open |
 | 4 | Implement | One playbook pack. Failing-first. Wave 0 host / Wave 1+ E2B. Console/CLI dry-run does not fake a green harvest |
 | 5 | Review | Independent, lit. Negative control: revert goes red. Evidence attached by the operator, not invented |
 | 6 | Draft | Fork → upstream draft. Body from `renderPrBody`. Create helper sets `draft: true` |
@@ -133,7 +133,7 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 
 `hasInflight` gates: `gated`, `frozen`, `approved`, `implementing`, `reviewing`, `draft-ready`, **`submitted`**. `followed-up` is **not** in-flight.
 
-`submitted` → `followed-up` is bounded (ADR 0002, `applyPrSync`): threads answered + PR quiet ≥ 14 days releases the slot; maintainer activity on a `followed-up` packet re-blocks the tick until answered; ≥ 45 quiet days records a `stale-intent` note (`closedUnmerged` + polite close is a human act). Maintainer silence cannot idle the factory indefinitely.
+`submitted` → `followed-up` is bounded (ADR 0002, `applyPrSync`): threads answered + PR quiet ≥ 14 days releases the slot; maintainer activity on a `followed-up` packet re-blocks the tick until answered — unless a newer packet already holds the slot, in which case the older packet stays `followed-up` and records a `reply-owed:` note rather than doubling the count; ≥ 45 quiet days records a `stale-intent` note (`closedUnmerged` + polite close is a human act). Maintainer silence cannot idle the factory indefinitely.
 
 ### Scorecard halt
 

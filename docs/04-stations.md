@@ -52,6 +52,8 @@ The operator reads the packet: objective, non-goals, acceptance, abort, policy, 
 
 Actions: `approve` (attest) or `reject` (park). Denied, halted, and unlisted packets cannot be approved. Approve re-runs the competing-work check live: a competitor that appeared since gating blocks the approval; an adjacent mention is shown to the approver.
 
+`reject` has its own scope. A `merged` packet **cannot** be rejected: it is terminal and already counted toward `mergedTotal` and the attested Wave 0 merges, so a late reject would desync the promotion gate from the ledger. A `submitted` packet **can** — that is the documented halt-everything path (`docs/08-operations.md`) — but reject does not close the PR, so when the packet names a live PR the CLI prints an `open pr:` warning naming it and the packet record says which PR was left open. Until a human closes it, `reconcile` keeps flagging it as an abandoned live PR.
+
 The first 20 factory-wide approvals decrement a visible counter. At zero, Wave 0 may auto-freeze only if policy is `owner` and lighting stays `lit`. Wave 1+ never auto-freeze.
 
 ## 4. Implementer
@@ -77,7 +79,10 @@ A draft PR is not done. The packet stays on this station until merged, closed, o
 Does:
 
 - Sync the live PR (draft/open/merged, head SHA, review comment count). User-initiated. Never on load.
-- Record bot-reconcile and review-reply notes against the current head.
+- Record bot-reconcile and review-reply notes against the current head. `review-reply` is a reply
+  that was **made**; a reply still **owed** — maintainer activity arriving while another packet
+  holds the in-flight slot — is a `note` prefixed `reply-owed:`, the same shape as `stale-intent`
+  (the shape only; `stale-intent` is deduped, a reply owed is not).
 - Mark quiet when threads are answered. **Never merge.**
 - When GitHub reports `merged`, write the scorecard `merged` row. When closed unmerged, write `closedUnmerged`.
 
@@ -88,7 +93,13 @@ Quiet-day rule (ADR 0002, enforced by `applyPrSync`, driven by the operator CLI:
 thread has a reply): once threads are answered and the PR has been quiet ≥ **14 days**, sync moves
 the packet to `followed-up` and the slot frees — the factory is bounded by discipline, not by
 maintainer latency. New maintainer activity on a `followed-up` packet moves it back to `submitted`
-(answer before any new tick). At ≥ **45 quiet days** sync records a `stale-intent` follow-up note;
+(answer before any new tick) — **unless a newer packet already holds the in-flight slot**, in which
+case the older packet stays `followed-up` and records a `reply-owed:` note rather than doubling the
+in-flight count. Nothing else nags about that reply — no tick was blocked and no thread was closed —
+so `status` prints it under the packet rather than leaving it buried in the ledger; answering is a
+human act and the note is a permanent record of the arrival, not a checkbox the engine clears. One
+note per arrival, not one per packet: each new maintainer comment owes its own reply. At ≥ **45 quiet days**
+sync records a `stale-intent` follow-up note (deduped — the staleness is one standing fact);
 the close itself is a human act, and the scorecard's `closedUnmerged` row is written once, on the
 actual open→closed transition — never for a still-open draft, which is not a terminal outcome
 (docs/08-operations.md). Quiet days derive from GitHub's `updated_at`, which any activity bumps —
