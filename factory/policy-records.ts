@@ -9,8 +9,24 @@ const STANCES = new Set(["forbidden", "conditional", "welcome", "silent"]);
  * A derived measurement: a ratio (`141 of 272`, `141/272`) or a percentage (`61%`). Deliberately
  * narrow — an ISO date, a file path and a version number must all pass, because absence notes carry
  * them ("no CONTRIBUTING.md ... as of 2026-08-28").
+ *
+ * The two alternatives are written separately, and the `i` flag is why (issue #82). The first
+ * pattern was `(?:\/|of)` under one case-sensitive expression, which failed in both directions at
+ * once: `141 Of 272` walked through the guard because `of` matched lowercase only, and `docs/2026/08`
+ * tripped it because a slash between two numbers was accepted anywhere at all — including inside a
+ * path, which the comment above says must pass. Only the word needs the case fold, so only the word
+ * gets it; the slash form is instead anchored to *not* be a path segment. That anchoring is the
+ * whole difference between a ratio and a path: a ratio has whitespace or a sentence around it, a
+ * path segment has another `/` on one side. Adjacent slashes are therefore the exclusion, which
+ * also drops `2026/08/28` — a date written the other way — without needing to know it is a date.
  */
-const DERIVED_FIGURE = /\b\d[\d,]*\s*(?:\/|of)\s*\d[\d,]*\b|\b\d+(?:\.\d+)?\s*%/;
+const RATIO_IN_WORDS = /\b\d[\d,]*\s*of\s*\d[\d,]*\b/i;
+const RATIO_AS_SLASH = /(?<![/\w])\b\d[\d,]*\s*\/\s*\d[\d,]*\b(?![/\w])/;
+const PERCENTAGE = /\b\d+(?:\.\d+)?\s*%/;
+
+export function hasDerivedFigure(quote: string): boolean {
+  return RATIO_IN_WORDS.test(quote) || RATIO_AS_SLASH.test(quote) || PERCENTAGE.test(quote);
+}
 
 export function policyRecordsPath(from = import.meta.url): string {
   return join(dirname(fileURLToPath(from)), "..", "policy-records.json");
@@ -40,7 +56,7 @@ export function parsePolicyRecords(text: string): Map<string, PolicyRecord> {
     // its method. Scoped to `silent` on purpose: a `welcome` / `conditional` / `forbidden` quote is
     // genuinely the maintainer's prose and may legitimately count something (issue #44 item 2,
     // docs/SPEC.md §3, docs/10-schemas.md).
-    if (stance === "silent" && DERIVED_FIGURE.test(quote)) {
+    if (stance === "silent" && hasDerivedFigure(quote)) {
       throw new Error(
         `policy-records.json: ${repoId} is silent but its quote carries a derived figure — ` +
           `that quote renders as the maintainer's own words; measurements belong in allowlist.yaml policyNotes`,

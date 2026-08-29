@@ -232,6 +232,145 @@ const MUTANTS: Mutant[] = [
     why: "a shipped verb goes missing from the only list of them",
   },
 
+  // ---- SWEEP 2 (#77–#82): six review comments a prior sweep merged past without reading ----
+  // Each of these is one call site of a fix, on purpose. The recurring defect in this repository is
+  // a well-tested function behind untested wiring — a fix applied to one consumer and not its
+  // sibling, eight times — so a mutant per FUNCTION would keep reporting a clean sheet over exactly
+  // the gap that keeps shipping. Where a fix touched two consumers, both are listed separately.
+
+  // #77 — the freeze showed 4,000 characters and then claimed a clean scan over the whole document.
+  {
+    label: "i77-claim",
+    file: "factory/packet.ts",
+    from: "  } else if (withheld > 0) {",
+    to: "  } else if (false) {",
+    why: "the freeze closes with `no ban statement matched in N chars` over text the operator was never shown — the sentence directly above the attest, and #37's parked scanner leg is what makes the missed ban real",
+  },
+  {
+    label: "i77-marker",
+    file: "factory/packet.ts",
+    from:
+      "        `  ⟪ ${missing} more characters of ${doc.name} are NOT shown above. The scanner read them; you have not. ⟫`,\n",
+    to: '        "",\n',
+    why: "the omission is announced only in a header 4,000 characters up, so the operator scrolling to where the text stops sees nothing marking the end",
+  },
+  {
+    label: "i77-consumer",
+    file: "factory/cli.ts",
+    from: "    if (packetForFreeze) console.log(renderFreezeEvidence(packetForFreeze));",
+    to: "    if (packetForFreeze) console.log(renderFreezeEvidence(packetForFreeze).split(\"\\n\")[0]);",
+    why: "the render is correct and the verb prints one line of it — the exact untested-wiring shape this audit exists for",
+  },
+
+  // #78 — a witnessed third-party repo could write raw control sequences to the operator's console.
+  {
+    label: "i78-sanitizer",
+    file: "factory/witness.ts",
+    from: '  const stripped = text.replace(TERMINAL_SEQUENCE, "").replace(CONTROL_CHAR, "");',
+    to: "  const stripped = text;",
+    why: "a sandboxed repo repaints the one surface whose job is to say what happened: `\\r` plus a cursor move turns a red witness green, and OSC 52 reaches the clipboard",
+  },
+  {
+    label: "i78-probe-sink",
+    file: "factory/witness.ts",
+    from: '    const lines = sanitizeTerminalText(probe.output).text.split("\\n")',
+    to: '    const lines = probe.output.split("\\n")',
+    why: "the failure detail is clean and the SECOND repo-controlled sink is not — `witness-check` prints the probe's `path` verbatim",
+  },
+
+  // #79 — the halt gate ran after the platform requests it exists to prevent.
+  {
+    label: "i79-tick-preflight",
+    file: "factory/cli.ts",
+    from: "  if (factoryHalt(state)) return applyTick(state);\n",
+    to: "",
+    why: "a halted factory spends ~20 GitHub requests per tick before refusing — the retry SPEC.md §6 forbids, against the very limit that wrote the halt",
+  },
+  {
+    label: "i79-approve-preflight",
+    file: "factory/cli.ts",
+    from: "      const gate = maySelectRepo(state, packetForFreeze.repoId);\n      if (!gate.ok) {\n        console.error(`cannot approve ${id}: ${gate.reason}`);\n        process.exit(1);\n      }\n",
+    to: "",
+    why: "same rule, the approve sibling: three reads go out under a halt and are then thrown away",
+  },
+  {
+    label: "i79-tick-verdict",
+    file: "factory/engine.ts",
+    from: "  const halted = factoryHalt(state);\n  if (halted) {\n    const next = appendEvent(\n      state,\n      ev(\"tick\", `Tick refused — factory halted ${halted.at}: ${halted.reason}`),\n    );\n    return { state: next, packet: null, reason: `Factory halted ${halted.at}: ${halted.reason}` };\n  }\n",
+    to: "",
+    why: "a halted tick reports `idle` and exits 0 — the per-repo gate refuses every candidate and the absence of candidates reads as a quiet roster",
+  },
+
+  // #80 — witness log paths resolved against cwd; the class #43 fixed for STATE_FILE, left in a sibling.
+  {
+    label: "i80-read-anchor",
+    file: "factory/cli.ts",
+    from: "    return readFileSync(resolve(LOGS_ROOT, path), \"utf8\");",
+    to: '    return readFileSync(resolve(path), "utf8");',
+    why: "`attach-witness` run from anywhere but the repo root rejects a perfectly good witness as a missing log",
+  },
+  {
+    label: "i80-write-anchor",
+    file: "factory/cli.ts",
+    from: "  root = LOGS_ROOT,",
+    to: '  root = ".",',
+    why: "the write sibling: run logs land beside the operator's shell while the evidence page keeps promising them inside the checkout",
+  },
+  {
+    label: "i80-default",
+    file: "factory/cli.ts",
+    from: "  return override ? resolve(override) : REPO_ROOT;",
+    to: "  return override ? resolve(override) : resolve(\".\");",
+    why: "the override still works, so every test that passes `--logs-root` stays green while the DEFAULT — the half the bug was in — is back",
+  },
+
+  {
+    label: "i80-test-guard",
+    file: "factory/cli.ts",
+    from: "  if (root === LOGS_ROOT && !LOGS_ROOT_FLAG && process.env.NODE_TEST_CONTEXT) {",
+    to: "  if (false) {",
+    why: "anchoring took away the temp-cwd isolation spawned-CLI tests had for free, so a test that forgets `--logs-root` writes two run logs into the developer's real checkout — which this change already did once before the guard existed",
+  },
+
+  // #81 — the operator revert verb bypassed the deadline the classifier enforces.
+  {
+    label: "i81-gate",
+    file: "factory/engine.ts",
+    from: "  if (window.known && !window.within) {",
+    to: "  if (false) {",
+    why: "a rollback of a merge from a year ago increments `reverts`, and `health()` makes that an unconditional permanent stop only a seed edit lifts",
+  },
+  {
+    label: "i81-predicate",
+    file: "factory/scorecard.ts",
+    from: "    within: atMs <= deadlineMs,",
+    to: "    within: true,",
+    why: "the shared window always says yes — both halves of one documented definition stop enforcing it together, which is the point of sharing it",
+  },
+  {
+    label: "i81-consumer",
+    file: "factory/cli.ts",
+    from: "    const result = applyRevert(state, id, { source: \"operator\", why: reason });\n    if (result.error) {\n      console.error(result.error);\n      process.exit(1);\n    }",
+    to: "    const result = applyRevert(state, id, { source: \"operator\", why: reason });\n    if (result.error) {\n      console.error(result.error);\n    }",
+    why: "the engine refuses and the verb carries on — the operator is told the repo was halted by a run that exited 0 having written nothing",
+  },
+
+  // #82 — the derived-figure guard failed permissively AND strictly.
+  {
+    label: "i82-case",
+    file: "factory/policy-records.ts",
+    from: "const RATIO_IN_WORDS = /\\b\\d[\\d,]*\\s*of\\s*\\d[\\d,]*\\b/i;",
+    to: "const RATIO_IN_WORDS = /\\b\\d[\\d,]*\\s*of\\s*\\d[\\d,]*\\b/;",
+    why: "`141 Of 272 external PRs merged` renders as a maintainer's own words again — the exact defect #44 added the guard to stop, one shift key away",
+  },
+  {
+    label: "i82-path",
+    file: "factory/policy-records.ts",
+    from: "const RATIO_AS_SLASH = /(?<![/\\w])\\b\\d[\\d,]*\\s*\\/\\s*\\d[\\d,]*\\b(?![/\\w])/;",
+    to: "const RATIO_AS_SLASH = /\\b\\d[\\d,]*\\s*\\/\\s*\\d[\\d,]*\\b/;",
+    why: "a numeric path segment reads as a ratio, so a valid silent-absence note throws out of a lazy cache and takes `validate` and every packet build with it",
+  },
+
   // ---- NEGATIVE CONTROL ----
   // The clock's own copy of the line REQUIRED 2 is about. It was already killed before this round,
   // and it must still be — a harness that reported everything as killed would prove nothing, and one

@@ -149,6 +149,93 @@ test("the freeze prints the words the scanner read, not a boolean", () => {
   assert.match(out, /AGENTS\.md.*not fetched/i);
 });
 
+/**
+ * Issue #77, and the reason it is a P1 rather than a rendering nit.
+ *
+ * #37 legs 2–3 exist because "the human freeze is blind — fetched docs are discarded". #70 fixed
+ * that by printing the parsed text, and then capped the print at 4,000 characters — so for the one
+ * case the whole mechanism is for, the human was still blind. The scanner reads the WHOLE document;
+ * the freeze showed a prefix. And #37's scanner leg is parked, so "the scanner misses a realistic
+ * ban" is a live condition on this tree, not a hypothesis.
+ *
+ * The specific sentence that made it dangerous is the closing one. After 4,000 characters of quoted
+ * text the surface said `no ban statement matched in 4,882 chars from CONTRIBUTING` — a claim of
+ * coverage over 882 characters the operator had not been shown, phrased as reassurance, sitting
+ * directly above the attest. The `(first 4000 shown)` marker was real but was ~55 screens further
+ * up, which is not a disclosure at the moment of the decision.
+ *
+ * INVARIANT: an operator must never be able to approve while text the scanner read is hidden from
+ * them without their knowing it. So the withheld amount is stated where the text stops AND in the
+ * scan claim itself, and the scan claim may never assert coverage over characters it did not show.
+ */
+const withheldFixture = (banAt: number, ban: string) => {
+  const filler = "Please read the guidelines below before opening a pull request.\n".repeat(200);
+  return `${filler.slice(0, banAt)}\n${ban}\n`;
+};
+
+test("the freeze never claims a clean scan over characters it did not show", () => {
+  // A ban the scanner MISSES, past the excerpt limit: the exact composition issue #77 describes.
+  const missedBan = "Kindly refrain from opening pull requests that were authored by an AI assistant.";
+  const doc = withheldFixture(POLICY_DOC_EXCERPT_LIMIT + 801, missedBan);
+  const packet = freezePacket({ contributing: doc });
+
+  // Preconditions — if either of these stops holding, the test below is measuring something else.
+  assert.equal(packet.policy.code, "ALLOW", "the scanner must MISS this ban for the test to bite");
+  assert.ok(doc.length > POLICY_DOC_EXCERPT_LIMIT, "the document must exceed the excerpt limit");
+  assert.equal(packet.policyDocs![0].truncated, true);
+
+  const out = renderFreezeEvidence(packet);
+  const withheld = doc.length - POLICY_DOC_EXCERPT_LIMIT;
+
+  // 1. The withheld amount is stated, in characters, so "how much" is answerable.
+  assert.match(out, new RegExp(`${withheld} character`), out);
+
+  // 2. It is stated WHERE THE TEXT STOPS, not only in a header 4,000 characters earlier. The line
+  //    after the last quoted line must be the notice — that is the position an operator scrolling
+  //    to the end of the quote actually lands on.
+  //    Located from the DOCUMENT's own header, not from the last `| ` line in the render: the
+  //    committed policy record and `policyNotes` are quoted the same way further down, so a
+  //    whole-output search would land on those and pass over a marker that was never emitted.
+  const lines = out.split("\n");
+  const header = lines.findIndex((l) => l.startsWith(`  ${packet.policyDocs![0].name} — `));
+  assert.ok(header >= 0, out);
+  let end = header + 1;
+  while (lines[end]?.startsWith("  | ")) end += 1;
+  assert.match(
+    lines[end] ?? "",
+    /not shown|withheld/i,
+    `the line where the document's text stops must say so:\n${lines.slice(end - 1, end + 2).join("\n")}`,
+  );
+
+  // 3. The closing scan claim — the sentence directly above the attest — may not stand as a clean
+  //    bill of health over the full character count. The shipped line was exactly
+  //    `Scanner: no ban statement matched in 4883 chars from CONTRIBUTING.`: a complete sentence,
+  //    terminated, unqualified. The count may still be reported (it is a true fact about the
+  //    scanner) but it may not be the last word, so the FULL STOP is what must be gone.
+  assert.equal(
+    out.includes(`no ban statement matched in ${doc.length} chars from CONTRIBUTING.`),
+    false,
+    `the scan claim must not close over unshown text:\n${out.slice(-900)}`,
+  );
+  // …and the qualification is in the closing block, where the decision is made, not only upstream.
+  const closing = out.slice(out.lastIndexOf("  Scanner:"));
+  assert.match(closing, new RegExp(`${withheld}`), closing);
+  assert.match(closing, /not shown|you have not/i, closing);
+
+  // 4. And the ban itself is genuinely absent from the render — this is the harm, restated as a
+  //    fact rather than assumed. The operator's protection is that they are TOLD it is absent.
+  assert.equal(out.includes(missedBan), false, "precondition: the ban really is past the limit");
+});
+
+test("a fully shown document carries no withheld notice at all", () => {
+  // The negative half. A guard that fires on every document teaches the operator to skip it, and
+  // "N characters not shown" over a document that was shown whole is a false statement in its own
+  // right. Most CONTRIBUTINGs fit, and those freezes must read exactly as they did.
+  const out = renderFreezeEvidence(freezePacket({ contributing: CLEAN_CONTRIBUTING }));
+  assert.equal(/not shown|withheld/i.test(out), false, out);
+  assert.match(out, new RegExp(`no ban statement matched in ${CLEAN_CONTRIBUTING.length} chars`, "i"));
+});
+
 test("the freeze prints the ban statement the scanner did match", () => {
   const packet = freezePacket({ agentsMd: BAN_AGENTS_MD });
   assert.equal(packet.policy.code, "DENY_FORBIDDEN");

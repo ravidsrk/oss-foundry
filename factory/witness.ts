@@ -104,6 +104,64 @@ export const PREFLIGHT_INVOCATION = "node --experimental-strip-types factory/cli
 export const WITNESS_TAIL_LINES = 40;
 
 /**
+ * ANSI/OSC/DCS/APC and friends, as full sequences rather than as a lone `\x1b` (issue #78).
+ *
+ * Stripping only the introducer would leave `]52;c;<base64>` sitting in the text, one concatenation
+ * away from being a working OSC 52 again — so a sequence is removed whole or not at all.
+ *
+ * Both encodings of each introducer are handled, because a strip that knows only about `\x1b` is a
+ * strip a terminal in 8-bit mode walks straight through: `\x9b` IS `\x1b[` and `\x9d` IS `\x1b]`,
+ * so they take the same body grammar rather than merely losing their first byte and leaving the
+ * parameters behind as text.
+ *
+ * The string-terminated forms are bounded by `[^\x07\x1b\x9c]*` rather than allowed to run to the
+ * end of the input: an unterminated OSC should cost the operator that one sequence, not every line
+ * of the run log after it. The final byte of each form is optional so a sequence truncated by the
+ * tail slice still loses its introducer and parameters.
+ */
+const TERMINAL_SEQUENCE = new RegExp(
+  [
+    // OSC / DCS / SOS / PM / APC: introducer, string body, string terminator.
+    "(?:\\x1b[\\]PX^_]|[\\x9d\\x90\\x98\\x9e\\x9f])[^\\x07\\x1b\\x9c]*(?:\\x07|\\x1b\\\\|\\x9c)?",
+    // CSI: parameter bytes, intermediate bytes, final byte.
+    "(?:\\x1b\\[|\\x9b)[0-?]*[ -/]*[@-~]?",
+    // Any other two-character escape sequence, and a lone ESC.
+    "\\x1b[@-Z\\\\-_]?",
+  ].join("|"),
+  "g",
+);
+/** Everything else a terminal acts on rather than shows: C0, DEL, C1. `\n` and `\t` are not that. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+
+/**
+ * Make text produced by a WITNESSED REPOSITORY safe to put in front of an operator.
+ *
+ * The repository under witness is third-party code from the allowlist, executed in a sandbox
+ * precisely because it is not trusted, and its stdout/stderr is therefore attacker-controllable on
+ * the one surface whose entire job is to report what actually happened. With control sequences
+ * intact that output can repaint a red witness as green (`\r` plus a cursor move), scroll its own
+ * failure out of the scrollback, or invoke a terminal action outright (OSC 52 writes the clipboard).
+ * #41 added the diagnostic because a silent refusal was indistinguishable from a broken interpreter;
+ * printing it raw just moves the question up a level.
+ *
+ * `\n` and `\t` are kept: they are the shape of a test log, and a diagnostic flattened to one line
+ * is the diagnostic thrown away.
+ *
+ * This is a RENDERING boundary, not a record one. The run logs persisted to disk keep the original
+ * bytes and the sha256 on the evidence page is computed over those, so the audit trail is unchanged
+ * — what is sanitised is the copy a human reads.
+ *
+ * `removed` is returned rather than discarded so a caller can say that something was taken out. A
+ * sanitiser that silently tidies hostile output is itself a concealment channel: the operator would
+ * see a coherent transcript with no sign that the coherence was ours.
+ */
+export function sanitizeTerminalText(text: string): { text: string; removed: number } {
+  const stripped = text.replace(TERMINAL_SEQUENCE, "").replace(CONTROL_CHAR, "");
+  return { text: stripped, removed: text.length - stripped.length };
+}
+
+/**
  * The diagnostic block every run-failure refusal ends with.
  *
  * Before this, `tests are red at head d91fe2f (exit 1) — nothing to witness` was the entire
@@ -115,7 +173,17 @@ export const WITNESS_TAIL_LINES = 40;
 export function runFailureDetail(command: string, output: string, toolchain?: string): string {
   const detail = [`  command: ${command}`];
   if (toolchain) detail.push(`  toolchain: ${toolchain}`);
-  const body = output.replace(/\s+$/, "");
+  // Sanitised BEFORE the trim and the line split, so a `\r` cannot survive into a "line" that the
+  // terminal then repaints, and so the line count the block reports is the count of lines a human
+  // will actually see. `command` and `toolchain` are ours — `allowlist.yaml`'s testCommand and a
+  // tool name plus a digits-only version — so the repository's output is the only untrusted input.
+  const scrubbed = sanitizeTerminalText(output);
+  const body = scrubbed.text.replace(/\s+$/, "");
+  if (scrubbed.removed > 0) {
+    detail.push(
+      `  ${scrubbed.removed} byte(s) of terminal control sequence removed from this repository's output before printing it — a witnessed repo does not get to move your cursor. The persisted run log keeps the original bytes.`,
+    );
+  }
   if (body.length === 0) {
     // The single most misleading case, so it gets a sentence rather than an empty block: a command
     // that dies before printing anything is usually the environment, not the patch.
@@ -202,7 +270,12 @@ export async function resolveToolchain(
       [`command -v ${tool} && ${tool} --version 2>&1 | head -n 1`],
       cwd ? { cwd } : undefined,
     );
-    const lines = probe.output.split("\n").map((l) => l.trim()).filter(Boolean);
+    // The SECOND repository-controlled sink (issue #78). Inside `witnessEvidence` this probe runs
+    // with `cwd` set to the clone, and `TOOL_TOKEN` admits a path — so a repo whose `testCommand`
+    // names something it ships (`./scripts/test.sh`) writes every byte of both lines below. `path`
+    // is printed verbatim by `witness-check`, so it is an operator surface exactly like the failure
+    // detail is. Sanitised before the split for the same reason: a `\r` must not become a "line".
+    const lines = sanitizeTerminalText(probe.output).text.split("\n").map((l) => l.trim()).filter(Boolean);
     const path = probe.exit === 0 ? lines[0] : undefined;
     if (!path) {
       resolved.push({ tool });

@@ -11,7 +11,9 @@ import {
   health,
   isTerminalReviewSubject,
   REVERT_NOTE_PREFIX,
+  REVERT_WINDOW_DAYS,
   revertNote,
+  revertWindow,
   scorecardRow,
 } from "./scorecard.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
@@ -78,6 +80,23 @@ export function applyTick(
   if (hasInflight(state.packets)) {
     const next = appendEvent(state, ev("tick", "Tick aborted — a packet is already in flight. One at a time."));
     return { state: next, packet: null, reason: "in-flight" };
+  }
+
+  // A halted tick has its own verdict, and it is not `idle` (issue #79).
+  //
+  // `pickCandidate` already consulted `maySelectRepo` per repo, so a halt DID keep every candidate
+  // out — but by refusing them one at a time it arrived at "no candidate", which this function
+  // reports as `Tick idle — no named candidate. Factory will not invent work.` and the CLI exits 0
+  // over. So a bricked factory read as a quiet one: the operator is told the roster had nothing to
+  // offer, when in fact the roster was never eligible. Same gate, same `factoryHalt` the per-repo
+  // check reads, asked once up front where the answer can be stated instead of inferred.
+  const halted = factoryHalt(state);
+  if (halted) {
+    const next = appendEvent(
+      state,
+      ev("tick", `Tick refused — factory halted ${halted.at}: ${halted.reason}`),
+    );
+    return { state: next, packet: null, reason: `Factory halted ${halted.at}: ${halted.reason}` };
   }
 
   let held = state;
@@ -1232,7 +1251,35 @@ export function applyRevert(
   const already = revertNote(packet);
   if (already) return { state, recorded: false };
   const at = input.at ?? now();
-  const detail = input.sha ? `${input.sha.slice(0, 12)} — ${input.why}` : input.why;
+  // docs/08-operations.md's window, on BOTH paths into this counter (issue #81).
+  //
+  // It lives here rather than in the `revert` verb because this function is the sole writer of
+  // `reverts`, and `health()` turns `reverts > 0` into an unconditional stop that only a hand edit
+  // of `factory/seed.ts` lifts. A check in the CLI would guard today's two callers and none of
+  // tomorrow's; a check at the counter guards the counter. For the `commit` path this is belt and
+  // braces — `classifyRevert` already filtered on the same predicate before `reconcile` got here —
+  // and the redundancy is the cheapest possible proof that the two agree.
+  //
+  // Refused, not recorded-quietly: `reverts` IS the halt, so there is no way to record without
+  // halting that does not invent a second counter nothing is defined over. An unknown window is
+  // the one exception, and it errs toward the halt — a ledger missing `mergedAt` must not become
+  // the way to keep a reverted repo selectable.
+  const window = revertWindow(packet.prMeta?.mergedAt, at);
+  if (window.known && !window.within) {
+    return {
+      state,
+      error:
+        `refusing to record a revert on ${id}: the rollback is dated ${at}, ${window.days} days after the ` +
+        `merge at ${packet.prMeta!.mergedAt} — past the ${REVERT_WINDOW_DAYS}-day window that closed ${window.deadline} ` +
+        `(docs/08-operations.md, "within 30 days of merge"). classifyRevert discards a commit this late for the same ` +
+        `reason, and reverts is a permanent scorecard stop. Record it as a follow-up note instead if it should be kept.`,
+      recorded: false,
+    };
+  }
+  const unknownWindow = window.known
+    ? ""
+    : ` [window could not be checked — no parseable mergedAt on this packet; recorded anyway rather than letting a missing date skip the halt]`;
+  const detail = (input.sha ? `${input.sha.slice(0, 12)} — ${input.why}` : input.why) + unknownWindow;
   const note = followUpEntry(at, "note", `${REVERT_NOTE_PREFIX} (${input.source}) ${detail}`, packet.prUrl);
   const next = bump(packet, { followUps: [...(packet.followUps ?? []), note] });
   const scorecard = applyPacketToScorecard(state.scorecard, packet, "reverted");

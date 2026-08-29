@@ -3,8 +3,8 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { ALLOWLIST, CAPS, repoById } from "./allowlist.ts";
 import {
@@ -40,6 +40,7 @@ import { packetChecks, packetDivergences } from "./ledger-check.ts";
 import {
   commandTools,
   isTestPath,
+  resolveToolchain,
   runFailureDetail,
   toolchainLabel,
   verifyWitnessLogs,
@@ -1988,6 +1989,91 @@ test("a refusal names the toolchain when it knows one and stays silent when it d
   assert.match(unknown, /^ {2}command: python3 -m pytest$/m, unknown);
 });
 
+/**
+ * The witnessed repository is third-party code, run in a sandbox precisely because it is not
+ * trusted — and until issue #78 its stdout/stderr reached `console.error` with only a trailing
+ * -whitespace trim and a tail slice between it and the operator's terminal.
+ *
+ * That is not a rendering nit. This surface's ENTIRE job is to tell a human what actually happened,
+ * and control sequences let the output rewrite the story it is part of: `\r` plus a cursor move
+ * repaints a red witness as green, `\x1b[2J` scrolls the real failure away, and OSC 52 asks the
+ * terminal itself to take an action (a clipboard write) that has nothing to do with printing text.
+ * #41 added this block because a silent refusal was indistinguishable from a broken interpreter;
+ * printing it raw reopens the same question one level up — can the operator trust what they just
+ * read?
+ *
+ * `\n` and `\t` survive, because they are how a test log is shaped and stripping them would destroy
+ * the diagnostic this block exists to carry.
+ */
+test("a witnessed repository's output cannot write control sequences to the operator's console", () => {
+  const ESC = "\x1b";
+  const hostile = [
+    "FAIL src/thing.test.js",
+    `${ESC}[2J${ESC}[H`, // clear screen, home the cursor: scroll the real failure away
+    `${ESC}]52;c;aGVsbG8=\x07`, // OSC 52: ask the terminal to write the clipboard
+    "3 failing\rnegative control passed, 0 failing", // CR repaint: forge a green verdict over a red one
+    `${ESC}[32mall green${ESC}[0m`,
+    "\x07\x08\x1b[1;1H", // BEL, BS, cursor home
+    "\x9b31m", // a bare C1 CSI — the 8-bit form, which a naive `\x1b`-only strip misses
+  ].join("\n");
+
+  const detail = runFailureDetail("npm test", hostile, "npm 10.9.2");
+
+  for (const [name, needle] of [
+    ["ESC", ESC],
+    ["BEL", "\x07"],
+    ["BS", "\x08"],
+    ["CR", "\r"],
+    ["C1 CSI", "\x9b"],
+  ] as const) {
+    assert.equal(detail.includes(needle), false, `${name} reached the console: ${JSON.stringify(detail)}`);
+  }
+  assert.equal(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(detail), false, JSON.stringify(detail));
+  // The whole OSC payload goes, not just its introducer — a stripped `\x1b` leaving `]52;c;…`
+  // behind would be a terminal action reassembled by the next thing to touch this text.
+  assert.equal(detail.includes("]52;c;"), false, JSON.stringify(detail));
+  // `\x9b` IS `\x1b[`, so its parameters must go with it. A strip that removed only the
+  // introducer would leave `31m` behind as text — harmless, but it would mean the 8-bit form was
+  // never actually understood, and the next sequence it meets may not be so forgiving.
+  assert.equal(detail.includes("31m"), false, JSON.stringify(detail));
+
+  // Sanitising must not become its own concealment channel: the readable text survives, and the
+  // operator is told that something was removed rather than handed a quietly tidied transcript.
+  assert.match(detail, /FAIL src\/thing\.test\.js/, detail);
+  assert.match(detail, /3 failing/, detail);
+  assert.match(detail, /control sequence/i, detail);
+  // Newlines and tabs are the shape of a log, and they stay.
+  assert.match(detail, /^ {2}\| FAIL src\/thing\.test\.js$/m, detail);
+  assert.equal(runFailureDetail("npm test", "a\tb").includes("\t"), true);
+});
+
+/**
+ * The second sink, and the reason issue #78 says "check for OTHER sinks besides this one".
+ *
+ * `resolveToolchain` runs `command -v <tool> && <tool> --version` through the same runner as the
+ * test phases and, inside `witnessEvidence`, with `cwd` set to the CLONE — so the probe's output is
+ * as repository-controlled as the test output is. A repo that ships the tool the `testCommand`
+ * names (`./scripts/test.sh` is a legal tool token) chooses every byte of both lines this reads.
+ * `witness-check` prints `tool.path` straight to the operator's terminal.
+ */
+test("the toolchain probe's output cannot write control sequences either", async () => {
+  const ESC = "\x1b";
+  const { runner } = fakeRunner({
+    "probe command -v python3": {
+      exit: 0,
+      output: `/opt/homebrew/bin/python3${ESC}[2K\r/usr/bin/false\nPython${ESC}]0;pwned\x07 3.14.7\n`,
+    },
+  });
+  const resolved = await resolveToolchain("python3 -m pytest", runner);
+  const probed = resolved[0]!;
+  assert.equal(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(probed.path ?? ""), false, probed.path);
+  assert.equal(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(probed.raw ?? ""), false, probed.raw);
+  assert.equal((probed.path ?? "").includes("]0;"), false, probed.path);
+  assert.equal((probed.raw ?? "").includes("]0;"), false, probed.raw);
+  // Still resolved: the point is to clean the report, not to lose it.
+  assert.equal(probed.version, "3.14.7");
+});
+
 test("the witness records the toolchain that produced the green, resolved inside the clone", async () => {
   const { runner, calls, cwds } = fakeRunner({
     "probe command -v python3": { exit: 0, output: "/opt/homebrew/bin/python3\nPython 3.14.7\n" },
@@ -2984,7 +3070,19 @@ function writeCompareStub(dir: string, issueNumber: number, filesChanged = 1): s
   return stub;
 }
 
-function runCli(dir: string, args: string[], stub?: string, env: Record<string, string> = {}) {
+function runCli(
+  dir: string,
+  args: string[],
+  stub?: string,
+  env: Record<string, string> = {},
+  // Where the fixture's ledger lives, when that is deliberately NOT the cwd the child is started
+  // in. Issue #80: witness log paths used to be found only because `cwd` happened to be the
+  // fixture, so a test that proves the anchor has to be able to separate the two.
+  stateDir: string = dir,
+  // Only the guard test sets this: it needs a spawned CLI that FORGOT `--logs-root`, which is the
+  // one thing every other caller here is careful never to be.
+  omitLogsRoot = false,
+) {
   const nodeArgs = ["--experimental-strip-types"];
   if (stub) nodeArgs.push("--import", pathToFileURL(stub).href);
   // `--state` is what isolates this, not `cwd`: the ledger path is anchored to the repo root, so a
@@ -2992,8 +3090,13 @@ function runCli(dir: string, args: string[], stub?: string, env: Record<string, 
   // which temp directory it was started in. Every fixture here writes its ledger to
   // `<dir>/.foundry-state.json`, so point the child at that one unless a caller is deliberately
   // exercising some other path. `cwd` still matters — the witness log paths are relative to it.
-  const stateArgs = args.includes("--state") ? [] : ["--state", join(dir, ".foundry-state.json")];
-  nodeArgs.push(join(import.meta.dirname, "cli.ts"), ...args, ...stateArgs);
+  const stateArgs = args.includes("--state") ? [] : ["--state", join(stateDir, ".foundry-state.json")];
+  // …and the same for the witness log root (issue #80). These fixtures used to find their logs
+  // because `cwd` happened to be the fixture tree, which is precisely the resolution rule the issue
+  // is about: the tests were isolated by the defect. Anchored explicitly, like the ledger, so the
+  // isolation survives the fix and a test that wants a foreign cwd can have one.
+  const logArgs = args.includes("--logs-root") || omitLogsRoot ? [] : ["--logs-root", stateDir];
+  nodeArgs.push(join(import.meta.dirname, "cli.ts"), ...args, ...stateArgs, ...logArgs);
   const run = spawnSync(process.execPath, nodeArgs, {
     cwd: dir,
     encoding: "utf8",
@@ -3097,6 +3200,60 @@ test("attach-witness refuses when a run log on disk is not what was witnessed", 
   assert.equal(missing.status, 1, missing.seen);
   assert.match(missing.seen, /missing or unreadable/);
   assert.equal(ledgerAt(gone.dir).packets[0].evidence, undefined);
+});
+
+/**
+ * Issue #80 — the eighth time in this run a fix landed on one call site and not its sibling.
+ *
+ * #43 anchored `STATE_FILE` to the repository root and gave it a `--state` override, because "the
+ * ledger belongs to the repository, not to whatever directory the operator happened to be in".
+ * Witness log paths are the same kind of path — `witnessLogPathViolation` refuses anything that is
+ * not exactly `docs/evidence/logs/<packetId>/{test,revert}.log`, and its own refusal message says
+ * "run logs are repo-root-relative" — but `readIfPresent` resolved them with a bare `resolve()`,
+ * which is cwd-relative. So the schema said one thing and the reader did another, and an operator
+ * who ran `attach-witness` from anywhere but the repository root had a valid witness rejected as a
+ * missing log.
+ *
+ * The cwd here is deliberately NOT the fixture. Before this, `cwd` was the only thing that made
+ * these tests find their logs — the suite was pinning the defect, and the fix could not be red.
+ */
+test("attach-witness resolves witness logs against the log root, not the operator's cwd", () => {
+  const { dir, id, manifestPath, stub } = ingestFixture();
+  // Run from a directory that is neither the fixture nor the repository: the only thing that can
+  // make the logs findable is the anchor.
+  const elsewhere = mkdtempSync(join(tmpdir(), "foundry-elsewhere-"));
+  const run = runCli(elsewhere, ["attach-witness", id, "--manifest", manifestPath, "--logs-root", dir], stub, {}, dir);
+  assert.equal(run.status, 0, `a valid witness must ingest from any cwd:\n${run.seen}`);
+  assert.ok(ledgerAt(dir).packets[0].evidence, "the witness must have reached the ledger");
+
+  // The negative case, from the same foreign cwd: a genuinely missing log still refuses. Without
+  // this, "anchor everything to a directory that happens to contain the logs" would also pass.
+  const gone = ingestFixture();
+  rmSync(join(gone.dir, "docs", "evidence", "logs", gone.id, "test.log"));
+  const missing = runCli(
+    elsewhere,
+    ["attach-witness", gone.id, "--manifest", gone.manifestPath, "--logs-root", gone.dir],
+    gone.stub,
+    {},
+    gone.dir,
+  );
+  assert.equal(missing.status, 1, missing.seen);
+  assert.match(missing.seen, /missing or unreadable/);
+  assert.equal(ledgerAt(gone.dir).packets[0].evidence, undefined);
+});
+
+test("the witness log root defaults to the repository root and the state file's own anchor", async () => {
+  // The default is the half an override can hide. `--logs-root` above proves the plumbing; this
+  // proves that an operator who passes nothing gets the checkout rather than their shell's cwd —
+  // which is the whole defect. Asserted through the CLI's own resolver so it cannot be satisfied by
+  // a test-local reimplementation of the rule.
+  const { witnessLogRootFor } = await import("./cli.ts");
+  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  assert.equal(witnessLogRootFor([]), repoRoot);
+  assert.equal(witnessLogRootFor(["attach-witness", "pkt_x", "--manifest", "w.json"]), repoRoot);
+  // Not the cwd: this test's own process is started in the repo root by the runner, so the two
+  // would be indistinguishable if the assertion were `!== process.cwd()`. Name the value instead.
+  assert.equal(witnessLogRootFor(["--logs-root", "/tmp/elsewhere"]), resolve("/tmp/elsewhere"));
 });
 
 test("attach-witness refuses a manifest that names logs outside its own packet", () => {
@@ -3354,8 +3511,12 @@ function evidenceFixture(filesChanged = 2, message = "fix the answer\n\nFixes #7
     HOME: home,
     PATH: `${git.binDir}:${process.env.PATH ?? ""}`,
   };
-  const runEvidence = () =>
-    runCli(dir, ["evidence", id, "--base", origin.base, "--head", origin.head], stub, childEnv);
+  // `from` exists so the WRITE side of issue #80 can be observed. With cwd and the log root the
+  // same directory — which is what every caller here wants — a `persistWitnessLogs` that resolved
+  // against `"."` and one that resolved against the anchor put the files in the identical place,
+  // so no assertion could tell them apart. Separating the two is the only thing that can.
+  const runEvidence = (from: string = dir, omitLogsRoot = false) =>
+    runCli(from, ["evidence", id, "--base", origin.base, "--head", origin.head], stub, childEnv, dir, omitLogsRoot);
   /** The pre-flight, run from the same working directory and the same environment as the witness. */
   const runWitnessCheck = () => runCli(dir, ["witness-check", "ravidsrk/orca-fleet"], stub, childEnv);
   return { dir, id, origin, logPaths, runEvidence, runWitnessCheck, gitCalls: git.calls };
@@ -3369,6 +3530,70 @@ function exists(path: string): boolean {
     return false;
   }
 }
+
+test("a spawned CLI that forgot --logs-root refuses rather than writing into the real checkout", () => {
+  // The cost of anchoring, and the half of #43 that has to come with it.
+  //
+  // `persist` carries this comment for the ledger: "Anchoring `STATE_FILE` took away the isolation
+  // that spawned-CLI tests were getting for free from a temp cwd: with the path fixed to the repo
+  // root, a test that forgets `--state` reads and writes the developer's real ledger, and the damage
+  // lands in whichever *other* test file reads it next." Anchoring `LOGS_ROOT` does the identical
+  // thing to the run logs, and it is not hypothetical — an intermediate state of this very change
+  // left two real run logs sitting in `docs/evidence/logs/` in the working checkout.
+  //
+  // Same guard, same shape, same reason: refuse at the WRITE, only for the un-overridden repo-root
+  // default, and only under `node --test` (`NODE_TEST_CONTEXT`), so it is inert for an operator.
+  const { dir, id, runEvidence } = evidenceFixture();
+  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  const leaked = join(repoRoot, "docs", "evidence", "logs", id);
+  // Scrubbed FIRST, so the assertion below is about this run and not about the tree's history. It
+  // also keeps the mutant that disables the guard from poisoning the next baseline: without this,
+  // proving the guard matters would leave behind the very artifact the guard exists to prevent.
+  rmSync(leaked, { recursive: true, force: true });
+
+  const run = runEvidence(dir, true);
+  assert.equal(run.status, 1, `a forgotten --logs-root must refuse:\n${run.seen}`);
+  assert.match(run.seen, /refusing to write .* run logs?/i, run.seen);
+  assert.match(run.seen, /--logs-root/, run.seen);
+  // The claim is the filesystem, not the message: nothing may reach the real checkout.
+  assert.equal(
+    exists(join(leaked, "test.log")),
+    false,
+    "a test run must never write run logs into the developer's own checkout",
+  );
+  rmSync(leaked, { recursive: true, force: true });
+});
+
+test("the evidence verb writes its run logs under the log root, not beside the operator's shell", () => {
+  // The WRITE half of issue #80, and the half the first pass of this fix left untested — the
+  // mutation audit found it by putting `persistWitnessLogs`'s default back to `"."` and watching
+  // the whole suite stay green. Which is the defect this repository keeps shipping, arriving one
+  // more time inside the change that was meant to close it: the read anchor had a test, its sibling
+  // did not, and the two were indistinguishable as long as cwd happened to be the log root.
+  //
+  // What it would cost: the ledger records `docs/evidence/logs/<id>/test.log` and the evidence page
+  // offers a maintainer `shasum -a 256` over that path in the Foundry checkout — while the bytes
+  // sit in whatever directory the operator was standing in. The recompute offer, which is the whole
+  // proof, resolves to nothing.
+  const { dir, id, logPaths, runEvidence } = evidenceFixture();
+  const elsewhere = evidenceScratchDir("foundry-evidence-cwd-");
+
+  const run = runEvidence(elsewhere);
+  assert.equal(run.status, 0, run.seen);
+  for (const path of logPaths) {
+    assert.ok(exists(path), `${path} was never written from a foreign cwd: ${run.seen}`);
+  }
+  // …and nothing was written next to the shell instead.
+  assert.equal(
+    exists(join(elsewhere, "docs", "evidence", "logs", id, "test.log")),
+    false,
+    "run logs must not land in the operator's working directory",
+  );
+  // The ledger's own claim about where they are still holds, which is what a maintainer acts on.
+  const witness = ledgerAt(dir).packets[0].evidence?.witness;
+  assert.equal(witness?.testLogPath, `docs/evidence/logs/${id}/test.log`);
+  assert.ok(exists(join(dir, witness!.testLogPath)), "the ledger's path must resolve under the log root");
+});
 
 test("the evidence verb writes the run logs its own ledger entry points at", () => {
   const { dir, id, origin, logPaths, runEvidence } = evidenceFixture();
@@ -4097,6 +4322,83 @@ test("applyRevert refuses a packet that was never merged, and one it has never h
 
   const unknown = applyRevert(state, "pkt_nope", { source: "operator", why: "x" });
   assert.match(unknown.error ?? "", /unknown packet/);
+});
+
+/**
+ * ONE definition of "a revert", enforced on both of its paths (issue #81).
+ *
+ * docs/08-operations.md says a revert counts "within 30 days of merge". `classifyRevert` makes that
+ * structural for the mechanical path — a commit past the deadline is set aside with a reason and
+ * `reverted: false` comes back. The operator's `revert` verb went straight to `applyRevert` with no
+ * deadline anywhere, so the SAME rollback, of the SAME merge, on the SAME day, was a no-op through
+ * one door and a permanent repository stop through the other: `reverts` is cumulative and
+ * `health()` turns `reverts > 0` into an unconditional `stop`, which only a hand edit of the
+ * scorecard row in `factory/seed.ts` can undo.
+ *
+ * Refuse rather than record-without-halting, because the counter and the halt are the same fact:
+ * `health()` reads `reverts`, so "record it but do not halt" would need a second, quieter revert
+ * counter that no KPI is defined over — a number kept for nobody. The window is what the classifier
+ * already does; the operator's verb now does it too, and says which rule refused.
+ */
+test("applyRevert enforces the 30-day window on the operator's path, not only the classifier's", () => {
+  const seed = seedState();
+  const id = "pkt_ravidsrk_orca-fleet_71";
+  const merged = seed.packets.find((p) => p.id === id)!;
+  const mergedMs = Date.parse(merged.prMeta!.mergedAt!);
+  const at = (days: number) => new Date(mergedMs + days * 86_400_000).toISOString();
+
+  const withMergedAt = (mergedAt: string | undefined): FactoryState => ({
+    ...seed,
+    packets: seed.packets.map((p) =>
+      p.id === id ? { ...p, prMeta: { ...p.prMeta!, mergedAt } as typeof p.prMeta } : p,
+    ),
+  });
+
+  // Out of window: refused, the counter does not move, and the repo does not become unselectable.
+  const late = applyRevert(seed, id, { source: "operator", why: "maintainer said so", at: at(31) });
+  assert.equal(late.recorded, false, "an out-of-window rollback must not be recorded");
+  assert.match(late.error ?? "", /30-day window/, late.error);
+  assert.match(late.error ?? "", /docs\/08-operations\.md/, late.error);
+  assert.equal(scorecardRow(late.state.scorecard, merged.repoId)!.reverts, 0);
+  assert.equal(health(scorecardRow(late.state.scorecard, merged.repoId)!), "good");
+
+  // The classifier reaches the same verdict on the same facts — that is the point of the change.
+  const classified = classifyRevert({
+    mergeCommitSha: merged.prMeta!.mergeCommitSha!,
+    mergedAt: merged.prMeta!.mergedAt!,
+    commits: [
+      {
+        sha: "ffff1110000",
+        message: `Revert it\n\nThis reverts commit ${merged.prMeta!.mergeCommitSha}.`,
+        committedAt: at(31),
+      },
+    ],
+  });
+  assert.equal(classified.reverted, false);
+  assert.match(classified.why, /30-day window/);
+
+  // In window, including the last instant of it: still recorded, still a stop.
+  for (const day of [0, 29, 30]) {
+    const inWindow = applyRevert(seed, id, { source: "operator", why: "rolled back", at: at(day) });
+    assert.equal(inWindow.recorded, true, `day ${day} is inside the window`);
+    assert.equal(scorecardRow(inWindow.state.scorecard, merged.repoId)!.reverts, 1, `day ${day}`);
+    assert.equal(health(scorecardRow(inWindow.state.scorecard, merged.repoId)!), "stop", `day ${day}`);
+  }
+
+  // A ledger that cannot say when the merge happened must not be a way to dodge the halt. The
+  // window is unevaluable, so it does not apply, and the revert is recorded with that said out
+  // loud — the permissive direction here would let a missing field unlock the factory.
+  for (const missing of [undefined, "not-a-date"]) {
+    const blind = applyRevert(withMergedAt(missing), id, {
+      source: "operator",
+      why: "rolled back",
+      at: at(400),
+    });
+    assert.equal(blind.recorded, true, `mergedAt=${missing} must still record`);
+    assert.equal(scorecardRow(blind.state.scorecard, merged.repoId)!.reverts, 1);
+    const note = revertNote(blind.state.packets.find((p) => p.id === id)!);
+    assert.match(note?.body ?? "", /window could not be checked/i, note?.body);
+  }
 });
 
 test("a recorded revert points the operator at the seed, never at allowlist.yaml", () => {

@@ -68,12 +68,34 @@ import {
  * The sha256 on the evidence page is only proof if the maintainer can recompute it. Write the two
  * run logs at the repo-root-relative paths the witness names, so the digest is checkable on disk.
  * `root` exists so this is drivable against a scratch tree instead of the operator's checkout.
+ *
+ * The default is `LOGS_ROOT`, not `"."` (issue #80). A cwd default made this the WRITE half of the
+ * same mismatch `readIfPresent` had on the read half: run the verb from outside the checkout and
+ * the logs land beside the operator's shell while the evidence page keeps naming
+ * `docs/evidence/logs/...` inside the repository — a recompute offer pointing at files that are not
+ * there. Read and write anchor to the same value, because they name the same two files.
  */
 export function persistWitnessLogs(
   witness: EvidenceWitness,
   logs: WitnessLogs,
-  root = ".",
+  root = LOGS_ROOT,
 ): void {
+  // The other half of anchoring, exactly as `persist` is for the ledger.
+  //
+  // Before this, a spawned-CLI test was isolated by its temp `cwd` for free. Anchoring `LOGS_ROOT`
+  // to the repo root takes that away, so a test that forgets `--logs-root` writes two run logs into
+  // the developer's real checkout — which is not hypothetical: an intermediate state of issue #80's
+  // own fix did precisely that, and the files were sitting in `docs/evidence/logs/` afterwards.
+  // Refused at the write and not at the resolve, because resolving the default path is a legitimate
+  // thing for a test to assert — that is how the anchoring itself is proven; it is the mutation that
+  // leaks. `NODE_TEST_CONTEXT` is set by `node --test` and inherited by spawned children, so this is
+  // inert for a real operator. An explicit `root` argument is a caller who has said where they mean.
+  if (root === LOGS_ROOT && !LOGS_ROOT_FLAG && process.env.NODE_TEST_CONTEXT) {
+    console.error(
+      `refusing to write the repo-root run logs under ${LOGS_ROOT} from a test run — pass \`--logs-root <tmpdir>\` to every spawned CLI so the test cannot write into the real checkout.`,
+    );
+    process.exit(1);
+  }
   for (const [path, text] of [
     [witness.testLogPath, logs.test],
     [witness.revertLogPath, logs.revert],
@@ -84,9 +106,37 @@ export function persistWitnessLogs(
   }
 }
 
-function readIfPresent(path: string): string | undefined {
+/**
+ * Read a path the OPERATOR typed on the command line. Cwd-relative, and that is correct: when
+ * someone types `--manifest ./witness.json`, the `./` is theirs and means their shell's directory.
+ *
+ * Deliberately NOT the reader for anything the ledger or a manifest names — see `readRepoRelative`.
+ * The two are separate functions with the anchor in the name because they were one function with
+ * two call sites and one right answer between them (issue #80), and a single `readIfPresent` is an
+ * invitation for the next call site to pick the wrong anchor silently.
+ */
+function readOperatorPath(path: string): string | undefined {
   try {
     return readFileSync(resolve(path), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read a path that is RELATIVE TO THE REPOSITORY, not to the operator (issue #80).
+ *
+ * Witness log paths are of this kind: `witnessLogPathViolation` refuses anything that is not
+ * exactly `docs/evidence/logs/<packetId>/{test,revert}.log`, and its refusal message says in so
+ * many words that "run logs are repo-root-relative". Resolving them with a bare `resolve()` made
+ * the schema's claim false from any directory but one, so `attach-witness` reported a perfectly
+ * good witness as a missing log — the same class #43 fixed for `STATE_FILE` and left in this
+ * sibling. `LOGS_ROOT` is the anchor, `--logs-root` is the override, exactly as `STATE_FILE` and
+ * `--state` are.
+ */
+function readRepoRelative(path: string): string | undefined {
+  try {
+    return readFileSync(resolve(LOGS_ROOT, path), "utf8");
   } catch {
     return undefined;
   }
@@ -105,6 +155,26 @@ const ARGV = process.argv.slice(2);
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const STATE_FILE_FLAG = flag(ARGV, "--state");
 const STATE_FILE = resolve(STATE_FILE_FLAG ?? resolve(REPO_ROOT, ".foundry-state.json"));
+
+/**
+ * Where `docs/evidence/logs/<packetId>/{test,revert}.log` is rooted (issue #80).
+ *
+ * The witness log paths are repo-root-relative by schema, so the tree they resolve against is a
+ * property of the CHECKOUT, not of the operator's shell — the identical argument #43 made for the
+ * ledger, and the identical shape of fix: an anchor plus one explicit override. Exported as a
+ * function of `argv` rather than read off the constant so a test can assert the DEFAULT, which is
+ * the half an override can hide and the half the bug was in.
+ *
+ * One value for both directions on purpose. A separate read root and write root would be two places
+ * that have to agree about where two named files are, and this issue is what disagreement looks
+ * like: the reader hunting one tree while the evidence page promises another.
+ */
+export function witnessLogRootFor(argv: string[]): string {
+  const override = flag(argv, "--logs-root");
+  return override ? resolve(override) : REPO_ROOT;
+}
+const LOGS_ROOT_FLAG = flag(ARGV, "--logs-root");
+const LOGS_ROOT = witnessLogRootFor(ARGV);
 
 /**
  * Every ledger write goes through here so a test can never make one to the repo root.
@@ -215,6 +285,19 @@ async function closingRefFor(
 
 async function tickWithGithub(state: FactoryState) {
   if (hasInflight(state.packets)) return applyTick(state);
+  // Before the first request, not after the last one (issue #79).
+  //
+  // SPEC.md §6: "a platform secondary rate limit MUST halt the factory, never retry." The halt was
+  // already consulted — inside `applyTick` → `maySelectRepo`, at the bottom of this function, after
+  // the loop below had spent a `pulls`, an `AGENTS.md`, a `CONTRIBUTING`, an issue read and a
+  // timeline read for every named row on the roster. Issuing those and then refusing IS the retry
+  // the rule forbids, and it aggravates the exact limit that wrote the halt; #43 made the halt
+  // durable so a re-run could not retry, and this ordering meant every re-run retried anyway.
+  //
+  // Two gates, and both earn their place: this one decides whether to spend requests, `applyTick`'s
+  // decides what the tick's verdict is. They cannot drift, because there is one `factoryHalt` and
+  // they both call it — and `applyTick` is left to phrase the outcome so this line never has to.
+  if (factoryHalt(state)) return applyTick(state);
   const competingKeys: string[] = [];
   const adjacentKeys: string[] = [];
   const closedIssues: { key: string; reason: string }[] = [];
@@ -327,7 +410,9 @@ function usage(): void {
   clear-halt --by <name> --note <text>   (a human lifts the factory-wide rate-limit halt — not the halt above)
 
 Any command takes --state <path> to point at a different ledger.
+Any command takes --logs-root <path> to root the witness run logs somewhere other than the checkout.
 State: ${STATE_FILE} (seed if missing; refuse if present but malformed). Foundry never merges.
+Witness logs: ${LOGS_ROOT}/docs/evidence/logs/<packetId>/ (read and written there, whatever your cwd).
 Disclosure:
 ${DISCLOSURE}
 `);
@@ -383,6 +468,21 @@ async function main() {
     // the one thing the human is here to read.
     if (packetForFreeze) console.log(renderFreezeEvidence(packetForFreeze));
     if (packetForFreeze && (packetForFreeze.status === "gated" || packetForFreeze.status === "frozen")) {
+      // The selection gate, moved ahead of the network reads (issue #79). `applyApprove` runs the
+      // identical `maySelectRepo` at the bottom of this verb, so the VERDICT is unchanged — what
+      // changes is that a halted or scorecard-stopped repository stops costing GitHub requests to
+      // discover. SPEC.md §6 says never retry; three reads and then a refusal is a retry. Same
+      // pre-flight, same wording, as `open-draft` below.
+      //
+      // Deliberately AFTER the freeze evidence above and INSIDE the status guard: the render is
+      // local, and it is the one thing the human came here to read (issue #37), so a refusal must
+      // not swallow it. Inside the guard, a wrong-status packet still gets `applyApprove`'s own
+      // "cannot approve … from status …" rather than being told about a halt it never reached.
+      const gate = maySelectRepo(state, packetForFreeze.repoId);
+      if (!gate.ok) {
+        console.error(`cannot approve ${id}: ${gate.reason}`);
+        process.exit(1);
+      }
       // SPEC.md §4: the approval step re-checks for competing upstream work and stands down rather
       // than proceed. An issue closed since gating is the strongest form of that — the work is
       // already done or explicitly unwanted — and it is invisible to the open-PR half of the
@@ -694,7 +794,8 @@ async function main() {
       console.error("no testCommand for this repo");
       process.exit(1);
     }
-    const raw = readIfPresent(manifestPath);
+    // Operator-typed, so operator-anchored: `--manifest ./witness.json` means their directory.
+    const raw = readOperatorPath(manifestPath);
     if (raw === undefined) {
       console.error(`cannot read witness manifest ${manifestPath}`);
       process.exit(1);
@@ -712,7 +813,8 @@ async function main() {
       process.exit(1);
     }
     // The hashes must cover logs that exist here, or the digest on the evidence page proves nothing.
-    const logs = verifyWitnessLogs(witness, readIfPresent);
+    // Repo-root-anchored, because these are the schema's paths and not the operator's (issue #80).
+    const logs = verifyWitnessLogs(witness, readRepoRelative);
     if (!logs.ok) {
       console.error(logs.error);
       process.exit(1);

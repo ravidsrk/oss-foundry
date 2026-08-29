@@ -164,6 +164,39 @@ export function revertNote(packet: TaskPacket) {
 /** docs/08-operations.md: a revert counts only "within 30 days of merge". */
 export const REVERT_WINDOW_DAYS = 30;
 
+/**
+ * Is a rollback observed at `at` inside the window opened by `mergedAt`? (issue #81.)
+ *
+ * ONE predicate, deliberately, read by BOTH halves of docs/08-operations.md's single definition:
+ * `classifyRevert` for the mechanical path, `applyRevert` for the operator's prose one. They used
+ * to be one enforcement and one nothing — the classifier discarded a commit past the deadline while
+ * the `revert` verb applied any rollback of any age, so the same maintainer statement about the
+ * same merge counted or did not depending on which door it came through. Two hand-written copies of
+ * a deadline is the shape this repository has shipped the same defect through repeatedly; a shared
+ * function is the only version of "they agree" that a mutation can prove.
+ *
+ * `unknown` is a third answer, not a lenient `true`. A packet whose ledger carries no parseable
+ * `mergedAt` cannot be placed against the deadline at all, and the two callers want opposite things
+ * from that: the classifier already refuses such a packet outright (it has no merge commit to match
+ * either), while the operator's verb must NOT treat a missing field as permission to skip the halt.
+ * Collapsing it into a boolean would pick one of those silently.
+ */
+export function revertWindow(
+  mergedAt: string | undefined,
+  at: string,
+): { known: true; within: boolean; deadline: string; days: number } | { known: false } {
+  const mergedMs = Date.parse(mergedAt ?? "");
+  const atMs = Date.parse(at);
+  if (!Number.isFinite(mergedMs) || !Number.isFinite(atMs)) return { known: false };
+  const deadlineMs = mergedMs + REVERT_WINDOW_DAYS * 86_400_000;
+  return {
+    known: true,
+    within: atMs <= deadlineMs,
+    deadline: new Date(deadlineMs).toISOString(),
+    days: Math.floor((atMs - mergedMs) / 86_400_000),
+  };
+}
+
 export interface RevertCandidate {
   sha: string;
   message: string;
@@ -196,7 +229,6 @@ export function classifyRevert(input: {
   if (merge.length < 7 || !Number.isFinite(mergedMs)) {
     return { reverted: false, why: "no merge commit recorded for this packet — nothing to revert" };
   }
-  const deadline = mergedMs + REVERT_WINDOW_DAYS * 86_400_000;
   let late: RevertCandidate | undefined;
   for (const commit of input.commits) {
     // A commit cannot revert itself, and the merge commit is in the branch's own history.
@@ -209,7 +241,10 @@ export function classifyRevert(input: {
     if (!names) continue;
     const at = Date.parse(commit.committedAt);
     if (!Number.isFinite(at) || at < mergedMs) continue;
-    if (at > deadline) {
+    // The shared deadline (issue #81) — the same call the operator's `revert` verb makes, so the
+    // two halves of one documented definition cannot drift into disagreeing about a date.
+    const window = revertWindow(input.mergedAt, commit.committedAt);
+    if (window.known && !window.within) {
       late = commit;
       continue;
     }
@@ -221,7 +256,8 @@ export function classifyRevert(input: {
     };
   }
   if (late) {
-    const days = Math.floor((Date.parse(late.committedAt) - mergedMs) / 86_400_000);
+    const window = revertWindow(input.mergedAt, late.committedAt);
+    const days = window.known ? window.days : 0;
     return {
       reverted: false,
       why: `${late.sha.slice(0, 12)} names our merge commit but landed ${days} days after the merge, past the ${REVERT_WINDOW_DAYS}-day window (docs/08-operations.md) — not counted as a revert`,

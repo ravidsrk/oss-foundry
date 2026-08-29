@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parsePolicyRecords, policyRecordsPath } from "./policy-records.ts";
+import { hasDerivedFigure, parsePolicyRecords, policyRecordsPath } from "./policy-records.ts";
 import { evaluatePolicy } from "./policy.ts";
 
 test("denylist always forbids matplotlib", () => {
@@ -256,6 +256,52 @@ test("a silent quote may hold an absence note but never a derived figure", () =>
   );
 });
 
+/**
+ * The guard failed in BOTH directions at once, which is why one test covers both (issue #82).
+ *
+ * Permissive: the pattern had no `i` flag, so `of` matched lowercase only and `141 Of 272` walked
+ * straight through the guard #44 added — the same unreproducible measurement in a maintainer's
+ * mouth, one shift key away.
+ *
+ * Strict: the `number/number` alternative was unanchored, so it also matched the `2026/08` inside a
+ * path. That contradicts the constant's own comment, which requires that "an ISO date, a file path
+ * and a version number must all pass, because absence notes carry them" — and a rejected absence
+ * note is not a cosmetic failure: `policyRecordFor` throws out of a lazy cache, so one such quote
+ * takes down `validate` and every packet build that touches the record.
+ */
+test("the derived-figure guard reads case-insensitively and does not mistake a path for a ratio", () => {
+  // Permissive direction. Every casing of the ratio word is the same claim.
+  for (const figure of [
+    "Behaviorally open: 141 Of 272 external PRs merged.",
+    "Behaviorally open: 141 OF 272 external PRs merged.",
+    "Behaviorally open: 141 oF 272 external PRs merged.",
+  ]) {
+    assert.throws(
+      () => parsePolicyRecords(record({ quote: figure })),
+      /is silent but its quote carries a derived figure/,
+      figure,
+    );
+  }
+
+  // Strict direction. A numeric path segment is a path, not a measurement.
+  for (const note of [
+    "no CONTRIBUTING.md at docs/2026/08 as of 2026-08-28",
+    "nothing under .github/2026/08/ and nothing in AGENTS.md as of 2026-08-28",
+    "checked https://example.invalid/docs/2026/08/policy as of 2026-08-28",
+  ]) {
+    assert.ok(
+      parsePolicyRecords(record({ quote: note })).get("ColeMurray/background-agents"),
+      note,
+    );
+  }
+
+  // …and the loosening must not cost the catch it was loosened around: a bare ratio still dies.
+  assert.throws(
+    () => parsePolicyRecords(record({ quote: "Behaviorally open: 250/408 non-owner PRs merged." })),
+    /is silent but its quote carries a derived figure/,
+  );
+});
+
 test("the committed policy records parse under the quote guard", () => {
   // Reads the shipped file, so restoring a figure into any silent quote turns this suite red.
   // Deliberately not a pin on the quote *text*: a legitimate refresh — upstream finally writes a
@@ -264,8 +310,13 @@ test("the committed policy records parse under the quote guard", () => {
   assert.ok(records.size > 0);
   const silent = [...records.values()].filter((r) => r.stance === "silent");
   assert.ok(silent.length > 0, "the file must still hold a silent record or this asserts nothing");
+  // Through the guard's OWN predicate, not a second copy of it. The copy that used to sit here was
+  // written when the two agreed, and issue #82 made them disagree: it had no `i` flag but also no
+  // path exclusion, so it was simultaneously looser and STRICTER than the rule it was checking. A
+  // legitimate absence note carrying `docs/2026/08` would have passed `validate` and turned this
+  // file red — the second half of #82's defect, relocated into the test suite.
   for (const r of silent) {
-    assert.doesNotMatch(r.quote, /\d\s*(?:\/|of)\s*\d|\d\s*%/, `${r.repoId} quote: ${r.quote}`);
+    assert.equal(hasDerivedFigure(r.quote), false, `${r.repoId} quote: ${r.quote}`);
   }
 });
 
