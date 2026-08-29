@@ -107,7 +107,11 @@ test("a stored witness may carry a toolchain string, and nothing else in that sl
   if (carried.ok) {
     assert.equal(carried.state.packets[0].evidence?.witness?.toolchain, "python3 3.14.7");
   }
-  for (const junk of [3.14, { python3: "3.14.7" }, ["python3"], null]) {
+  // `""` included: docs/10-schemas.md says `isWitness` and `parseWitnessManifest` both hold this
+  // to an optional *non-empty* string, and only the manifest parser did. An empty one renders on
+  // the evidence page as a claim about the run with the fact missing — the honest record for a
+  // toolchain nobody could resolve is absence, which the line above already accepts.
+  for (const junk of [3.14, { python3: "3.14.7" }, ["python3"], null, ""]) {
     assert.equal(
       loadFactoryState(write(withWitness({ toolchain: junk }))).ok,
       false,

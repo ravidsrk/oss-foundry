@@ -44,7 +44,10 @@ export type WitnessRunner = (
  *   change. `bash -c` is the same shell everywhere the factory runs, including CI.
  * - **Inherited environment.** `execFile` passes `process.env` through untouched, so the witness
  *   runs under exactly the PATH the operator invoked the CLI with. `witness-check` resolves
- *   through this same function, so the pre-flight cannot disagree with the run.
+ *   through this same function, so the pre-flight cannot disagree with the run *about the shell*.
+ *   It still can about the directory — the pre-flight resolves where the operator stands and the
+ *   witness inside the clone — which is why `witness.toolchain` records what the run used rather
+ *   than what the pre-flight predicted (`resolveToolchain`'s `cwd`, docs/08-operations.md).
  *
  * A repo needing anything more than this declares it as `setupCommand` in `allowlist.yaml`, where
  * it is visible, rather than relying on a profile nobody reads.
@@ -157,6 +160,13 @@ const VERSION = /\d+(?:\.\d+)+/;
  * Each token is interpolated into a probe command, so anything that is not a bare command name is
  * dropped rather than resolved. That is not a new trust boundary — `testCommand` comes from
  * `allowlist.yaml` and the witness already runs it verbatim — it is a refusal to open a second one.
+ *
+ * It is each segment's *first* token and nothing beneath it: `npm test` yields `npm`, never the
+ * `node` that actually runs the suite. So for a JS repo `witness.toolchain` names the package
+ * manager and the runtime is left to the run log, while for a Python repo naming `python3` the two
+ * coincide and the field answers the interpreter question directly (docs/10-schemas.md). Widening
+ * it would mean guessing at a runtime the command does not name, which is the sort of confident
+ * invention the whole field exists to replace.
  */
 export function commandTools(testCommand: string): string[] {
   const tools: string[] = [];
@@ -370,11 +380,16 @@ export async function witnessEvidence(
   if (revertRun.exit === 0) {
     return {
       ok: false,
-      // KNOWN DEFECT, diagnosed not undiscovered (issue #44 item 5): the "park the packet" below
-      // names a verb the operator does not have. `parked` is a status the engine writes on its own;
-      // the operator's stand-down verb is `reject`, as the corrected sibling string in
-      // `factory/sandbox.ts` already says. The wording here should read "reject the packet"; delete
-      // this comment with that edit.
+      // KNOWN DEFECT, diagnosed not undiscovered (issue #62): the "park the packet" below names a
+      // verb the operator does not have. `parked` is a status the engine writes on its own; the
+      // operator's stand-down verb is `reject`, as the corrected sibling string in
+      // `factory/sandbox.ts` already says. The wording here should read "reject the packet"; #62
+      // owns that string — delete this comment with that edit, and not before.
+      //
+      // Re-pointed from "issue #44 item 5", which is why the marker is worth keeping honest: #44
+      // closed with this item unfixed, so the pointer named a closed issue and the defect was
+      // owned by nobody. A tracking comment citing a closed issue is worse than none — it reads
+      // as accounted for.
       error:
         "negative control failed — tests stayed green with the production change reverted. The proof does not bind the change; park the packet." +
         runFailureDetail(input.testCommand, revertRun.output, toolchain),

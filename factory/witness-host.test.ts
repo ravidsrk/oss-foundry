@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -58,13 +58,20 @@ test("the host runner resolves tools from the operator's PATH, in the operator's
   // and merely demotes it below /usr/bin, which is exactly how six-minor-versions-too-old
   // interpreter selection stays invisible: everything resolves, to the wrong thing.
   const { dir, path } = shimDir("sort");
-  const resolved = await withPathPrefix(dir, () => hostRunner("run-tests@head", ["command -v sort"]));
-  assert.equal(resolved.exit, 0, resolved.output);
-  assert.equal(
-    resolved.output.trim(),
-    path,
-    `the witness resolved a different \`sort\` than the operator's PATH names first: ${resolved.output}`,
-  );
+  try {
+    const resolved = await withPathPrefix(dir, () => hostRunner("run-tests@head", ["command -v sort"]));
+    assert.equal(resolved.exit, 0, resolved.output);
+    assert.equal(
+      resolved.output.trim(),
+      path,
+      `the witness resolved a different \`sort\` than the operator's PATH names first: ${resolved.output}`,
+    );
+  } finally {
+    // The shim is a directory of executables on `$TMPDIR`; leaving one behind per run is how a
+    // machine ends up with sixty of them. Removed on the failure path too — the assertion above
+    // is where this test is most likely to exit.
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the toolchain probe reports the very interpreter the test phase would run", async () => {

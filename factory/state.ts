@@ -137,8 +137,12 @@ function isWitness(value: unknown): boolean {
     /^[0-9a-f]{64}$/.test(o.revertLogSha) &&
     typeof o.ranAt === "string" &&
     // Optional, because it is advisory and post-dates every witness in the committed seed. Still
-    // validated, because the evidence page interpolates it into a sentence for the maintainer.
-    optional(o.toolchain, (v) => typeof v === "string")
+    // validated — and non-empty, the same bar `parseWitnessManifest` holds an ingested manifest
+    // to — because the evidence page interpolates it into a sentence for the maintainer, and
+    // `toolchain: ""` renders as a claim about the run with the fact missing. The two validators
+    // agreeing is also what makes docs/10-schemas.md's "both validate it as an optional non-empty
+    // string" true; it was accepting `""` here.
+    optional(o.toolchain, (v) => typeof v === "string" && v.length > 0)
   );
 }
 
