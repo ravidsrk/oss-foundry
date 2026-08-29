@@ -1,5 +1,5 @@
 import { packetChecks } from "./ledger-check.ts";
-import { syncGithubPr } from "./github-pr.ts";
+import { revertCheck, syncGithubPr } from "./github-pr.ts";
 import { seedState } from "./seed.ts";
 
 // Clock-side, read-only: the committed seed ledger must match GitHub. A divergence — the published
@@ -22,6 +22,19 @@ for (const packet of withPr) {
     console.error(`verify-ledger: ${packet.id}: ${synced.error}`);
     process.exit(1);
   }
+  // SPEC.md §7 halts a repository on any revert of the operator's patch, and this workflow is the
+  // only thing that runs unattended (.github/workflows/oss-tick.yml, every 6h). The clock cannot
+  // write the ledger — it reads the committed seed — but it can refuse to call a ledger reconciled
+  // while GitHub says our merge commit was reverted and the record says otherwise (issue #39).
+  // Only for a merged packet, and no longer one request: since the read follows GitHub's `Link`
+  // cursor it costs 1..MAX_COMMIT_PAGES (10) requests, one per page of the bounded revert window.
+  const reverted =
+    packet.status === "merged" ? await revertCheck(packet.repoId, synced.meta) : undefined;
+  if (reverted && !reverted.ok) {
+    advisory.push(
+      `${packet.id}: could not read ${packet.repoId} commits since the merge — a revert would go unnoticed this run (${reverted.error})`,
+    );
+  }
   const checks = packetChecks(packet, {
     state: synced.meta.state,
     merged: synced.meta.merged,
@@ -31,6 +44,13 @@ for (const packet of withPr) {
     // break the call — it makes the check report that it could not run, which is the loudest thing
     // a skipped doctrine check can do.
     body: synced.body,
+    // Same contract for the revert verdict (issue #39): omit it on a merged packet and the check
+    // says it did not run.
+    revert: reverted?.ok ? reverted.verdict : undefined,
+    // And whether that verdict saw the whole window. A capped read returns the same commits and
+    // the same `reverted: false` a complete one does, so without this the clock cannot tell a
+    // clean base branch from one it only half-read — and it would print `ledger ok` over both.
+    revertTruncated: reverted?.ok ? reverted.truncated : undefined,
   });
   fatal.push(...checks.fatal);
   advisory.push(...checks.advisory);

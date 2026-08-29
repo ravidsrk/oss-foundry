@@ -60,6 +60,13 @@ test("spawning cli.ts as the entry point still runs main()", () => {
   assert.equal(run.status, 0, run.seen);
   assert.match(run.stdout, USAGE_BANNER, run.seen);
   assert.match(run.stdout, /attach-witness <packetId> --manifest <path>/, run.seen);
+  // Every verb this repo ships has to appear here or it is undiscoverable — `usage()` is the only
+  // list of them. The two issue #39 added deleted green, which is how a verb goes missing without
+  // a single red mark. Asserted against the dispatcher's own literals, so a renamed verb fails
+  // here instead of quietly dropping out of the help text.
+  for (const verb of ["status", "tick", "approve", "reject", "halt", "revert", "advance", "evidence", "witness-check", "attach-witness", "body", "attach-draft", "open-draft", "sync", "reconcile", "ledger", "evidence-page", "clear-halt"]) {
+    assert.match(run.stdout, new RegExp(`^\\s+${verb}\\b`, "m"), `usage() must list \`${verb}\`:\n${run.stdout}`);
+  }
 });
 
 test("the entry point is recognised through a symlinked checkout", () => {

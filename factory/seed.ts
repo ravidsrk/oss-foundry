@@ -38,11 +38,18 @@ export function seedState(): FactoryState {
       merged: true,
       mergeable: "unknown",
       commits: 2,
-      reviewComments: 1,
+      // GitHub's own total, re-read live 2026-08-29 (issue #39): 2, not the 1 that was typed here.
+      // Both surfaces are one bot + one person — `greptile-apps[bot]` and `ravidsrk` — which is
+      // exactly why this scalar cannot be the KPI. `humanReview` below is.
+      reviewComments: 2,
       issueComments: 0,
       headSha: "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d",
       updatedAt: "2026-08-27T07:04:56.000Z",
-      syncedAt: "2026-08-27T07:10:00.000Z",
+      syncedAt: "2026-08-29T00:00:00.000Z",
+      baseRef: "main",
+      mergeCommitSha: "36d0f23708adbdf911e4df050ed516821278a9fc",
+      mergedAt: "2026-08-27T07:04:52Z",
+      humanReview: { reviews: 1, comments: 1 },
     },
     followUps: [
       {
@@ -104,8 +111,17 @@ export function seedState(): FactoryState {
       reviewComments: 0,
       issueComments: 0,
       headSha: "09882b0075d7bb8f99a76c2526504b9194ce380d",
-      updatedAt: "2026-08-28T06:40:44.000Z",
-      syncedAt: "2026-08-28T10:30:00.000Z",
+      // The PR's own last activity, which is NOT its merge instant: GitHub stamps `updated_at` when
+      // the merge finishes writing, a beat after `merged_at`. Both values here were the merge
+      // instant, copied into the wrong field; re-read live 2026-08-29 (read-only GET) they are
+      // 06:40:45Z here and 11:30:08Z on orca-fleet#72.
+      updatedAt: "2026-08-28T06:40:45.000Z",
+      syncedAt: "2026-08-29T00:00:00.000Z",
+      baseRef: "main",
+      mergeCommitSha: "4375afc98341e6b991544df592f2b7fa7441ca7e",
+      mergedAt: "2026-08-28T06:40:44Z",
+      // Read live 2026-08-29: no reviews and no review comments at all. This is a `noReview` row.
+      humanReview: { reviews: 0, comments: 0 },
     },
     followUps: [
       {
@@ -164,8 +180,17 @@ export function seedState(): FactoryState {
       reviewComments: 0,
       issueComments: 0,
       headSha: "8c7068a5467a283de524c88e549dfa66782eeec2",
-      updatedAt: "2026-08-27T11:30:04.000Z",
-      syncedAt: "2026-08-28T10:30:00.000Z",
+      updatedAt: "2026-08-27T11:30:08.000Z",
+      syncedAt: "2026-08-29T00:00:00.000Z",
+      baseRef: "main",
+      // Note the ordering: this merge COMMIT is stamped 11:30:03Z, one second BEFORE `merged_at`,
+      // so a `since: mergedAt` read excludes it. Harmless — `classifyRevert` skips the merge commit
+      // anyway — but it is why "the read reaches the merge commit itself" is true of #70 and not of
+      // this one.
+      mergeCommitSha: "32050a009299df3608f5e67d9db3362c0a9ab4bb",
+      mergedAt: "2026-08-27T11:30:04Z",
+      // Read live 2026-08-29: no reviews and no review comments at all. This is a `noReview` row.
+      humanReview: { reviews: 0, comments: 0 },
     },
     followUps: [
       {
@@ -297,7 +322,16 @@ export function seedState(): FactoryState {
         ...row,
         opened: 2,
         merged: 2,
-        reviewCommentsAvg: 0.5,
+        // Derived from the two merged PRs, re-read live 2026-08-29 (issue #39), NOT typed:
+        //   #70 — 1 human review comment (the other was `greptile-apps[bot]`)  → in the denominator
+        //   #72 — no human review activity at all                              → noReview
+        // docs/08-operations.md computes the mean "only over PRs with ≥1 human review comment", so
+        // it is 1/1 = 1. The 0.5 that stood here was 1/2 — the merge-rate denominator, which is the
+        // wrong one — over a comment count that had counted a bot.
+        reviewCommentsAvg: 1,
+        humanReviewComments: 1,
+        humanReviewedPrs: 1,
+        noReview: 1,
         maintainerTone: "warm" as const,
         lastTouch: "2026-08-27",
       };
@@ -307,7 +341,10 @@ export function seedState(): FactoryState {
         ...row,
         opened: 1,
         merged: 1,
+        // #196 merged with no reviews and no review comments (live 2026-08-29): a silent merge.
+        // Nothing enters the mean's denominator; the row it belongs in is `noReview`.
         reviewCommentsAvg: 0,
+        noReview: 1,
         maintainerTone: "warm" as const,
         lastTouch: "2026-08-28",
       };

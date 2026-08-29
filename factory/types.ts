@@ -175,11 +175,29 @@ export interface PrMeta {
   merged: boolean;
   mergeable: string;
   commits: number;
+  /**
+   * GitHub's own `review_comments` total. It counts bots and names no author, so it is a record of
+   * what the platform said — NOT the `reviewCommentsAvg` input. Read `humanReview` for that.
+   */
   reviewComments: number;
   issueComments: number;
   headSha: string;
   updatedAt: string;
   syncedAt: string;
+  /** The PR's base branch, where a revert of our merge commit would land. */
+  baseRef?: string;
+  /** The commit a merge produced — the thing a `git revert` names. Absent until merged. */
+  mergeCommitSha?: string;
+  /** When the merge landed; the start of the 30-day revert window (docs/08-operations.md). */
+  mergedAt?: string;
+  /**
+   * Human (non-bot) review activity, read at a terminal outcome only.
+   *
+   * ABSENT means **not observed**, never "nobody reviewed it". The two are different facts and
+   * only one of them is a KPI; `applyPrSync` refuses to write `noReview` / `reviewCommentsAvg`
+   * when this is missing and says so out loud instead (issue #39).
+   */
+  humanReview?: { reviews: number; comments: number };
 }
 
 export interface TaskPacket {
@@ -276,8 +294,18 @@ export interface ScorecardRow {
   opened: number;
   merged: number;
   closedUnmerged: number;
-  /** Mean human (non-bot) review comments over PRs that received ≥1 human review comment. */
+  /**
+   * Mean human (non-bot) review comments over PRs that received ≥1 human review comment.
+   *
+   * Derived, never typed: it is exactly `humanReviewComments / humanReviewedPrs`, recomputed on
+   * every write. The sum and the denominator are stored beside it so the mean is auditable and so
+   * repeated updates cannot accumulate rounding error.
+   */
   reviewCommentsAvg: number;
+  /** Sum of human review comments over the PRs in the `reviewCommentsAvg` denominator. */
+  humanReviewComments: number;
+  /** The `reviewCommentsAvg` denominator: terminal PRs with ≥1 human review comment. */
+  humanReviewedPrs: number;
   /** Opened drafts that reached a terminal state with zero human review activity. */
   noReview: number;
   /** Explicit `git revert` of our merge commit (or maintainer-stated rollback naming the PR) within 30 days. Post-merge rework is not a revert. */

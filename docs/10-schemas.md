@@ -30,7 +30,10 @@ humanAttest       { by, at, note }  required before implement on Wave 1+
 evidence          EvidenceManifest
 prBody
 prUrl
-prMeta            { url, title, draft, state, merged, mergeable, commits, reviewComments, issueComments, headSha, updatedAt, syncedAt }
+prMeta            { url, title, draft, state, merged, mergeable, commits, reviewComments, issueComments, headSha, updatedAt, syncedAt,
+                    baseRef?, mergeCommitSha?, mergedAt?, humanReview?: { reviews, comments } }
+                  `humanReview` ABSENT means the review endpoints were not read — never "nobody reviewed it".
+                  `reviewComments` is GitHub's own total: it counts bots, so it is a record, not the KPI.
 followUps         [{ id, at, kind: review-reply|bot-reconcile|quiet|ci|note, body, url? }]
 sandboxSession
 ```

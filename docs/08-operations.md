@@ -151,10 +151,61 @@ Silence is the modal outcome for external agent PRs, so every KPI names its deno
   reached a terminal state with **zero** human review activity (a still-open silent draft is not yet
   counted; the silent share is `noReview / terminal outcomes`, the same denominator as merge rate).
   A low average from silence is not a low average from clean work.
+  - **Human review activity** = at least one review (a bare approval counts) **or** at least one
+    review comment, from a non-bot account. The two are counted separately, so a maintainer who
+    approves without typing anything is *not* `noReview` and is *not* in the average's denominator
+    either. Both are read at the terminal transition, from `GET /pulls/{n}/reviews` and
+    `GET /pulls/{n}/comments`; the PR object's own `review_comments` total counts bots and names no
+    author, so it is recorded but never used as the metric.
+  - **Non-bot** = GitHub's `user.type` is not `Bot`, the login does not end in `[bot]`, and the
+    login is not on `KNOWN_REVIEW_BOTS` (`factory/github-pr.ts`) — the short roster of review bots
+    this project has actually met, kept because a GitHub App installed as an ordinary account
+    carries neither of the first two signals. Substring matching is not used: a person may be
+    called `robotnik`.
+  - When the review endpoints cannot be read, the counters do **not** move and the ledger records
+    that they could not be computed. "We could not read it" is not "nobody reviewed it".
+  - **And that gap is recoverable, exactly once.** The counters are written on the terminal
+    transition — the tick that absorbs the merge or the first close — and that transition happens
+    once. A packet whose review endpoints were down for that one request used to be stranded at "not
+    observed" permanently, with its terminal outcome silently outside `noReview`'s denominator:
+    `applyPrSync` refuses a merged packet, so `sync` could not retry it, and nothing read the field
+    afterwards. `reconcile` now folds a later observation in, once, guarded on the packet's own
+    stored `prMeta.humanReview` — these are cumulative counters and a fold that ran every tick would
+    inflate them on its own. Until it is recovered, both `reconcile` and the clock print an
+    **advisory** naming the packet, because a rate over a population nobody was told was short is
+    the same defect as a zero nobody observed.
 - **Time-to-quiet** = open → last human activity (comment, review, or push).
 - **Revert** = an explicit `git revert` of our merge commit, or a maintainer-stated rollback naming
   the PR, within 30 days of merge. Post-merge edits/refactors of our code are **rework**, tracked as
   informational notes, never counted as reverts.
+  - The definition has two halves and so does its enforcement. The **mechanical** half — a commit on
+    the base branch whose message says `This reverts commit <our merge commit>` inside the 30-day
+    window — is found without a human: `verify-ledger` (the 6-hour clock) fails the run while the
+    ledger still records no revert, and `reconcile` records it and stops the repo. The **prose**
+    half — a maintainer-stated rollback — is `revert <packetId> --reason <text>`, where the reason
+    is mandatory and stored verbatim. Nothing else can set `reverts`, and one revert is counted per
+    packet: `health()` already stops the repo at one, so a second would only inflate the number.
+  - The mechanical half reads `GET /repos/{o}/{r}/commits?since=<mergedAt>&until=<mergedAt+30d>`
+    **through GitHub's own `Link: rel="next"` cursor**, up to a cap of 10 pages (1000 commits).
+    GitHub serves commits newest-first, so a single-page read hides the window that opens *at the
+    merge* — the window a revert is most likely to land in. If the cap is reached, the check says so
+    as an advisory rather than reporting a clean base branch: a capped read and a complete one
+    otherwise return the same verdict, and a short read that reads as `ledger ok` would silently
+    disable the halt above.
+  - **Both ends of the window are bounded, and the far end is the classifier's own deadline.**
+    `since` alone reads `[merge, now]`, which grows a day every day and never closes, while a revert
+    past 30 days is discarded anyway — so the extra pages are fetched and thrown away, and on a busy
+    base branch the read eventually exceeds the cap and emits a truncation advisory *forever*, about
+    a window that closed a month earlier and that nothing can clear. `until` makes the read a fixed
+    width from the day it opens. There is deliberately no expiry on the re-check itself: with the
+    bound in place it is cheap, and an expiry would mean a revert first observed after day 30 — with
+    the clock down, say — is never seen at all.
+  - **Clearing a revert the clock has found takes a seed edit.** `reconcile` and `revert` write
+    `.foundry-state.json`, which is gitignored and which `verify-ledger` never reads — it reads the
+    committed seed. Record the revert with those verbs, then promote it into `factory/seed.ts` and
+    regenerate the block in `docs/12-ledger.md`. Do **not** reach for `allowlist.yaml`: scorecard
+    rows are built from the roster, so removing a repo there deletes the row that holds `reverts`
+    and destroys the record instead of clearing it.
 - **Bans** (must stay 0) = scorecard tone `banned`: a maintainer asked the factory to stop.
 
 PR volume is a vanity metric and is not shown as a success KPI.

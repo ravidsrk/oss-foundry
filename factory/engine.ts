@@ -5,7 +5,15 @@ import { factoryHalt } from "./halt.ts";
 import { AGENT_NAME_RE, commitTrailerLine, DISCLOSURE, type DisclosureTrailer } from "./neighbor.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { planSandbox, runSandboxDry } from "./sandbox.ts";
-import { applyPacketToScorecard, health, scorecardRow } from "./scorecard.ts";
+import {
+  applyPacketToScorecard,
+  applyReviewToScorecard,
+  health,
+  isTerminalReviewSubject,
+  REVERT_NOTE_PREFIX,
+  revertNote,
+  scorecardRow,
+} from "./scorecard.ts";
 import { foundryAttestedWave0Merges } from "./status.ts";
 import {
   INFLIGHT_STATUSES,
@@ -968,6 +976,65 @@ function followUpEntry(at: string, kind: FollowUpEntry["kind"], body: string, ur
 }
 
 /**
+ * Write the two review KPIs for a packet that just reached a terminal outcome (issue #39).
+ *
+ * Called from BOTH terminal transitions in `applyPrSync` — merged and closedUnmerged — because
+ * docs/08-operations.md defines `noReview` and `reviewCommentsAvg` over terminal outcomes, both
+ * buckets. Each call site pushes its own event, so which transition wrote the row is legible in
+ * the ledger and a dropped call site is a missing sentence, not a silent zero.
+ *
+ * The three outcomes are worded so that no two of them can satisfy the same assertion: silence
+ * ("no human review"), comments ("reviewCommentsAvg now …"), a bare approval ("no review
+ * comment"), and the unread case ("Human review not observed"). A test that means one of them
+ * cannot pass on another.
+ */
+function recordTerminalReview(
+  scorecard: ScorecardRow[],
+  packet: TaskPacket,
+  meta: PrMeta,
+  events: FactoryEvent[],
+  id: string,
+): ScorecardRow[] {
+  const observed = meta.humanReview;
+  if (!observed) {
+    events.push(
+      ev(
+        "follow-up",
+        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}; run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ...")`,
+        id,
+      ),
+    );
+    return scorecard;
+  }
+  const next = applyReviewToScorecard(scorecard, packet.repoId, observed);
+  if (observed.reviews === 0 && observed.comments === 0) {
+    events.push(
+      ev("follow-up", `Terminal with no human review on ${meta.url} — noReview +1 for ${packet.repoId}`, id),
+    );
+    return next;
+  }
+  if (observed.comments >= 1) {
+    const row = scorecardRow(next, packet.repoId);
+    events.push(
+      ev(
+        "follow-up",
+        `${observed.comments} human review comment(s) on ${meta.url} — reviewCommentsAvg now ${row?.reviewCommentsAvg ?? 0} over ${row?.humanReviewedPrs ?? 0} reviewed PR(s) for ${packet.repoId}`,
+        id,
+      ),
+    );
+    return next;
+  }
+  events.push(
+    ev(
+      "follow-up",
+      `Human review with no review comment on ${meta.url} — review activity recorded for ${packet.repoId}; neither noReview nor the reviewCommentsAvg denominator moves`,
+      id,
+    ),
+  );
+  return next;
+}
+
+/**
  * Apply a live PR sync to a submitted/followed-up packet.
  * merged → terminal + scorecard `merged`. closed unmerged → followed-up + scorecard `closedUnmerged`.
  * open: answered threads + ≥QUIET_RELEASE_DAYS quiet releases the in-flight slot; new maintainer
@@ -995,6 +1062,7 @@ export function applyPrSync(
     // Reachable only from submitted/followed-up; the merged status blocks re-entry, so this fires once.
     next = bump(next, { status: "merged", station: "terminal" });
     scorecard = applyPacketToScorecard(scorecard, packet, "merged");
+    scorecard = recordTerminalReview(scorecard, packet, meta, events, id);
     mergedNow = true;
     events.push(ev("follow-up", `Merged by maintainers — ${meta.url}`, id));
   } else if (meta.state === "closed") {
@@ -1004,6 +1072,7 @@ export function applyPrSync(
     const firstClose = packet.prMeta?.state !== "closed";
     if (firstClose) {
       scorecard = applyPacketToScorecard(scorecard, packet, "closed");
+      scorecard = recordTerminalReview(scorecard, packet, meta, events, id);
       events.push(ev("follow-up", `Closed unmerged — scorecard closedUnmerged written for ${packet.repoId}`, id));
     }
   } else {
@@ -1114,4 +1183,154 @@ export function commitTrailerViolation(
     }
   }
   return undefined;
+}
+
+/**
+ * Record a revert of a merged packet — the producer `reverts` never had (issue #39).
+ *
+ * SPEC.md §7 makes halting a repository on "any revert of the operator's patch" a MUST, and
+ * `health()` has always turned `reverts > 0` into an unconditional `stop`. Nothing could ever set
+ * it. This is the one way in, and it has two callers because docs/08-operations.md's definition of
+ * a revert has two halves:
+ *
+ *   - `source: "commit"` — `reconcile` matched an explicit `git revert` of our merge commit on the
+ *     base branch inside the 30-day window (`classifyRevert`). Mechanical, unattended.
+ *   - `source: "operator"` — a human read "a maintainer-stated rollback naming the PR" and typed
+ *     `revert`. Prose; no classifier should pretend to read it.
+ *
+ * Counted at most once per packet. The KPI is `reverts = 0` and one already stops the repo, so a
+ * second recording of the same rollback would change no decision and only inflate the number.
+ *
+ * The halt is the scorecard `stop` (`maySelectRepo` refuses the repo from here on), and the only
+ * thing that lifts it is a human editing the scorecard row — in live state, and in `factory/seed.ts`
+ * for the published one. Emphatically NOT `allowlist.yaml`: `emptyScorecard()` builds its rows from
+ * `ALLOWLIST`, so pulling the repo off the roster deletes the row that holds `reverts` and destroys
+ * the record instead of clearing it.
+ *
+ * In-flight packets are deliberately NOT parked the way `applyHalt` parks them. A maintainer asking
+ * us to stop is a statement about our open drafts; a revert is a statement about one merged commit.
+ * And parking here would manufacture a red: `packetChecks` makes a parked packet whose PR is still
+ * open on GitHub a FATAL divergence (ledger-check.ts, "an abandoned live PR"), so auto-parking would
+ * put every in-flight packet on this repo into that state without anyone having closed anything.
+ * Closing a draft stays a human act — `park` itself only sets `status: "parked"` and never touches
+ * the PR.
+ */
+export function applyRevert(
+  state: FactoryState,
+  id: string,
+  input: { source: "commit" | "operator"; why: string; sha?: string; at?: string },
+): { state: FactoryState; error?: string; recorded?: boolean } {
+  const packet = state.packets.find((p) => p.id === id);
+  if (!packet) return { state, error: `unknown packet ${id}`, recorded: false };
+  if (packet.status !== "merged") {
+    return {
+      state,
+      error: `cannot record a revert on status ${packet.status} — a revert is of a merge, and ${id} was never merged`,
+      recorded: false,
+    };
+  }
+  const already = revertNote(packet);
+  if (already) return { state, recorded: false };
+  const at = input.at ?? now();
+  const detail = input.sha ? `${input.sha.slice(0, 12)} — ${input.why}` : input.why;
+  const note = followUpEntry(at, "note", `${REVERT_NOTE_PREFIX} (${input.source}) ${detail}`, packet.prUrl);
+  const next = bump(packet, { followUps: [...(packet.followUps ?? []), note] });
+  const scorecard = applyPacketToScorecard(state.scorecard, packet, "reverted");
+  const withPacket: FactoryState = {
+    ...state,
+    packets: state.packets.map((p) => (p.id === id ? next : p)),
+    scorecard,
+  };
+  return {
+    state: appendEvent(
+      withPacket,
+      ev(
+        "score",
+        `REVERT recorded (${input.source}) on ${packet.repoId} for ${id}: ${detail}. SPEC.md §7 — the repo is now a scorecard stop (health() gates on reverts > 0) and stays unselectable while the ledger records it; only a human editing the scorecard row in factory/seed.ts changes that. NOT allowlist.yaml: the scorecard rows are built from the roster, so removing the repo there deletes this row and erases the revert with it.`,
+        id,
+      ),
+    ),
+    recorded: true,
+  };
+}
+
+/**
+ * Recover the two review KPIs for a packet that reached a terminal outcome without them
+ * (issue #39 round 3).
+ *
+ * **Why this exists.** `recordTerminalReview` is called from exactly two places, both inside
+ * `applyPrSync`'s terminal *transition* branches, and `applyPrSync` refuses any packet whose status
+ * is not `submitted`/`followed-up`. So the KPI has exactly one chance to be written: the tick that
+ * absorbs the merge (or the first close). If GitHub's review endpoints were down for that one
+ * request, `meta.humanReview` arrived ABSENT, `recordTerminalReview` correctly declined to invent a
+ * zero — and nothing could ever fill it in. `reconcile` skips merged packets when it calls
+ * `applyPrSync`; the clock never reads `humanReview` at all. The 2 requests/PR that
+ * `fetchHumanReview` spends on every already-terminal PR, every tick, had no consumer whatsoever
+ * for the merged case, which is 3 of the 4 seeded packets. This is that consumer.
+ *
+ * **Why it cannot double-count.** The two scorecard fields are cumulative counters, so a
+ * level-triggered writer that ran every tick would inflate them forever — the exact bug
+ * `applyPrSync`'s `firstClose` guard exists to prevent for `closedUnmerged`. The guard here is the
+ * packet's own record: the observation is written into `prMeta.humanReview` (a snapshot, not a
+ * counter) and this refuses to run at all when one is already there. So the fold into the scorecard
+ * happens at most once per packet, keyed on a fact stored beside the packet rather than on a
+ * transition nobody can replay.
+ *
+ * **Both terminal halves, one predicate — and it is SHARED.** `recordTerminalReview` fires on merged
+ * AND on the first close, because docs/08-operations.md defines `noReview`/`reviewCommentsAvg` over
+ * terminal outcomes, both buckets. A closed-unmerged packet is stranded by the same mechanism (after
+ * the close is absorbed, `prMeta.state === "closed"` makes `firstClose` false forever). The
+ * condition is `isTerminalReviewSubject`, the same function `packetChecks` reports from, so this
+ * writer and that reporter cannot drift into disagreeing about which packets are in the population.
+ *
+ * The write lands in `.foundry-state.json`, which is gitignored and which the 6-hour clock never
+ * reads. Clearing the clock's advisory still takes the documented promotion into `factory/seed.ts`,
+ * exactly like a recorded revert.
+ */
+export function applyReviewObservation(
+  state: FactoryState,
+  id: string,
+  observed: { reviews: number; comments: number },
+): { state: FactoryState; error?: string; recorded?: boolean } {
+  const packet = state.packets.find((p) => p.id === id);
+  if (!packet) return { state, error: `unknown packet ${id}`, recorded: false };
+  const meta = packet.prMeta;
+  if (!meta) {
+    return {
+      state,
+      error: `cannot record a review observation on ${id} — it has no recorded PR to attach one to`,
+      recorded: false,
+    };
+  }
+  if (!isTerminalReviewSubject(packet)) {
+    return {
+      state,
+      error: `cannot record a review observation on ${id} — its PR is still open, and noReview/reviewCommentsAvg are defined over terminal outcomes only`,
+      recorded: false,
+    };
+  }
+  // Already observed. Not an error — the common case, every tick, forever — and emphatically not a
+  // re-fold: these are cumulative counters and this is the only thing standing between them and a
+  // count that grows once every six hours.
+  if (meta.humanReview) return { state, recorded: false };
+
+  const next = bump(packet, { prMeta: { ...meta, humanReview: observed } });
+  const scorecard = applyReviewToScorecard(state.scorecard, packet.repoId, observed);
+  const withPacket: FactoryState = {
+    ...state,
+    packets: state.packets.map((p) => (p.id === id ? next : p)),
+    scorecard,
+  };
+  const row = scorecardRow(scorecard, packet.repoId);
+  return {
+    state: appendEvent(
+      withPacket,
+      ev(
+        "score",
+        `Human review recovered for ${id} on ${packet.repoId}: ${observed.reviews} review(s), ${observed.comments} comment(s) — the terminal transition recorded none, so the KPI was outside noReview and reviewCommentsAvg until now. noReview=${row?.noReview ?? 0}, reviewCommentsAvg=${row?.reviewCommentsAvg ?? 0} over ${row?.humanReviewedPrs ?? 0} reviewed PR(s). This wrote local state only, and .foundry-state.json is gitignored: promote it into factory/seed.ts or the 6-hour clock keeps reading a seed that never observed it.`,
+        id,
+      ),
+    ),
+    recorded: true,
+  };
 }

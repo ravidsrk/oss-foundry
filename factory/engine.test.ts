@@ -14,8 +14,10 @@ import {
   applyAttachEvidence,
   applyHalt,
   applyPrSync,
+  applyReviewObservation,
   applyQueueLive,
   applyReject,
+  applyRevert,
   applyTick,
   bindingFromCompare,
   branchMentionsIssue,
@@ -47,7 +49,16 @@ import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { runSandboxDry } from "./sandbox.ts";
-import { applyPacketToScorecard, emptyScorecard, health } from "./scorecard.ts";
+import {
+  applyPacketToScorecard,
+  applyReviewToScorecard,
+  classifyRevert,
+  isTerminalReviewSubject,
+  emptyScorecard,
+  health,
+  revertNote,
+  scorecardRow,
+} from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
@@ -1536,7 +1547,14 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
 test("an absorbed close is at rest: reconcile-style re-diff reports no divergence", () => {
   const state = seedState();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
-  const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
+  // A close a real sync absorbed, which means the review endpoints answered: `syncGithubPr` reads
+  // them for any terminal PR, and `recordTerminalReview` folds the result into the scorecard on the
+  // closedUnmerged transition. A fixture that omits it is not an absorbed close — it is an absorbed
+  // close with a hole in it, which is the subject of the second half of this test.
+  const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", {
+    state: "closed",
+    humanReview: { reviews: 1, comments: 2 },
+  });
   const absorbed = applyPrSync(state, submitted.id, closedMeta, {
     threadsAnswered: false,
     at: "2026-09-02T00:00:00.000Z",
@@ -1552,6 +1570,30 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
   assert.deepEqual(packetDivergences(after, live), []);
   const unabsorbed = packetDivergences(submitted, live);
   assert.equal(unabsorbed.some((d) => d.includes(`sync ${submitted.id}`)), true);
+
+  // The same absorbed close with the review endpoints down for that one request (issue #39 round
+  // 3). `recordTerminalReview` correctly refuses to write a zero it never saw, so the scorecard
+  // counts the closedUnmerged and excludes it from noReview's denominator — a KPI computed over a
+  // population nobody was told was short. It is still not a DIVERGENCE (the ledger contradicts
+  // nothing GitHub says), and it must not be silent either.
+  const blindMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
+  const blind = applyPrSync(state, submitted.id, blindMeta, {
+    threadsAnswered: false,
+    at: "2026-09-02T00:00:00.000Z",
+  });
+  const unobserved = blind.state.packets.find((p) => p.id === submitted.id)!;
+  const checks = packetChecks(unobserved, live);
+  assert.deepEqual(checks.fatal, [], "an unobserved review KPI is not the ledger contradicting GitHub");
+  assert.equal(
+    checks.advisory.some((a) => a.includes(submitted.id) && /no human-review observation/.test(a)),
+    true,
+    `a terminal outcome outside the KPI's denominator must be said out loud:\n${checks.advisory.join("\n")}`,
+  );
+  // And the control: the observed close above raises no such line, or the advisory means nothing.
+  assert.equal(
+    packetChecks(after, live).advisory.some((a) => /no human-review observation/.test(a)),
+    false,
+  );
 });
 
 test("a rejected packet with a still-open PR never rots invisibly in the ledger check", () => {
@@ -3656,4 +3698,657 @@ test("tick skips a closed named issue and records why, without consuming the row
     "ravidsrk/orca-fleet#71",
     "with the issue open again the same row is selectable, no hand edit required",
   );
+});
+
+/* ------------------------------------------------------------------------------------------- *
+ * issue #39 — the three 90-day KPIs that no code path could compute.
+ * ------------------------------------------------------------------------------------------- */
+
+test("applyReviewToScorecard writes noReview only on zero human review activity", () => {
+  const repo = "ravidsrk/orca-fleet";
+  const silent = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 0, comments: 0 });
+  const row = scorecardRow(silent, repo)!;
+  assert.equal(row.noReview, 1, "a terminal PR nobody human reviewed is the noReview counter");
+  assert.equal(row.humanReviewedPrs, 0, "silence is not a review-comment observation");
+  assert.equal(row.reviewCommentsAvg, 0);
+
+  // A bare approval is review ACTIVITY with no review COMMENT: it is not noReview, and it is not
+  // in the reviewCommentsAvg denominator either. Collapsing the two counts loses exactly this row.
+  const approved = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 1, comments: 0 });
+  const approvedRow = scorecardRow(approved, repo)!;
+  assert.equal(approvedRow.noReview, 0, "a human approved it — that is review activity");
+  assert.equal(approvedRow.humanReviewedPrs, 0, "an approval with no comment is not a comment");
+});
+
+test("reviewCommentsAvg is a mean over PRs with ≥1 human review comment, not over all terminal PRs", () => {
+  const repo = "ravidsrk/orca-fleet";
+  // The live shape of ravidsrk/orca-fleet on 2026-08-29: #70 drew one human review comment, #72
+  // drew none. The documented denominator is PRs with ≥1 human review comment — so the mean is
+  // 1/1 = 1, NOT the 1/2 = 0.5 that was typed into the seed by hand.
+  let rows = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 1, comments: 1 });
+  rows = applyReviewToScorecard(rows, repo, { reviews: 0, comments: 0 });
+  const row = scorecardRow(rows, repo)!;
+  assert.equal(row.humanReviewComments, 1);
+  assert.equal(row.humanReviewedPrs, 1);
+  assert.equal(row.reviewCommentsAvg, 1, "the silent PR is counted by noReview, not by the mean");
+  assert.equal(row.noReview, 1);
+
+  // Two reviewed PRs, 1 and 4 comments → mean 2.5. Exact, because the mean is recomputed from the
+  // stored sum and denominator rather than folded into itself.
+  let more = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 1, comments: 1 });
+  more = applyReviewToScorecard(more, repo, { reviews: 1, comments: 4 });
+  assert.equal(scorecardRow(more, repo)!.reviewCommentsAvg, 2.5);
+  assert.equal(scorecardRow(more, repo)!.humanReviewComments, 5);
+  assert.equal(scorecardRow(more, repo)!.humanReviewedPrs, 2);
+});
+
+test("an unobserved review split moves no counter at all", () => {
+  const repo = "ravidsrk/orca-fleet";
+  const rows = applyReviewToScorecard(emptyScorecard(), repo, undefined);
+  const row = scorecardRow(rows, repo)!;
+  assert.equal(row.noReview, 0, "'we could not read it' is not 'nobody reviewed it'");
+  assert.equal(row.humanReviewedPrs, 0);
+  assert.equal(row.reviewCommentsAvg, 0);
+});
+
+test("classifyRevert names the reverting commit, and only inside the 30-day window", () => {
+  const merge = "36d0f23708adbdf911e4df050ed516821278a9fc";
+  const mergedAt = "2026-08-27T07:04:52Z";
+
+  const hit = classifyRevert({
+    mergeCommitSha: merge,
+    mergedAt,
+    commits: [
+      {
+        sha: "ffff1110000000000000000000000000000000aa",
+        message: `Revert "fix validator"\n\nThis reverts commit ${merge}.`,
+        committedAt: "2026-08-28T09:00:00Z",
+      },
+    ],
+  });
+  assert.equal(hit.reverted, true);
+  if (hit.reverted) {
+    assert.equal(hit.sha, "ffff1110000000000000000000000000000000aa");
+    assert.equal(hit.at, "2026-08-28T09:00:00Z");
+  }
+
+  // git abbreviates in a hand-written revert body; a prefix of our merge commit still names it.
+  const abbreviated = classifyRevert({
+    mergeCommitSha: merge,
+    mergedAt,
+    commits: [{ sha: "aaaa111", message: "This reverts commit 36d0f237.", committedAt: "2026-08-28T09:00:00Z" }],
+  });
+  assert.equal(abbreviated.reverted, true);
+
+  // docs/08-operations.md: "Post-merge edits/refactors of our code are rework, tracked as
+  // informational notes, never counted as reverts." Rework is excluded structurally — nothing but
+  // a commit naming our merge commit can ever reach the counter.
+  const rework = classifyRevert({
+    mergeCommitSha: merge,
+    mergedAt,
+    commits: [
+      { sha: "bbbb222", message: "refactor the validator introduced in #70", committedAt: "2026-08-28T09:00:00Z" },
+      { sha: "cccc333", message: "This reverts commit 0123456789abcdef0123456789abcdef01234567.", committedAt: "2026-08-28T09:00:00Z" },
+    ],
+  });
+  assert.equal(rework.reverted, false);
+  if (!rework.reverted) assert.match(rework.why, /no commit/i);
+
+  // 31 days out: the definition names 30, so this is not a revert and must say why.
+  const late = classifyRevert({
+    mergeCommitSha: merge,
+    mergedAt,
+    commits: [{ sha: "dddd444", message: `This reverts commit ${merge}.`, committedAt: "2026-09-27T09:00:00Z" }],
+  });
+  assert.equal(late.reverted, false);
+  if (!late.reverted) assert.match(late.why, /30-day/);
+
+  // The merge commit cannot revert itself, and nothing before the merge can revert it.
+  const self = classifyRevert({
+    mergeCommitSha: merge,
+    mergedAt,
+    commits: [{ sha: merge, message: `This reverts commit ${merge}.`, committedAt: mergedAt }],
+  });
+  assert.equal(self.reverted, false);
+});
+
+test("applyPrSync writes noReview on the merge transition and names the packet it read", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const before = scorecardRow(state.scorecard, submitted.repoId)!.noReview;
+  const merged = applyPrSync(
+    state,
+    submitted.id,
+    prMetaAt("2026-09-01T00:00:00.000Z", {
+      merged: true,
+      state: "closed",
+      humanReview: { reviews: 0, comments: 0 },
+    }),
+    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+  );
+  assert.equal(merged.error, undefined);
+  const row = scorecardRow(merged.state.scorecard, submitted.repoId)!;
+  assert.equal(row.noReview, before + 1);
+  assert.equal(row.humanReviewedPrs, 0);
+  const said = merged.state.events.find((e) => e.message.includes("no human review"));
+  assert.ok(said, `the merge must say what it recorded:\n${merged.state.events.map((e) => e.message).join("\n")}`);
+  assert.equal(said!.packetId, submitted.id);
+  assert.match(said!.message, /noReview/);
+});
+
+test("applyPrSync folds review comments into the mean on the closedUnmerged transition", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const closed = applyPrSync(
+    state,
+    submitted.id,
+    prMetaAt("2026-09-01T00:00:00.000Z", {
+      state: "closed",
+      humanReview: { reviews: 2, comments: 3 },
+    }),
+    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+  );
+  assert.equal(closed.error, undefined);
+  const row = scorecardRow(closed.state.scorecard, submitted.repoId)!;
+  assert.equal(row.closedUnmerged, 1);
+  assert.equal(row.humanReviewComments, 3);
+  assert.equal(row.humanReviewedPrs, 1);
+  assert.equal(row.reviewCommentsAvg, 3);
+  assert.equal(row.noReview, 0, "three human review comments is not silence");
+  assert.ok(
+    closed.state.events.some((e) => /reviewCommentsAvg now 3 over 1 reviewed PR/.test(e.message)),
+    `the close must say what it recorded, in words the not-observed branch cannot also produce:\n${closed.state.events.map((e) => e.message).join("\n")}`,
+  );
+
+  // Edge-triggered like closedUnmerged itself: re-syncing an already-closed PR must not inflate
+  // the mean's denominator.
+  const again = applyPrSync(
+    closed.state,
+    submitted.id,
+    prMetaAt("2026-09-03T00:00:00.000Z", { state: "closed", humanReview: { reviews: 2, comments: 3 } }),
+    { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" },
+  );
+  const twice = scorecardRow(again.state.scorecard, submitted.repoId)!;
+  assert.equal(twice.humanReviewedPrs, 1, "a second sync of the same close is not a second PR");
+  assert.equal(twice.humanReviewComments, 3);
+});
+
+test("a terminal transition with no observed review split records nothing and says so", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const merged = applyPrSync(
+    state,
+    submitted.id,
+    prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }),
+    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+  );
+  const row = scorecardRow(merged.state.scorecard, submitted.repoId)!;
+  assert.equal(row.noReview, 0, "an unread endpoint must not be recorded as silence");
+  assert.equal(row.humanReviewedPrs, 0);
+  const messages = merged.state.events.map((e) => e.message);
+  assert.ok(
+    messages.some((m) => m.includes("Human review not observed")),
+    `the gap must be stated, not skipped silently:\n${messages.join("\n")}`,
+  );
+  // And it must NOT be confusable with the real thing: the recorded-silence wording is absent.
+  assert.equal(
+    messages.some((m) => m.includes("no human review")),
+    false,
+    "'not observed' must not be reported with the same words as 'nobody reviewed it'",
+  );
+  // The remedy it names has to be one that works (issue #39 round 3). This line said "re-sync",
+  // and `sync` routes through `applyPrSync`, whose status guard answers `cannot sync PR from
+  // status merged` — the operator was being sent at a verb that refuses the packet by design. The
+  // same defect class this unit had already fixed once, reintroduced in the commit that fixed it.
+  const gap = messages.find((m) => m.includes("Human review not observed"))!;
+  assert.match(gap, /run `reconcile`/, `the advice must name the verb that recovers it:\n${gap}`);
+  assert.equal(
+    /re-sync/.test(gap),
+    false,
+    `\`sync\` refuses a terminal packet, so naming it is advice that cannot be followed:\n${gap}`,
+  );
+  // Not a claim about the wording — a claim about the verb. `sync` really does refuse this packet.
+  const refused = applyPrSync(
+    merged.state,
+    submitted.id,
+    prMetaAt("2026-09-03T00:00:00.000Z", { merged: true, state: "closed" }),
+    { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" },
+  );
+  assert.match(
+    refused.error ?? "",
+    /cannot sync PR from status merged/,
+    "if this ever starts succeeding, the advice above should change back",
+  );
+  // And `reconcile`'s writer is the one that does work on the very same packet.
+  const recovered = applyReviewObservation(merged.state, submitted.id, { reviews: 1, comments: 2 });
+  assert.equal(recovered.error, undefined, recovered.error);
+  assert.equal(recovered.recorded, true, "the named remedy must actually move the KPI");
+  assert.equal(scorecardRow(recovered.state.scorecard, submitted.repoId)!.humanReviewedPrs, 1);
+});
+
+test("the review-KPI writer and reporter share one predicate, so they cannot disagree", () => {
+  // Three times in issue #39 one consumer of a fact was pinned and its sibling was not. The
+  // structural answer is that `applyReviewObservation` (which WRITES a cumulative counter) and
+  // `packetChecks` (which REPORTS the gap) ask `isTerminalReviewSubject` rather than each carrying
+  // a hand-written copy of "is this packet in the KPI's population". This asserts the agreement on
+  // the case where two plausible hand-written copies come apart: a packet whose PR someone else
+  // closed, which this ledger never absorbed and never counted as a terminal outcome.
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const rejected = applyReject(state, submitted.id, "operator mis-typed reject").state;
+  const packet = rejected.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(packet.status, "rejected");
+  assert.equal(packet.prMeta?.state, "open", "the ledger never absorbed a close for this packet");
+
+  // The predicate says no...
+  assert.equal(isTerminalReviewSubject(packet), false);
+  // ...so the writer refuses to fold it into `noReview`'s denominator, even though GitHub says the
+  // PR is closed. A fold here would count a terminal outcome the scorecard never recorded.
+  const wrote = applyReviewObservation(rejected, packet.id, { reviews: 0, comments: 0 });
+  assert.match(wrote.error ?? "", /still open/);
+  assert.deepEqual(wrote.state.scorecard, rejected.scorecard);
+  // ...and the reporter stays quiet about it, on the same GitHub answer.
+  const closedLive = {
+    state: "closed" as const,
+    merged: false,
+    draft: packet.prMeta!.draft,
+    headSha: packet.prMeta!.headSha,
+    body: VERBATIM_BODY,
+  };
+  assert.equal(
+    packetChecks(packet, closedLive).advisory.some((a) => /no human-review observation/.test(a)),
+    false,
+    "nagging about a denominator this packet was never in is noise on the channel",
+  );
+
+  // And the complement, so neither half above passes by being uniformly silent: once the ledger
+  // HAS absorbed a terminal outcome, the predicate says yes, the reporter speaks, and the writer
+  // accepts. Same packet, same live answer — only the stored meta changed.
+  const absorbed = {
+    ...rejected,
+    packets: rejected.packets.map((p) =>
+      p.id === packet.id ? { ...p, prMeta: { ...p.prMeta!, state: "closed" as const } } : p,
+    ),
+  };
+  const now = absorbed.packets.find((p) => p.id === packet.id)!;
+  assert.equal(isTerminalReviewSubject(now), true);
+  assert.equal(
+    packetChecks(now, closedLive).advisory.some((a) => /no human-review observation/.test(a)),
+    true,
+  );
+  assert.equal(applyReviewObservation(absorbed, now.id, { reviews: 0, comments: 0 }).recorded, true);
+});
+
+test("a merge sha too short to identify a commit is not matched against, it is refused", () => {
+  // `classifyRevert` matches by prefix in BOTH directions — `merge.startsWith(named) ||
+  // named.startsWith(merge)` — because a `git revert` message may abbreviate the sha it names. That
+  // is what makes a too-short recorded sha dangerous rather than merely useless: with `mergeCommitSha
+  // = "a"`, every revert commit on the base branch that names any sha beginning with `a` matches,
+  // and SPEC.md §7 halts a repository on a revert of somebody else's patch. The length guard is the
+  // only thing stopping it, and it deleted green.
+  const commits = [
+    {
+      sha: "ffff1110000000000000000000000000000000aa",
+      message: 'Revert "someone else\'s change"\n\nThis reverts commit abcdef1234567.',
+      committedAt: "2026-08-28T09:00:00Z",
+    },
+  ];
+  const tooShort = classifyRevert({ mergeCommitSha: "abcdef", mergedAt: "2026-08-27T07:04:52Z", commits });
+  assert.equal(tooShort.reverted, false, "six characters cannot identify a commit");
+  assert.match(tooShort.why, /nothing to revert/, `it must refuse, not silently not-match:\n${tooShort.why}`);
+  // The control: one more character and the very same input is a match, so the refusal above is
+  // about the LENGTH and not about the fixture failing to match for some other reason.
+  const longEnough = classifyRevert({ mergeCommitSha: "abcdef1", mergedAt: "2026-08-27T07:04:52Z", commits });
+  assert.equal(longEnough.reverted, true, "seven characters is git's own abbreviation floor");
+});
+
+test("applyReviewObservation refuses everything that is not a one-time terminal recovery", () => {
+  // The recovery writer folds into CUMULATIVE counters and runs on every reconcile, forever. Its
+  // refusals are the only thing between `noReview`/`reviewCommentsAvg` and a KPI that grows once
+  // every six hours on its own, so each refusal is asserted rather than assumed.
+  const state = seedState();
+  const merged = state.packets.find((p) => p.status === "merged")!;
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+
+  assert.match(
+    applyReviewObservation(state, "pkt_nope", { reviews: 1, comments: 1 }).error ?? "",
+    /unknown packet/,
+  );
+
+  // An OPEN PR: `noReview` and `reviewCommentsAvg` are defined over terminal outcomes only, so
+  // folding one in would put a PR still under review into a mean of finished ones.
+  const open = applyReviewObservation(state, submitted.id, { reviews: 1, comments: 1 });
+  assert.match(open.error ?? "", /still open/);
+  assert.equal(open.recorded, false);
+
+  // A packet with no PR at all has nothing to attach an observation to.
+  const parked = state.packets.find((p) => p.status === "parked")!;
+  assert.match(
+    applyReviewObservation(state, parked.id, { reviews: 1, comments: 1 }).error ?? "",
+    /no recorded PR/,
+  );
+
+  // Already observed: a no-op, and NOT an error — this is the common case on every tick forever.
+  const again = applyReviewObservation(state, merged.id, { reviews: 9, comments: 9 });
+  assert.equal(again.error, undefined);
+  assert.equal(again.recorded, false, "a second fold would inflate a cumulative counter");
+  assert.deepEqual(again.state.scorecard, state.scorecard, "and it must not have touched the row");
+
+  // The one path that does work, and its guard closing behind it.
+  const blind = {
+    ...state,
+    packets: state.packets.map((p) =>
+      p.id === merged.id ? { ...p, prMeta: { ...p.prMeta!, humanReview: undefined } } : p,
+    ),
+  };
+  const before = scorecardRow(blind.scorecard, merged.repoId)!;
+  const first = applyReviewObservation(blind, merged.id, { reviews: 1, comments: 2 });
+  assert.equal(first.recorded, true);
+  const after = scorecardRow(first.state.scorecard, merged.repoId)!;
+  assert.equal(after.humanReviewedPrs, before.humanReviewedPrs + 1);
+  assert.equal(after.humanReviewComments, before.humanReviewComments + 2);
+  assert.equal(applyReviewObservation(first.state, merged.id, { reviews: 1, comments: 2 }).recorded, false);
+  // The event says where the number has to be promoted to, because local state is gitignored.
+  assert.match(
+    first.state.events.map((e) => e.message).join("\n"),
+    /Human review recovered .*factory\/seed\.ts/s,
+  );
+});
+
+test("applyRevert is the producer reverts never had: it counts, it stops the repo, it counts once", () => {
+  const state = seedState();
+  const mergedPacket = state.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_42")!;
+  assert.equal(repoHealth(state.scorecard, mergedPacket.repoId), "good");
+
+  const recorded = applyRevert(state, mergedPacket.id, {
+    source: "commit",
+    sha: "ffff1110000000000000000000000000000000aa",
+    why: 'ffff111 on main reverts our merge commit 36d0f237 ("Revert \\"fix validator\\"")',
+    at: "2026-08-28T09:00:00.000Z",
+  });
+  assert.equal(recorded.error, undefined);
+  assert.equal(recorded.recorded, true);
+  const row = scorecardRow(recorded.state.scorecard, mergedPacket.repoId)!;
+  assert.equal(row.reverts, 1);
+  // SPEC.md §7: a repository MUST halt on any revert of the operator's patch.
+  assert.equal(repoHealth(recorded.state.scorecard, mergedPacket.repoId), "stop");
+  assert.equal(maySelectRepo(recorded.state, mergedPacket.repoId).ok, false);
+  const after = recorded.state.packets.find((p) => p.id === mergedPacket.id)!;
+  assert.ok(after.followUps?.some((f) => f.body.startsWith("revert:")));
+
+  // Idempotent: `reconcile` re-checks every merged packet on every run, so the same revert commit
+  // arrives again and again. One revert is one revert.
+  const twice = applyRevert(recorded.state, mergedPacket.id, {
+    source: "commit",
+    sha: "ffff1110000000000000000000000000000000aa",
+    why: "same commit, next reconcile",
+    at: "2026-08-29T09:00:00.000Z",
+  });
+  assert.equal(twice.recorded, false);
+  assert.equal(scorecardRow(twice.state.scorecard, mergedPacket.repoId)!.reverts, 1);
+});
+
+test("applyRevert refuses a packet that was never merged, and one it has never heard of", () => {
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const notMerged = applyRevert(state, submitted.id, { source: "operator", why: "maintainer said so" });
+  assert.match(notMerged.error ?? "", /submitted/);
+  assert.equal(scorecardRow(notMerged.state.scorecard, submitted.repoId)!.reverts, 0);
+
+  const unknown = applyRevert(state, "pkt_nope", { source: "operator", why: "x" });
+  assert.match(unknown.error ?? "", /unknown packet/);
+});
+
+test("a recorded revert points the operator at the seed, never at allowlist.yaml", () => {
+  // The shipped line told the operator the repo was "unselectable until a human edits
+  // allowlist.yaml". Following that instruction is actively destructive: `emptyScorecard()` maps
+  // its rows from `ALLOWLIST`, and `health()` gates on `row.reverts > 0` — so removing the repo
+  // from the roster deletes the scorecard row and with it the `reverts: 1` this whole unit exists
+  // to produce. `allowlist.yaml` carries `version`, `caps`, `denylist`, `repos` and nothing that
+  // touches reverts; there is no edit to it that clears a revert stop.
+  const state = seedState();
+  const packet = state.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_42")!;
+  const recorded = applyRevert(state, packet.id, {
+    source: "commit",
+    sha: "ffff1110000000000000000000000000000000aa",
+    why: "ffff111 on main reverts our merge commit 36d0f237",
+    at: "2026-08-28T09:00:00.000Z",
+  });
+  const score = recorded.state.events.filter((e) => e.kind === "score").map((e) => e.message);
+  const line = score.find((d) => d.startsWith("REVERT recorded"));
+  assert.ok(line, `applyRevert must leave a score event:\n${score.join("\n")}`);
+  assert.match(line!, /factory\/seed\.ts/);
+  assert.equal(
+    /edits? allowlist\.yaml/.test(line!),
+    false,
+    `the roster edit deletes the scorecard row that holds the count:\n${line}`,
+  );
+  // The reader is told what actually holds the stop, so the remedy is checkable rather than folklore.
+  assert.match(line!, /reverts > 0/);
+});
+
+test("the revert note carries which half of the definition recorded it", () => {
+  // docs/08-operations.md defines a revert two ways — an explicit `git revert` of our merge commit
+  // (mechanical) and "a maintainer-stated rollback naming the PR" (prose). The two producers are
+  // deliberately different kinds of evidence, so which one wrote the row has to survive into the
+  // record; a note that says only "reverted" cannot be audited back to what was actually seen.
+  const state = seedState();
+  const id = "pkt_ravidsrk_orca-fleet_42";
+  const byCommit = applyRevert(state, id, {
+    source: "commit",
+    sha: "ffff1110000000000000000000000000000000aa",
+    why: "ffff111 on main reverts our merge commit 36d0f237",
+  });
+  const commitNote = revertNote(byCommit.state.packets.find((p) => p.id === id)!)!;
+  assert.match(commitNote.body, /^revert: \(commit\) /);
+  // The abbreviated sha is in the record: a revert nobody can look up is not evidence.
+  assert.match(commitNote.body, /ffff11100000/);
+
+  const byOperator = applyRevert(state, id, {
+    source: "operator",
+    why: "maintainer rolled it back in the release thread",
+  });
+  const operatorNote = revertNote(byOperator.state.packets.find((p) => p.id === id)!)!;
+  assert.match(operatorNote.body, /^revert: \(operator\) /);
+  assert.equal(
+    /\(commit\)/.test(operatorNote.body),
+    false,
+    "a human's reading of prose must never be recorded as a matched commit",
+  );
+});
+
+test("revertNote reads notes only — a followUp of another kind cannot masquerade as one", () => {
+  // `revertNote` is the dedupe key AND the clock's "is it already recorded" test, so a followUp
+  // that merely starts with the prefix must not silence a real revert. `applyRevert` writes
+  // `kind: "note"`; every other kind is a different record type with a different lifecycle.
+  const state = seedState();
+  const packet = state.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_42")!;
+  const impostor = {
+    ...packet,
+    followUps: [
+      ...(packet.followUps ?? []),
+      { id: "fu_x", at: "2026-08-28T09:00:00.000Z", kind: "quiet" as const, body: "revert: (commit) ffff111 — looks like one" },
+    ],
+  };
+  assert.equal(revertNote(impostor), undefined);
+  const real = {
+    ...impostor,
+    followUps: [
+      ...impostor.followUps,
+      { id: "fu_y", at: "2026-08-28T09:00:00.000Z", kind: "note" as const, body: "revert: (commit) ffff111 — the record" },
+    ],
+  };
+  assert.equal(revertNote(real)?.id, "fu_y");
+});
+
+test("applyReviewToScorecard writes exactly one row, and counts rather than clamps", () => {
+  // The repo guard is the difference between a KPI and a headline. `factoryKpis()` sums `noReview`
+  // across every allowlist row, so a fold that forgot which row it was writing would multiply the
+  // published number by the size of the roster — eight rows today. The identical guard in
+  // `applyPacketToScorecard` is pinned; this one was not, so writing the WRONG row was caught and
+  // writing EVERY row was not.
+  const repo = "ravidsrk/orca-fleet";
+  const rows = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 0, comments: 0 });
+  assert.equal(rows.filter((r) => r.noReview > 0).length, 1, "exactly one row may move");
+  assert.equal(scorecardRow(rows, repo)!.noReview, 1);
+  for (const other of rows.filter((r) => r.repoId !== repo)) {
+    assert.deepEqual(
+      { noReview: other.noReview, hrc: other.humanReviewComments, hrp: other.humanReviewedPrs, avg: other.reviewCommentsAvg },
+      { noReview: 0, hrc: 0, hrp: 0, avg: 0 },
+      `${other.repoId} was never terminal and must not carry a review number`,
+    );
+  }
+  const commented = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 1, comments: 3 });
+  assert.equal(commented.filter((r) => r.humanReviewedPrs > 0).length, 1);
+  assert.equal(commented.reduce((a, r) => a + r.humanReviewComments, 0), 3, "the fleet total is one PR's comments");
+
+  // And it accumulates: two silent terminals on one repo are two, not "some". A `> 0 ? 1 : 0`
+  // clamp anywhere on this path satisfies every single-PR assertion in the suite.
+  let twice = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 0, comments: 0 });
+  twice = applyReviewToScorecard(twice, repo, { reviews: 0, comments: 0 });
+  assert.equal(scorecardRow(twice, repo)!.noReview, 2);
+  let thrice = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 1, comments: 2 });
+  thrice = applyReviewToScorecard(thrice, repo, { reviews: 1, comments: 4 });
+  assert.equal(scorecardRow(thrice, repo)!.humanReviewedPrs, 2);
+  assert.equal(scorecardRow(thrice, repo)!.humanReviewComments, 6);
+  assert.equal(scorecardRow(thrice, repo)!.reviewCommentsAvg, 3);
+});
+
+test("a commit that names our merge but predates it is not a revert of it", () => {
+  // `git revert` writes `This reverts commit <sha>` and the classifier accepts nothing else — but a
+  // message is just text, and a commit that landed BEFORE the merge cannot have reverted it. The
+  // `since` window makes this rare from GitHub and not impossible: `since` is a committer-date
+  // filter, and committer dates are writable. Without the guard, a cherry-pick or a rebased branch
+  // carrying that line stops a repository under SPEC.md §7 for something that never happened.
+  const merge = "36d0f23708adbdf911e4df050ed516821278a9fc";
+  const before = classifyRevert({
+    mergeCommitSha: merge,
+    mergedAt: "2026-08-27T07:04:52Z",
+    commits: [
+      {
+        sha: "eeee111",
+        message: `Revert "fix validator"\n\nThis reverts commit ${merge}.`,
+        committedAt: "2026-08-26T09:00:00Z",
+      },
+    ],
+  });
+  assert.equal(before.reverted, false, "a commit older than the merge cannot revert it");
+  assert.match(before.why, /no commit on the base branch/);
+
+  // The same commit one second after the merge is the real thing, so the guard is a date test and
+  // not an accidental filter on the message.
+  const after = classifyRevert({
+    mergeCommitSha: merge,
+    mergedAt: "2026-08-27T07:04:52Z",
+    commits: [
+      {
+        sha: "eeee111",
+        message: `Revert "fix validator"\n\nThis reverts commit ${merge}.`,
+        committedAt: "2026-08-27T07:04:53Z",
+      },
+    ],
+  });
+  assert.equal(after.reverted, true);
+});
+
+test("the seed's review KPIs are re-derived from its own packets, not typed beside them", () => {
+  // Issue #39's acceptance is "Ledger output shows non-hand-seeded values". The values in
+  // `factory/seed.ts` ARE derived — but nothing held them to it, so the next hand edit could put
+  // any number there and the whole suite would stay green, which is the exact defect this unit was
+  // opened about, one level up. This recomputes the published columns from the packets' own
+  // `prMeta.humanReview` using the same fold the live path uses.
+  const seed = seedState();
+  const terminal = seed.packets.filter((p) => p.prMeta && (p.prMeta.merged || p.prMeta.state === "closed"));
+  assert.ok(terminal.length >= 3, `the seed must carry terminal packets or this proves nothing: ${terminal.length}`);
+  let derived = emptyScorecard();
+  for (const p of terminal) derived = applyReviewToScorecard(derived, p.repoId, p.prMeta!.humanReview);
+  for (const row of seed.scorecard) {
+    const mine = scorecardRow(derived, row.repoId)!;
+    assert.deepEqual(
+      {
+        noReview: row.noReview,
+        humanReviewComments: row.humanReviewComments,
+        humanReviewedPrs: row.humanReviewedPrs,
+        reviewCommentsAvg: row.reviewCommentsAvg,
+      },
+      {
+        noReview: mine.noReview,
+        humanReviewComments: mine.humanReviewComments,
+        humanReviewedPrs: mine.humanReviewedPrs,
+        reviewCommentsAvg: mine.reviewCommentsAvg,
+      },
+      `${row.repoId}: the published review KPIs must equal what its own packets fold to`,
+    );
+  }
+  // Non-vacuous: some row actually carries each of the two counters.
+  assert.ok(seed.scorecard.some((r) => r.humanReviewedPrs > 0), "a mean over nothing proves nothing");
+  assert.ok(seed.scorecard.some((r) => r.noReview > 0), "a noReview column of all zeros proves nothing");
+});
+
+test("a bare approval is review activity that moves neither counter, and says so in its own words", () => {
+  // The fourth outcome, and the only one no assertion reached. docs/08-operations.md keeps the two
+  // KPIs on different denominators precisely so this case exists: a maintainer who clicks Approve
+  // with no text IS review activity (so the PR is not `noReview`) and contributes NO review comment
+  // (so it stays out of the `reviewCommentsAvg` denominator). Unasserted, its message could be
+  // deleted, or reworded to contain both other messages' key phrases, and the suite stayed green —
+  // against `recordTerminalReview`'s own claim that "no two of them can satisfy the same assertion".
+  const state = seedState();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const approved = applyPrSync(
+    state,
+    submitted.id,
+    prMetaAt("2026-09-01T00:00:00.000Z", {
+      merged: true,
+      state: "closed",
+      humanReview: { reviews: 1, comments: 0 },
+    }),
+    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+  );
+  assert.equal(approved.error, undefined);
+  const row = scorecardRow(approved.state.scorecard, submitted.repoId)!;
+  assert.equal(row.noReview, 0, "a human approved it — that is not silence");
+  assert.equal(row.humanReviewedPrs, 0, "a bare approval has no comment to average");
+  assert.equal(row.humanReviewComments, 0);
+  assert.equal(row.reviewCommentsAvg, 0);
+
+  const messages = approved.state.events.map((e) => e.message);
+  const said = messages.find((m) => m.includes("Human review with no review comment"));
+  assert.ok(said, `the bare-approval arm must state itself:\n${messages.join("\n")}`);
+  assert.match(said!, /neither noReview nor the reviewCommentsAvg denominator moves/);
+  // The three outcomes are worded so no two satisfy the same assertion. Hold them to it.
+  assert.equal(
+    messages.some((m) => m.includes("no human review") || m.includes("Human review not observed")),
+    false,
+    `a bare approval is neither silence nor an unread endpoint:\n${messages.join("\n")}`,
+  );
+  assert.equal(
+    messages.some((m) => m.includes("reviewCommentsAvg now")),
+    false,
+    "nothing entered the mean, so nothing may announce a new mean",
+  );
+});
+
+test("applyRevert writes the note and the counter together", () => {
+  // The clock's revert FATAL reads `revertNote(packet)` — it is handed one packet and never sees
+  // the scorecard — while the KPI it protects is `row.reverts`. The two are only equivalent because
+  // this is the sole writer of either and it writes both in one step. Pin that, or the equivalence
+  // the check rests on is folklore.
+  const state = seedState();
+  const id = "pkt_ravidsrk_orca-fleet_42";
+  const repoId = state.packets.find((p) => p.id === id)!.repoId;
+  assert.equal(scorecardRow(state.scorecard, repoId)!.reverts, 0);
+  assert.equal(revertNote(state.packets.find((p) => p.id === id)!), undefined);
+
+  const after = applyRevert(state, id, { source: "commit", sha: "ffff111", why: "reverted" }).state;
+  assert.ok(revertNote(after.packets.find((p) => p.id === id)!), "the note is the record the clock reads");
+  assert.equal(scorecardRow(after.scorecard, repoId)!.reverts, 1, "the counter is the KPI the note protects");
+
+  // A refused revert moves neither, so the pairing holds on the failure path too.
+  const refused = applyRevert(state, state.packets.find((p) => p.status === "submitted")!.id, {
+    source: "operator",
+    why: "never merged",
+  });
+  assert.ok(refused.error);
+  assert.equal(refused.state.scorecard.reduce((a, r) => a + r.reverts, 0), 0);
+  assert.equal(refused.state.packets.filter((p) => revertNote(p)).length, 0);
 });
