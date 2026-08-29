@@ -73,7 +73,29 @@ const ARGV = process.argv.slice(2);
 // A cwd-relative path silently served the committed seed as live truth from anywhere else, and a
 // mutating command forked a second state file next to it.
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const STATE_FILE = resolve(flag(ARGV, "--state") ?? resolve(REPO_ROOT, ".foundry-state.json"));
+const STATE_FILE_FLAG = flag(ARGV, "--state");
+const STATE_FILE = resolve(STATE_FILE_FLAG ?? resolve(REPO_ROOT, ".foundry-state.json"));
+
+/**
+ * Every ledger write goes through here so a test can never make one to the repo root.
+ *
+ * Anchoring `STATE_FILE` took away the isolation that spawned-CLI tests were getting for free from
+ * a temp cwd: with the path fixed to the repo root, a test that forgets `--state` reads and writes
+ * the developer's real ledger, and the damage lands in whichever *other* test file reads it next —
+ * far from the test that caused it. The refusal is deliberately at the write and not at the load,
+ * because reading the default path is a legitimate thing for a test to assert (that is how the
+ * anchoring itself is proven); it is the mutation that leaks. `NODE_TEST_CONTEXT` is set by
+ * `node --test` and inherited by spawned children, so this is inert for a real operator.
+ */
+function persist(state: FactoryState): void {
+  if (!STATE_FILE_FLAG && process.env.NODE_TEST_CONTEXT) {
+    console.error(
+      `refusing to write the repo-root ledger ${STATE_FILE} from a test run — pass \`--state <tmpfile>\` to every spawned CLI so the test cannot mutate real state.`,
+    );
+    process.exit(1);
+  }
+  saveFactoryState(STATE_FILE, state);
+}
 
 function mustLoad() {
   const loaded = loadFactoryState(STATE_FILE);
@@ -243,14 +265,14 @@ async function main() {
       process.exit(1);
     }
     const by = flag(rest, "--by") ?? process.env.FOUNDRY_OPERATOR ?? "operator";
-    saveFactoryState(STATE_FILE, clearFactoryHalt(state, by, flag(rest, "--note") ?? ""));
+    persist(clearFactoryHalt(state, by, flag(rest, "--note") ?? ""));
     console.log(`halt from ${halted.at} cleared by ${by}`);
     return;
   }
 
   if (cmd === "tick") {
     const result = await tickWithGithub(state);
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     if (!result.packet) {
       console.log(result.reason);
       printStatus(result.state, source);
@@ -313,7 +335,7 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     console.log(`approved ${id}`);
     return;
   }
@@ -332,7 +354,7 @@ async function main() {
     // Reject still succeeds (it is the documented halt-everything path) but it does not go quiet:
     // an abandoned live PR is named on the terminal, not only in parkReason and the event log.
     if (result.warning) console.error(result.warning);
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     console.log(`rejected ${id}`);
     return;
   }
@@ -348,7 +370,7 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     console.log(`halted ${repoId} (scorecard banned). Edit allowlist.yaml denylist the same hour.`);
     return;
   }
@@ -362,11 +384,11 @@ async function main() {
     const result = applyAdvance(state, id);
     if (result.error) {
       const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
-      if (parked) saveFactoryState(STATE_FILE, result.state);
+      if (parked) persist(result.state);
       console.error(result.error);
       process.exit(1);
     }
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     const p = result.state.packets.find((x) => x.id === id);
     console.log(`advanced ${id} → ${p?.status}`);
     return;
@@ -431,11 +453,11 @@ async function main() {
     const result = applyAttachEvidence(state, id, evidence, bindingFromCompare(compared));
     if (result.error) {
       const parked = result.state.packets.find((p) => p.id === id)?.status === "parked";
-      if (parked) saveFactoryState(STATE_FILE, result.state);
+      if (parked) persist(result.state);
       console.error(result.error);
       process.exit(1);
     }
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     console.log(`evidence attached ${id}`);
     return;
   }
@@ -519,10 +541,7 @@ async function main() {
       if (created.halt) {
         // The banner is for the human at the keyboard; the ledger write is what stops the next run.
         console.error(SECONDARY_LIMIT_BANNER);
-        saveFactoryState(
-          STATE_FILE,
-          applySecondaryLimitHalt(state, { repoId: packet.repoId, detail: created.error }),
-        );
+        persist(applySecondaryLimitHalt(state, { repoId: packet.repoId, detail: created.error }));
         console.error(`halt recorded in ${STATE_FILE} — clear it with \`clear-halt\` once a human has checked.`);
       }
       console.error(created.error);
@@ -544,7 +563,7 @@ async function main() {
       console.error(`draft opened but not recorded (${attached.error}) — run: attach-draft ${id} ${created.url}`);
       process.exit(1);
     }
-    saveFactoryState(STATE_FILE, attached.state);
+    persist(attached.state);
     console.log(`attached ${created.url} (draft=${synced.meta.draft}) — packet submitted`);
     return;
   }
@@ -573,7 +592,7 @@ async function main() {
       }
       doctrine.push(...packetDivergences(next.packets.find((p) => p.id === packet.id)!, live));
     }
-    saveFactoryState(STATE_FILE, next);
+    persist(next);
     for (const d of doctrine) console.error(`DIVERGENCE ${d}`);
     console.log(`reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length}`);
     return;
@@ -646,7 +665,7 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     const after = result.state.packets.find((p) => p.id === id);
     console.log(
       `synced ${id} → ${after?.status}  quiet=${quietDaysOf(synced.meta, new Date().toISOString())}d  draft=${synced.meta.draft} state=${synced.meta.state} merged=${synced.meta.merged}`,
@@ -709,7 +728,7 @@ async function main() {
       console.error(result.error);
       process.exit(1);
     }
-    saveFactoryState(STATE_FILE, result.state);
+    persist(result.state);
     console.log(`attached ${url} (draft=${synced.meta.draft})`);
     return;
   }

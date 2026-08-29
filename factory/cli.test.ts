@@ -92,18 +92,88 @@ function draftReadyState(): FactoryState {
 const DRAFT_READY_ID = "pkt_ColeMurray_background-agents_1476";
 const DRAFT_READY_REPO = "ColeMurray/background-agents";
 
+/** The annotation `status` appends when the resolved path holds no file. */
+const SEED_SUFFIX = " (absent — committed seed)";
+
 test("the state path is anchored to the repo root, not the cwd", () => {
-  const fromRoot = runCli(["status"], REPO_ROOT);
-  const fromElsewhere = runCli(["status"], tmpdir());
-  const line = (out: string) => out.split("\n").find((l) => l.startsWith("state:"));
-  assert.equal(fromRoot.code, 0);
-  assert.equal(fromElsewhere.code, 0);
-  assert.equal(
-    line(fromRoot.stdout)?.startsWith(`state: ${resolve(REPO_ROOT, ".foundry-state.json")}`),
-    true,
-    `unexpected state line: ${line(fromRoot.stdout)}`,
+  // The state line carries two independent facts, and only one of them is this test's claim.
+  // WHICH path the CLI resolves is fixed by the repo layout. Whether that path currently holds a
+  // file is not: a developer's own ledger, or a sibling test file running in parallel under
+  // `node --test factory/*.test.ts`, decides it. Comparing the whole line across the two runs
+  // therefore asserted the anchoring AND raced on the annotation. So: the path is asserted
+  // exactly (stronger than the prefix match it replaces), and the annotation is pinned below on
+  // paths whose absence and presence this test sets itself.
+  const stateLine = (out: string) => {
+    const l = out.split("\n").find((x) => x.startsWith("state: "));
+    assert.ok(l, `no state line in:\n${out}`);
+    return l;
+  };
+  const statePath = (out: string) =>
+    stateLine(out).slice("state: ".length).replace(SEED_SUFFIX, "");
+
+  // A decoy exactly where the ledger used to be read from. Under the old cwd-relative path this
+  // file WAS the state; the canary tick count is what proves it is not consulted now — a path
+  // assertion alone would still pass if the CLI printed one path and read another.
+  const decoyDir = mkdtempSync(join(tmpdir(), "foundry-anchor-"));
+  writeFileSync(
+    join(decoyDir, ".foundry-state.json"),
+    JSON.stringify({ ...seedState(), ticksRun: 90210 }),
   );
-  assert.equal(line(fromElsewhere.stdout), line(fromRoot.stdout));
+
+  const fromRoot = runCli(["status"], REPO_ROOT);
+  const fromElsewhere = runCli(["status"], decoyDir);
+  assert.equal(fromRoot.code, 0, fromRoot.out);
+  assert.equal(fromElsewhere.code, 0, fromElsewhere.out);
+
+  const anchored = resolve(REPO_ROOT, ".foundry-state.json");
+  assert.equal(statePath(fromRoot.stdout), anchored);
+  assert.equal(statePath(fromElsewhere.stdout), anchored, "the cwd moved; the ledger must not");
+  assert.equal(
+    /ticks=90210/.test(fromElsewhere.out),
+    false,
+    `the cwd's decoy ledger was read, not the repo root's: ${fromElsewhere.out}`,
+  );
+
+  // And the annotation the line carries, driven where absence and presence are facts we set.
+  const absentPath = join(decoyDir, "absent.json");
+  assert.equal(stateLine(runCli(["status", "--state", absentPath], decoyDir).stdout), `state: ${absentPath}${SEED_SUFFIX}`);
+  const present = writeState(seedState());
+  assert.equal(stateLine(runCli(["status", "--state", present], decoyDir).stdout), `state: ${present}`);
+});
+
+test("a test that spawns the CLI without --state cannot write the repo-root ledger", () => {
+  // The landmine anchoring created, and the reason this guard exists. #34's spawned-CLI tests
+  // isolated themselves with a temp `cwd`, which worked only while the ledger path was
+  // cwd-relative. Anchored, those spawns began rewriting the real repo-root file, and the damage
+  // surfaced in a DIFFERENT test file that read it — the failure landing nowhere near its cause.
+  //
+  // The two candidate guards were "assert no test leaves a state file behind" and "make a missing
+  // --state loud". The first cannot be made deterministic here: `node --test factory/*.test.ts`
+  // runs the files in parallel processes, so an end-of-run absence check is racy against whichever
+  // file is still going, and a check that runs before the offending write simply misses it. This
+  // one fires at the moment of the write, in the offending process, whatever the order.
+  //
+  // Reads of the default path stay legal — the anchoring test above depends on them, and a read
+  // leaks nothing. It is the write that escapes the test, so the write is what refuses.
+  const anchored = resolve(REPO_ROOT, ".foundry-state.json");
+  const snapshot = () => (existsSync(anchored) ? readFileSync(anchored, "utf8") : null);
+  const before = snapshot();
+
+  const blocked = runCli(["reject", DRAFT_READY_ID, "--reason", "guard probe"], tmpdir());
+  assert.equal(blocked.code, 1, blocked.out);
+  assert.match(blocked.out, /refusing to write the repo-root ledger/);
+  assert.ok(blocked.out.includes(anchored), blocked.out);
+  assert.match(blocked.out, /--state/);
+  assert.equal(/^rejected /m.test(blocked.stdout), false, "the write must not be reported as done");
+  assert.equal(snapshot(), before, "the refused run must leave the repo-root ledger untouched");
+
+  // Not a blanket ban on the command: the same reject, pointed at its own ledger, still lands.
+  const path = writeState(seedState());
+  const allowed = runCli(["reject", DRAFT_READY_ID, "--reason", "guard probe", "--state", path], tmpdir());
+  assert.equal(allowed.code, 0, allowed.out);
+  assert.match(allowed.stdout, new RegExp(`rejected ${DRAFT_READY_ID}`));
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(onDisk.packets.find((p) => p.id === DRAFT_READY_ID)?.status, "rejected");
 });
 
 test("a seed-backed run says so instead of presenting the seed as live truth", () => {

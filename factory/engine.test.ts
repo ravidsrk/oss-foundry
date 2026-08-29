@@ -1183,16 +1183,28 @@ test("the reject warning reaches the operator's terminal, not only the ledger", 
   // The reducer-level assertions above all passed while the CLI printed nothing but `rejected <id>`
   // — the exact silence issue #34 opens with. This drives the real binary and reads its streams.
   const dir = mkdtempSync(join(tmpdir(), "foundry-cli-"));
+  // `--state` is what isolates this, not `cwd`. The ledger path is anchored to the repo root
+  // (factory/cli.ts), so a bare spawn would read and rewrite the developer's real state file.
+  const statePath = join(dir, ".foundry-state.json");
   const state = seedState();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   assert.ok(submitted.prUrl);
-  writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
+  writeFileSync(statePath, JSON.stringify(state));
 
   const cli = join(import.meta.dirname, "cli.ts");
   const reject = (id: string) =>
     spawnSync(
       process.execPath,
-      ["--experimental-strip-types", cli, "reject", id, "--reason", "typo, meant a different id"],
+      [
+        "--experimental-strip-types",
+        cli,
+        "reject",
+        id,
+        "--reason",
+        "typo, meant a different id",
+        "--state",
+        statePath,
+      ],
       { cwd: dir, encoding: "utf8" },
     );
 
@@ -1242,13 +1254,16 @@ test("status does not claim a re-block that the held slot already prevented", ()
   // printed "(maintainer activity re-blocks the tick)" for a packet whose maintainer activity had
   // just re-blocked nothing, and `reconcile` reported divergences=0. Drive the real binary.
   const dir = mkdtempSync(join(tmpdir(), "foundry-cli-status-"));
+  // See the reject test above: `--state` is the isolation, since the default path is the repo root.
+  const statePath = join(dir, ".foundry-state.json");
   const cli = join(import.meta.dirname, "cli.ts");
   const statusIn = (state: FactoryState) => {
-    writeFileSync(join(dir, ".foundry-state.json"), JSON.stringify(state));
-    const run = spawnSync(process.execPath, ["--experimental-strip-types", cli, "status"], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    writeFileSync(statePath, JSON.stringify(state));
+    const run = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", cli, "status", "--state", statePath],
+      { cwd: dir, encoding: "utf8" },
+    );
     assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
     return `${run.stdout}${run.stderr}`;
   };
