@@ -47,7 +47,7 @@ import {
   verifyWitnessLogs,
   witnessEvidence,
 } from "./witness.ts";
-import { DISCLOSURE, DISCLOSURE_TAIL, FOUNDRY_REPO_URL } from "./neighbor.ts";
+import { DISCLOSURE, FOUNDRY_REPO_URL } from "./neighbor.ts";
 import { buildPacket, renderEvidencePage, renderPrBody } from "./packet.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { runSandboxDry } from "./sandbox.ts";
