@@ -117,9 +117,27 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
   for (const w of waivers) {
     const hit = new RegExp(w, "i").exec(clause);
     if (!hit) continue;
-    // A scoped waiver is a requirement wearing a waiver's clothes: "not required EXCEPT for new
-    // dependencies" means a packet touching one needs it. Read from the sentence, not the clause.
-    if (SCOPE_LIMITER.test(sentence)) return "required";
+    /**
+     * A scoped waiver is a requirement in a waiver's clothes: "not required EXCEPT for new
+     * dependencies" means a packet touching one needs it. But the limiter has to belong to THIS
+     * waiver, and both ways of getting that wrong are fail-modes this branch actually shipped:
+     *
+     * - Reading it from the CLAUSE missed "A CLA is not required, except for new dependencies.",
+     *   because the limiter sits in the next clause. Fail-open.
+     * - Reading it from the whole SENTENCE over-blocked "No CLA is required, and all patches are
+     *   welcome except spam", where the "except" is about spam. Fail-closed, and it parks a packet
+     *   whose policy waives the CLA in as many words. Raised as P1 by review.
+     *
+     * So the span is the waiver's own statement: its clause, plus what follows the waiver up to the
+     * first coordinating conjunction — a limiter past an "and" belongs to a different statement —
+     * plus a leading "Except for X, ..." that the waiver is the main clause of.
+     */
+    const at = sentence.toLowerCase().indexOf(hit[0].toLowerCase());
+    const after = at === -1 ? "" : sentence.slice(at + hit[0].length);
+    const conjunction = after.search(/\b(?:and|or|but|however)\b/i);
+    const forward = conjunction === -1 ? after : after.slice(0, conjunction);
+    const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
+    if (SCOPE_LIMITER.test(clause) || SCOPE_LIMITER.test(forward) || leading) return "required";
     /**
      * A WAIVER GOVERNS ONLY THE OCCURRENCE IT NAMES — a P1 from review. Polarity was decided once
      * per clause from the first match, so "No CLA is required for documentation and a CLA is

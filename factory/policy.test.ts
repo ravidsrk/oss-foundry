@@ -465,6 +465,14 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No DCO is needed, unless you are adding a new module.", want: "required", why: "limiter behind a comma" },
   { doc: "No CLA is required, other than for vendored code.", want: "required", why: "limiter behind a comma" },
   { doc: "A CLA is not required; except for new dependencies.", want: "required", why: "limiter behind a semicolon" },
+  { doc: "Except for new dependencies, a CLA is not required.", want: "required", why: "leading limiter, waiver is the main clause" },
+  // ...and the limiter must NOT reach a waiver it has nothing to do with. Reading it from the whole
+  // sentence over-blocked these, which parks a packet whose policy waives the CLA in as many words
+  // — raised as P1 by review, the mirror image of the fail-open two rows up. A limiter past a
+  // coordinating conjunction belongs to a different statement.
+  { doc: "No CLA is required, and all patches are welcome except spam.", want: "waived", why: "the 'except' is about spam" },
+  { doc: "No DCO is needed, and we review everything except vendored trees.", want: "waived", why: "the 'except' is about review scope" },
+  { doc: "No CLA. Reviews are quick, except during release weeks.", want: "waived", why: "limiter in a later sentence about something else" },
 
   // --- Plain requirements, in the phrasings a real CONTRIBUTING.md uses. ---
   { doc: "Pull requests without a signed Contributor License Agreement will be closed.", want: "required", why: "#50: the phrasing most likely to appear for real" },
