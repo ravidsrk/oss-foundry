@@ -23,7 +23,7 @@ Allowlist YAML, deterministic policy gate, one-in-flight including `submitted`, 
 
 ## v2
 
-Live GitHub scout (user-initiated), E2B dry-run labeled as dry-run, follow-up PR sync, draft-only create helper. Credentials stay out of git.
+E2B dry-run labeled as dry-run, follow-up PR sync, draft-only create helper. Credentials stay out of git. The live issue **scout** (`factory/github-scout.ts`) is written but **not wired**: `tick` walks each repo's named `firstIssues` rather than discovering issues — see [06-v2](docs/06-v2.md).
 
 ## Tests
 

@@ -46,9 +46,14 @@ test("ledger sections keep wave order and drop the ones with nothing in them", (
  * refreshed only by `sync`. Printing a bare `quiet=0d/14` reads as a live reading of the PR; on any
  * day after the last sync it is an extrapolation from a frozen fact. The number must name the
  * observation it came from and the command that refreshes it (issue #44 item 11).
+ *
+ * `factory/engine.test.ts` drives `status` itself — this file only pins the string.
  */
 test("the quiet counter names the observation it was extrapolated from", () => {
-  const line = quietLabel(0, 14, "2026-08-28T16:16:39Z");
+  const line = quietLabel(0, 14, {
+    updatedAt: "2026-08-28T16:16:39Z",
+    syncedAt: "2026-08-28T16:16:39Z",
+  });
   assert.match(line, /quiet=0d\/14/);
   assert.match(line, /2026-08-28/);
   assert.match(line, /sync/);
@@ -56,6 +61,23 @@ test("the quiet counter names the observation it was extrapolated from", () => {
 });
 
 test("the quiet counter still labels its source once the count has drifted", () => {
-  assert.match(quietLabel(31, 14, "2026-08-28T16:16:39Z"), /quiet=31d\/14/);
-  assert.match(quietLabel(31, 14, "2026-08-28T16:16:39Z"), /2026-08-28/);
+  const meta = { updatedAt: "2026-08-28T16:16:39Z", syncedAt: "2026-08-28T16:16:39Z" };
+  assert.match(quietLabel(31, 14, meta), /quiet=31d\/14/);
+  assert.match(quietLabel(31, 14, meta), /2026-08-28/);
+});
+
+/**
+ * The two dates only look like one fact in the seed, where they coincide. `updatedAt` is the PR's
+ * own last activity — what the count is measured from; `syncedAt` is when we read it. After a real
+ * `sync` they diverge, and a line that printed only one of them would read as though the count had
+ * been measured from the other.
+ */
+test("the quiet counter distinguishes the PR's last activity from when we read it", () => {
+  const line = quietLabel(3, 14, {
+    updatedAt: "2026-09-01T00:00:00Z",
+    syncedAt: "2026-09-04T09:30:00Z",
+  });
+  assert.match(line, /quiet=3d\/14/);
+  assert.match(line, /PR last active 2026-09-01/);
+  assert.match(line, /read by `sync` 2026-09-04/);
 });

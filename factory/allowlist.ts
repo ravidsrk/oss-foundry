@@ -14,20 +14,40 @@ export const DENYLIST: { id: string; reason: string }[] = parsed.denylist;
 export const ALLOWLIST: AllowlistedRepo[] = parsed.repos;
 
 /**
- * GitHub treats `owner/repo` case-insensitively, so a live path can hand us casing that does not
- * match the YAML's. `isDenied` already normalizes; this one compared raw strings, so the two halves
- * of the roster gate disagreed. The mismatch failed *closed* — an unmatched id is "not on the
- * allowlist" — so it was never exploitable, but a gate that holds only because live paths happen to
- * echo the file is a gate resting on an accident (issue #44 item 10). `maySelectRepo` still checks
- * `isDenied` before this, so the denylist keeps winning under any casing.
+ * GitHub treats `owner/repo` case-insensitively, so an operator or a live path can hand us casing
+ * that does not match the YAML's. Every comparison of two repo ids goes through here so no two
+ * halves of a gate can disagree about what "the same repo" means.
  */
+export function sameRepoId(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * Resolve a caller-supplied id to the roster's spelling — the boundary conversion.
+ *
+ * Case-insensitive *lookup* alone is not enough, and getting that wrong turned a loud fail-closed
+ * into a silent fail-open. Round 1 normalized `repoById` only; every downstream store still keyed
+ * on the raw string, so `halt "colemurray/background-agents"` found the roster row, reported
+ * success and pushed `bans` to 1 while the scorecard row for `ColeMurray/background-agents` stayed
+ * `tone=neutral health=good` and the in-flight packet was never parked — the operator's same-hour
+ * stop (docs/PRODUCT.md:47, SPEC §7) silently did nothing. The same gap let
+ * `maySelectRepo("RavidSrk/Orca-Fleet")` return `{ok:true}` for a repo whose scorecard says `stop`.
+ *
+ * So: convert once, at every entry point that takes an id from outside (`applyHalt`,
+ * `buildPacket`), and store the canonical spelling. An id the roster does not know is returned
+ * unchanged — an unlisted or denied repo keeps the id it arrived with, and the callers that must
+ * refuse it still refuse it loudly (issue #44 item 10).
+ */
+export function canonicalRepoId(id: string): string {
+  return repoById(id)?.id ?? id;
+}
+
 export function repoById(id: string): AllowlistedRepo | undefined {
-  const wanted = id.toLowerCase();
-  return ALLOWLIST.find((r) => r.id.toLowerCase() === wanted);
+  return ALLOWLIST.find((r) => sameRepoId(r.id, id));
 }
 
 export function isDenied(id: string): { id: string; reason: string } | undefined {
-  return DENYLIST.find((d) => d.id.toLowerCase() === id.toLowerCase());
+  return DENYLIST.find((d) => sameRepoId(d.id, id));
 }
 
 export function waveLabel(wave: Wave): string {

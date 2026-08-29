@@ -164,7 +164,7 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
     console.log("in flight:");
     for (const p of inflight) {
       const quiet = p.prMeta
-        ? `  ${quietLabel(quietDaysOf(p.prMeta, new Date().toISOString()), QUIET_RELEASE_DAYS, p.prMeta.syncedAt)}`
+        ? `  ${quietLabel(quietDaysOf(p.prMeta, new Date().toISOString()), QUIET_RELEASE_DAYS, p.prMeta)}`
         : "";
       console.log(`  ${p.id}  ${p.status}  ${p.repoId}#${p.issueNumber}  ${p.prUrl ?? ""}${quiet}`);
     }
@@ -416,7 +416,9 @@ async function main() {
       process.exit(1);
     }
     persist(result.state);
-    console.log(`halted ${repoId} (scorecard banned). Edit allowlist.yaml denylist the same hour.`);
+    // Echo the roster's spelling, not the operator's: a halt typed in GitHub's casing now moves the
+    // row it names, and the line must say which row that was (issue #44 item 10).
+    console.log(`halted ${result.repoId ?? repoId} (scorecard banned). Edit allowlist.yaml denylist the same hour.`);
     return;
   }
 

@@ -6,7 +6,7 @@ The allowlist is the product. Everything else is a pipeline. Sole source: [`allo
 
 | Wave | Who | Sandbox | Human freeze |
 |---|---|---|---|
-| 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | First 20 factory-wide, then mechanical if policy allows |
+| 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | Always — the first-20 counter is an odometer, not a gate that opens ([04-stations](04-stations.md)) |
 | 1 | AI-welcome, small blast radius | E2B | Always |
 | 2 | Adjacent (Mastra, OpenHands) | E2B | Always + HUMAN/DCO holds |
 
@@ -35,7 +35,7 @@ Removed 2026-08-28: `kortix-ai/suna` — its documented dev/test loop is gated o
 
 - `matplotlib/matplotlib` — autonomous-agent ban.
 - `curl/curl` — maintainer request to stop agent noise.
-- `pydantic/pydantic` — welcomes AI-assisted PRs; **reserves the right to close any PR at its discretion**, naming mass submission across repos as a case, and **auto-closes** PRs opened against an issue without being assigned first. Denied as a poor factory fit, not as anti-AI. Re-confirmed 2026-08-29 against pydantic's live `CONTRIBUTING.md` (§"AI policy" and the assignment rule); a round-2 review recorded this as unconfirmable, which was wrong. "Bans" overstated it by a notch and is corrected here — the deny reason in `allowlist.yaml` already carried the precise wording (issue #44 item 7).
+- `pydantic/pydantic` — welcomes AI-assisted PRs, and **reserves the right to close any pull request at its discretion**, naming mass-submission across multiple repositories as a case — behaviour that "can also result in a permanent ban from the organization." Separately, a PR fixing an existing issue without being assigned first is **automatically closed**. Denied as a poor factory fit, not as anti-AI. Source: pydantic `docs/contributing.md` §"AI policy" plus its assignment rule (the repo's root `CONTRIBUTING.md` is a one-line pointer to that file), re-read 2026-08-29. Recorded in the 2026-08-29 corrections in [12-ledger](12-ledger.md).
 - `stablyai/orca` — no AI restriction upstream; denied for conflict of interest (it is the runtime Foundry rides). Contribute through orca-fleet.
 
 A denylist hit is `DENY_FORBIDDEN`. There is no override in the operator CLI.

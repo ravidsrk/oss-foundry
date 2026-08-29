@@ -61,6 +61,32 @@ Live verification found six factual errors in the allowlist; all corrected:
 
 **Roster change — 2026-08-28 (issue #12):** awesome-copilot gains first issue #2684 (docs class; caps raised 80→120 lines for reference work); e2b-dev/E2B → e2b-dev/e2b-cookbook (the docs/examples surface moved); kortix-ai/suna removed (secret-gated dev loop, externally unverifiable). Policy records updated to match (8 records).
 
+## Corrections — 2026-08-29 (issue #44)
+
+1. **background-agents merge figure re-derived.** The `141 of 272 external PRs merged` figure carried
+   in `allowlist.yaml`, `docs/03-allowlist.md` and `docs/PRODUCT.md` named no method and **does not
+   reproduce**. Re-measured 2026-08-29 via the GitHub search API —
+   `q=repo:ColeMurray/background-agents is:pr -author:ColeMurray` for the denominator and the same
+   query plus `is:merged` for the numerator: **250 of 408 non-owner PRs merged (61%)**. The figure
+   and its method live in `allowlist.yaml`'s `policyNotes`, which is what that field is for
+   (`docs/10-schemas.md`). It was briefly written into the `policy-records.json` `quote` instead;
+   that field is reserved for *one verbatim statement from the source* (`docs/SPEC.md` §3,
+   `docs/10-schemas.md`) and renders on the maintainer-facing evidence page as their own words, so
+   the quote is back to the absence note alone.
+2. **pydantic deny reason re-read at source.** Round 2 recorded pydantic's AI policy as
+   unconfirmable; that was wrong. It is in `docs/contributing.md` §"AI policy" (the repo's root
+   `CONTRIBUTING.md` is a one-line pointer to it), re-read 2026-08-29. Pydantic *welcomes* AI use,
+   reserves the right to close any PR at its discretion — mass-submission across multiple
+   repositories is a named case, and can end in a permanent ban from the organization — and
+   auto-closes PRs opened on an issue without assignment. "Bans AI PRs" overstated it; the deny
+   stands, on fit rather than on an AI ban.
+3. **Repo ids are matched case-insensitively, end to end.** GitHub treats `owner/repo` that way, and
+   the roster gate did not: `halt` typed in a maintainer's casing reported success, incremented
+   `bans`, and left the scorecard row `tone=neutral health=good` with the packet still in flight.
+   `applyHalt` and `buildPacket` now resolve to the roster's spelling at the boundary, every
+   scorecard lookup shares one comparison, and `assertAllowlist` checks disjointness the same way.
+   Bans in the block above stay 0 — no repository was actually halted by that defect.
+
 ## Next
 
 1. Follow #1652 (now **draft**, disclosure verbatim — healed 2026-08-28) until quiet / merged-by-maintainer / closed.

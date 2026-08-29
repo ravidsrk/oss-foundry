@@ -24,7 +24,7 @@
       "fetchedAt": "2026-08-28",
       "stance": "silent",
       "conditions": [],
-      "quote": "No AI-contribution language in CONTRIBUTING.md, AGENTS.md, or CLAUDE.md. Behaviorally open: 250 of 408 non-owner PRs merged (61%). Method: GitHub search API, q='repo:ColeMurray/background-agents is:pr -author:ColeMurray' for the denominator and the same q plus 'is:merged' for the numerator; measured 2026-08-29. The figure this replaces (141 of 272) carried no method and does not reproduce - issue #44 item 6."
+      "quote": "No AI-contribution language in CONTRIBUTING.md, AGENTS.md, or CLAUDE.md."
     },
     "github/awesome-copilot": {
       "source": "CONTRIBUTING.md",

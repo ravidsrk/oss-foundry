@@ -26,7 +26,7 @@ The product is not “open more PRs.” The product is **merged, etiquette-corre
 
 - matplotlib banned autonomous-agent PRs after a slop incident
 - curl maintainers asked agents to stop after a HackerOne flood
-- pydantic welcomes AI-assisted PRs but reserves the right to close mass submission across repos — the very pattern a contribution factory is
+- pydantic welcomes AI-assisted PRs but reserves the right to close mass submission across repos, and says it can end in a permanent ban from the org — the very pattern a contribution factory is
 - drive-by volume without governance is vandalism
 
 Foundry’s posture is the inverse: **contribute less, merge more, never surprise a maintainer.**
@@ -159,7 +159,7 @@ PR volume is a vanity metric. Not shown as a success KPI.
 
 | Wave | Who | Sandbox | Human freeze |
 |---|---|---|---|
-| 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | First 20 factory-wide, then mechanical if `aiPolicy: owner` |
+| 0 | Repos we own (`orca-fleet`, `frontguard`) | Host worktree | **Always** — the first-20 counter is an odometer, not a gate that opens ([04-stations](04-stations.md)) |
 | 1 | AI-welcome, small blast radius | E2B (dry-run in this repo) | **Always** |
 | 2 | Adjacent (Mastra, OpenHands) | E2B | Always + HUMAN/DCO holds |
 
@@ -188,7 +188,7 @@ Removed: `kortix-ai/suna` (secret-gated dev loop; externally unverifiable — is
 
 - `matplotlib/matplotlib` — autonomous-agent ban
 - `curl/curl` — maintainer asked agents to stop
-- `pydantic/pydantic` — welcomes AI-assisted PRs; reserves the right to close any PR at its discretion (mass submission across repos is a named case) and auto-closes unassigned PRs. Denied as poor factory fit, not anti-AI
+- `pydantic/pydantic` — welcomes AI-assisted PRs; reserves the right to close any PR at its discretion (mass submission across repos is a named case, and can end in a permanent ban from the org) and auto-closes unassigned PRs. Denied as poor factory fit, not anti-AI
 - `stablyai/orca` — no AI restriction; denied for conflict of interest (the runtime Foundry rides). Contribute via orca-fleet
 
 ---

@@ -79,10 +79,19 @@ export function ledgerSections(
  * The operator-facing quiet counter. `quietDaysOf` measures wall-clock against `prMeta.updatedAt`,
  * which is a *stored observation* refreshed only by `sync` — the committed seed's is frozen at the
  * day it was captured. A bare `quiet=0d/14` therefore reads as a live look at the PR while actually
- * being an extrapolation from whatever the last sync saw. The number names its source and the
- * command that refreshes it instead (issue #44 item 11).
+ * being an extrapolation from whatever the last sync saw (issue #44 item 11).
+ *
+ * Both dates are printed because they are two different facts and only look like one in the seed,
+ * where they coincide. `updatedAt` is the PR's own last activity — the anchor the count measures
+ * from. `syncedAt` is when we read it. After a real `sync` they diverge, and "quiet=3d, observed
+ * today" is only coherent once the line says which date is which.
  */
-export function quietLabel(quietDays: number, releaseDays: number, syncedAt: string): string {
-  const observed = syncedAt.slice(0, 10);
-  return `quiet=${quietDays}d/${releaseDays} (from PR metadata observed ${observed}; \`sync\` to refresh)`;
+export function quietLabel(
+  quietDays: number,
+  releaseDays: number,
+  meta: { updatedAt: string; syncedAt: string },
+): string {
+  const active = meta.updatedAt.slice(0, 10);
+  const observed = meta.syncedAt.slice(0, 10);
+  return `quiet=${quietDays}d/${releaseDays} (PR last active ${active}, read by \`sync\` ${observed}; \`sync\` to refresh)`;
 }

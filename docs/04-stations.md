@@ -50,7 +50,7 @@ The gate is deterministic. Grok does not get a vote here. There is no demo CONTR
 
 The operator reads the packet: objective, non-goals, acceptance, abort, policy, scout.
 
-Actions: `approve` (attest) or `reject` (park). Denied, halted, and unlisted packets cannot be approved. Approve re-runs the competing-work check live: a competitor that appeared since gating blocks the approval; an adjacent mention is shown to the approver.
+Actions: `approve` (attest) or `reject` (stand the packet down — it writes status `rejected`, not `parked`; see below). Denied, halted, and unlisted packets cannot be approved. Approve re-runs the competing-work check live: a competitor that appeared since gating blocks the approval; an adjacent mention is shown to the approver.
 
 `reject` has its own scope. A `merged` packet **cannot** be rejected: it is terminal and already counted toward `mergedTotal` and the attested Wave 0 merges, so a late reject would desync the promotion gate from the ledger. A `submitted` packet **can** — that is the documented halt-everything path (`docs/08-operations.md`) — but reject does not close the PR, so when the packet names a live PR the CLI prints an `open pr:` warning naming it and the packet record says which PR was left open. Until a human closes it, `reconcile` keeps flagging it as an abandoned live PR.
 

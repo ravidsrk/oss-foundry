@@ -15,7 +15,7 @@ denylist:
   - id: curl/curl
     reason: Maintainer asked agents to stop after HackerOne flood.
   - id: pydantic/pydantic
-    reason: "Welcomes AI-assisted PRs, but auto-closes unassigned PRs and reserves closing mass-submitted PRs across repos - the factory pattern. Denied as a poor factory fit, not as anti-AI."
+    reason: "Welcomes AI-assisted PRs, but auto-closes unassigned PRs and reserves closing mass-submitted PRs across repos, which can end in a permanent ban from the org - the factory pattern. Denied as a poor factory fit, not as anti-AI."
   - id: stablyai/orca
     reason: "No upstream AI restriction (PRs must include an AI review summary). Denied for conflict of interest: it is the runtime Foundry rides. Contribute via orca-fleet."
 

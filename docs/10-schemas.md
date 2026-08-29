@@ -13,7 +13,9 @@ nonGoals          list
 acceptance        list of checkable claims
 abort             list of stop conditions
 class             buildable | already-has-pr | needs-human | externally-resolved | out-of-scope | policy-denied
-status            scouted → gated → frozen → approved → implementing → reviewing → draft-ready → submitted → followed-up | parked | rejected | merged
+status            scouted → gated → approved → implementing → reviewing → draft-ready → submitted → followed-up | parked | rejected | merged
+                  (`frozen` is reserved in the union and never written — `approve` accepts it as a
+                  source status, but packets go `gated` → `approved`. See 04-stations §3.)
 station           scout | policy | freeze | implement | review | draft | follow-up | terminal
 lighting          lit
 policy            PolicyVerdict

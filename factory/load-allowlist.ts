@@ -61,16 +61,24 @@ export function parseAllowlistYaml(text: string): ParsedAllowlist {
   return { version, caps, denylist, repos };
 }
 
+/**
+ * Disjointness and uniqueness are compared case-INSENSITIVELY, because that is how `repoById` and
+ * `isDenied` compare (GitHub treats `owner/repo` that way). A case-sensitive check here would pass
+ * a config in which a denylisted id also sits among `repos` under different casing — and in that
+ * state nothing but `maySelectRepo`'s deny-first ordering would keep the repo out. The config
+ * invariant and the runtime lookups must use one notion of "the same repo" (issue #44 item 10).
+ */
 export function assertAllowlist(parsed: ParsedAllowlist): void {
-  const denyIds = new Set(parsed.denylist.map((d) => d.id));
+  const denyIds = new Set(parsed.denylist.map((d) => d.id.toLowerCase()));
   for (const id of REQUIRED_DENY) {
-    if (!denyIds.has(id)) throw new Error(`allowlist.yaml: denylist missing ${id}`);
+    if (!denyIds.has(id.toLowerCase())) throw new Error(`allowlist.yaml: denylist missing ${id}`);
   }
   const repoIds = new Set<string>();
   for (const repo of parsed.repos) {
-    if (denyIds.has(repo.id)) throw new Error(`allowlist.yaml: denylist id leaked into repos: ${repo.id}`);
-    if (repoIds.has(repo.id)) throw new Error(`allowlist.yaml: duplicate repo ${repo.id}`);
-    repoIds.add(repo.id);
+    const key = repo.id.toLowerCase();
+    if (denyIds.has(key)) throw new Error(`allowlist.yaml: denylist id leaked into repos: ${repo.id}`);
+    if (repoIds.has(key)) throw new Error(`allowlist.yaml: duplicate repo ${repo.id}`);
+    repoIds.add(key);
     if (repo.wave >= 1 && repo.sandbox === "host") {
       throw new Error(`allowlist.yaml: Wave 1+ repo ${repo.id} must not use host sandbox`);
     }
