@@ -1794,6 +1794,15 @@ test("status does not claim a re-block that the held slot already prevented", ()
   assert.ok(held.includes(a.prUrl!), held);
 });
 
+/**
+ * `mkdtemp` answers with a fixed path unless a case overrides it. The step exists so the protocol
+ * never calls `mkdtempSync` itself (issue #56): a stub that returned nothing would make every
+ * witness here fail closed on the scratch directory, and a stub that created a REAL directory would
+ * leak one per test, which is issue #64. A fixed fake path keeps the `calls` assertions readable —
+ * the dir is interpolated into `git clone …` — while touching no filesystem.
+ */
+const FAKE_SCRATCH = "/tmp/foundry-witness-fake";
+
 function fakeRunner(script: Record<string, { exit: number; output: string }>) {
   const calls: string[] = [];
   /** Parallel to `calls`: the working directory each step was handed, so cwd is assertable too. */
@@ -1803,7 +1812,9 @@ function fakeRunner(script: Record<string, { exit: number; output: string }>) {
     calls.push(line);
     cwds.push(opts?.cwd);
     const hit = Object.entries(script).find(([prefix]) => line.includes(prefix));
-    return hit ? hit[1] : { exit: 0, output: "" };
+    if (hit) return hit[1];
+    if (cmd === "mkdtemp") return { exit: 0, output: FAKE_SCRATCH };
+    return { exit: 0, output: "" };
   };
   return { runner, calls, cwds };
 }
@@ -2108,6 +2119,17 @@ test("no refusal the witness protocol can produce reaches the terminal with cont
       if (cmd === "run-tests@revert") return fail === "control" ? { exit: 0, output: hostile } : { exit: 1, output: hostile };
       if (cmd === "probe") return { exit: 0, output: `${hostile}\nnpm 10.9.2` };
       if (cmd === "cleanup") return { exit: 0, output: "" };
+      /**
+       * The scratch-directory step, and the reason it is a stage rather than a fixed answer: the
+       * refusal added for issue #56 interpolates this step's output, so it is exactly the "eighth
+       * stage tomorrow" this test's docblock promises to cover the day it exists.
+       *
+       * Answering it correctly also matters for the other nine. When this returned the fall-through
+       * `{ exit: 0, output: "" }`, the empty path made the witness fail closed on the scratch
+       * directory FIRST, so every stage in the loop asserted that one refusal and none of the nine
+       * they name — nine passing assertions exercising one code path, and the suite stayed green.
+       */
+      if (cmd === "mkdtemp") return fail === "mkdtemp" ? { exit: 1, output: hostile } : { exit: 0, output: FAKE_SCRATCH };
       const stage =
         line.includes(" clone ") ? "clone"
         : line.includes(" fetch ") ? "fetch"
@@ -2122,7 +2144,7 @@ test("no refusal the witness protocol can produce reaches the terminal with cont
     };
   };
 
-  const stages = ["clone", "fetch", "checkout", "setup", "clean", "setup-rerun", "revert", "head", "control"];
+  const stages = ["mkdtemp", "clone", "fetch", "checkout", "setup", "clean", "setup-rerun", "revert", "head", "control"];
   for (const stage of stages) {
     const outcome = await witnessEvidence(
       { ...WAVE0, testCommand: "npm test", setupCommand: "npm ci" },
@@ -2155,6 +2177,19 @@ test("no refusal the witness protocol can produce reaches the terminal with cont
     );
     // The diagnostic survives the sanitising — this must not be passing by printing nothing.
     assert.ok(stream.text.trim().length > 20, `${stage}: ${JSON.stringify(stream.text)}`);
+    /**
+     * ...and it must be THIS stage's refusal, not another one reached first.
+     *
+     * Every stage above answers its failing step with `hostile`, whose printable remainder after
+     * sanitising contains "repainted". A refusal raised before the stage under test — which is what
+     * happened while the scratch-directory step answered with an empty path — carries none of it.
+     * Without this line all ten stages passed while exercising one code path, and length alone could
+     * not tell the difference.
+     */
+    assert.ok(
+      stream.text.includes("repainted"),
+      `stage ${stage} refused before its own step ran, so this iteration proves nothing about it: ${JSON.stringify(stream.text.slice(0, 200))}`,
+    );
   }
 });
 
@@ -2474,6 +2509,7 @@ test("test-path classifier knows suffix conventions and setup runs before tests"
   const calls: string[] = [];
   const runner = async (step: string, args: string[]) => {
     calls.push([step, ...args].join(" "));
+    if (step === "mkdtemp") return { exit: 0, output: FAKE_SCRATCH };
     if (step === "run-tests@head") return { exit: 0, output: "ok" };
     if (step === "run-tests@revert") return { exit: 1, output: "red" };
     return { exit: 0, output: "" };
