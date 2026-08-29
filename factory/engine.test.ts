@@ -838,6 +838,35 @@ test("attach-draft refuses a PR body without the verbatim disclosure block", () 
   const ok = attach(`Fixes #${n}\n\n${DISCLOSURE}`);
   assert.equal(ok.error, undefined, ok.error);
   assert.equal(ok.state.packets[0].status, "submitted");
+
+  /**
+   * An UNSUPPLIED body refuses too, which is what `?? ""` buys and what nothing reached (issue #67).
+   * `body` is optional on the opts type, so rewriting the guard to
+   * `opts.body !== undefined && !opts.body.includes(DISCLOSURE)` — a natural "don't check what
+   * wasn't given" refactor — left the suite green: no test drove this gate without a body.
+   *
+   * `ledger-check.ts` makes the argument this pins: "forgetting a field is not a check". It made
+   * `body: string` REQUIRED and asserts an unsupplied one is reported, while the reducer carrying
+   * the same hazard had no such pin. Not exploitable today — both live call sites pass a body and
+   * both are independently pinned — so the hole is for the future third caller that file anticipates.
+   *
+   * The title has to carry the closing keyword: with no body, `mentionsIssue` reads
+   * `title + "\n"`, and without a match the reducer refuses at THAT gate instead and the disclosure
+   * check is never reached.
+   */
+  const unsupplied = applyAttachDraft(state, started.id, url, {
+    draft: true,
+    headSha: HEAD,
+    title: `Fixes #${n}`,
+  });
+  assert.ok(unsupplied.error, "an attach with no body at all must not bind to a packet");
+  assert.match(unsupplied.error!, /verbatim disclosure/, unsupplied.error!);
+  assert.equal(unsupplied.state.packets[0].status, "draft-ready");
+  assert.equal(
+    unsupplied.state.scorecard.find((r) => r.repoId === repoId)?.opened ?? 0,
+    openedBefore,
+    "a refused attach must not score an opened PR",
+  );
 });
 
 test("tick skips issues that already have a competing PR", () => {
