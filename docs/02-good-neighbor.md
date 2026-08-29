@@ -11,7 +11,7 @@ Maintainers do not owe us review. Foundry earns the next review by how the last 
 5. **Disclose.** PR body states Foundry + human attest. No pretending to be a solo late-night hacker.
 6. **Failing-first.** Test or repro is red before the fix exists. Revert must go red again.
 7. **Scope caps.** Per-repo `maxFiles` and `maxDiffLines`. Overflow = park, don’t “just this once.”
-8. **No competing PRs.** If upstream already has an open PR on the issue, assist or stand down. Alternative PR only if a maintainer invites it.
+8. **No competing PRs, and no PR on a closed issue.** If upstream already has an open PR, assist or stand down; alternative PR only if a maintainer invites it. A merged fix closes the PR *and* the issue, so the open-PR check goes quiet exactly when the work is already done — the issue's own state is read separately, at tick, at freeze, and before contact.
 9. **Follow up.** A draft that ignores review threads is slop with extra steps. Follow up until merged, closed, or quiet.
 10. **Stop when asked.** A single maintainer “please don’t” removes the repo from the allowlist the same day.
 

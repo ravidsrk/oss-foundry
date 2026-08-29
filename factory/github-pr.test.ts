@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareCommits, createDraftPull, fetchRepoFile, listCrossReferencingOpenPulls, listOpenPulls } from "./github-pr.ts";
+import {
+  compareCommits,
+  createDraftPull,
+  fetchIssueClosingRef,
+  fetchIssueState,
+  fetchRepoFile,
+  listCrossReferencingOpenPulls,
+  listOpenPulls,
+} from "./github-pr.ts";
 
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
@@ -209,4 +217,98 @@ test("createDraftPull rejects unqualified heads and halts on 429 secondary limit
   );
   assert.equal(secondary429.ok, false);
   if (!secondary429.ok) assert.equal(secondary429.halt, true);
+});
+
+test("fetchIssueState reports the issue's own state, reason and closer", async () => {
+  // The read nothing in the factory made before issue #40. `listOpenPulls` and the timeline filter
+  // both see only OPEN pull requests, so a fix that merged and closed the issue is invisible to
+  // them — this endpoint is the only one that answers "is the target still open?".
+  let seen = "";
+  const closed = await fetchIssueState("ravidsrk/orca-fleet", 71, async (url) => {
+    seen = String(url);
+    return jsonResponse(200, {
+      number: 71,
+      html_url: "https://github.com/ravidsrk/orca-fleet/issues/71",
+      state: "closed",
+      state_reason: "completed",
+      closed_at: "2026-08-27T11:30:05Z",
+      closed_by: { login: "ravidsrk" },
+    });
+  });
+  assert.equal(seen, "https://api.github.com/repos/ravidsrk/orca-fleet/issues/71");
+  assert.equal(closed.ok, true);
+  if (closed.ok) {
+    assert.equal(closed.issue.state, "closed");
+    assert.equal(closed.issue.stateReason, "completed");
+    assert.equal(closed.issue.closedBy, "ravidsrk");
+    assert.equal(closed.issue.isPullRequest, false);
+  }
+
+  const open = await fetchIssueState("ravidsrk/orca-fleet", 80, async () =>
+    jsonResponse(200, { number: 80, html_url: "u", state: "open", state_reason: null }),
+  );
+  assert.equal(open.ok, true);
+  if (open.ok) {
+    assert.equal(open.issue.state, "open");
+    assert.equal(open.issue.stateReason, undefined);
+  }
+});
+
+test("fetchIssueState marks a number that names a pull request, and fails closed on an error", async () => {
+  // GitHub serves pull requests from the issues endpoint too, distinguished only by the
+  // `pull_request` key. Without it an allowlist row naming a PR number reads as a healthy issue.
+  const pr = await fetchIssueState("ravidsrk/orca-fleet", 72, async () =>
+    jsonResponse(200, {
+      number: 72,
+      html_url: "https://github.com/ravidsrk/orca-fleet/pull/72",
+      state: "closed",
+      pull_request: { url: "https://api.github.com/repos/ravidsrk/orca-fleet/pulls/72" },
+    }),
+  );
+  assert.equal(pr.ok, true);
+  if (pr.ok) assert.equal(pr.issue.isPullRequest, true);
+
+  const failed = await fetchIssueState("ravidsrk/orca-fleet", 71, async () => jsonResponse(500, { message: "boom" }));
+  assert.equal(failed.ok, false, "a read that did not answer is not an open issue");
+  if (!failed.ok) assert.match(failed.error, /GitHub 500 reading ravidsrk\/orca-fleet#71/);
+
+  const threw = await fetchIssueState("ravidsrk/orca-fleet", 71, async () => {
+    throw new Error("socket hang up");
+  });
+  assert.equal(threw.ok, false);
+});
+
+test("fetchIssueClosingRef recovers the reference listCrossReferencingOpenPulls throws away", async () => {
+  // The closing pull request is CLOSED by definition, and `listCrossReferencingOpenPulls` keeps
+  // only open ones — so the timeline call the factory already makes has the answer and drops it.
+  // Live shape: ravidsrk/orca-fleet#71's timeline cross-references the closed PR #72.
+  const viaPull = await fetchIssueClosingRef("ravidsrk/orca-fleet", 71, async () =>
+    jsonResponse(200, [
+      {
+        event: "cross-referenced",
+        source: { issue: { state: "closed", pull_request: {}, html_url: "https://github.com/ravidsrk/orca-fleet/pull/72" } },
+      },
+      { event: "closed", commit_id: null },
+    ]),
+  );
+  assert.equal(viaPull, "https://github.com/ravidsrk/orca-fleet/pull/72");
+
+  // A commit that closed the issue directly outranks a mere cross-reference.
+  const viaCommit = await fetchIssueClosingRef("ravidsrk/orca-fleet", 71, async () =>
+    jsonResponse(200, [
+      {
+        event: "cross-referenced",
+        source: { issue: { state: "closed", pull_request: {}, html_url: "https://github.com/ravidsrk/orca-fleet/pull/72" } },
+      },
+      { event: "closed", commit_id: "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d" },
+    ]),
+  );
+  assert.equal(viaCommit, "commit d91fe2f");
+
+  // Enrichment only, never a gate: a timeline that will not load must degrade the refusal message,
+  // not turn a refusal into a crash or a proceed.
+  const failed = await fetchIssueClosingRef("ravidsrk/orca-fleet", 71, async () => jsonResponse(500, {}));
+  assert.equal(failed, undefined);
+  const none = await fetchIssueClosingRef("ravidsrk/orca-fleet", 71, async () => jsonResponse(200, [{ event: "labeled" }]));
+  assert.equal(none, undefined);
 });

@@ -26,6 +26,7 @@ import {
   hasInflight,
   isBoundSha,
   isPlaceholderSha,
+  issueStandDownReason,
   maySelectRepo,
   mentionsIssue,
   referencesIssue,
@@ -3455,4 +3456,99 @@ test("the pre-check does not let a foreign reference through the evidence verb",
   assert.deepEqual(gitCalls(), [], `a foreign reference bought a clone: ${run.seen}`);
   assert.match(run.seen, /does not reference ravidsrk\/orca-fleet#71/, run.seen);
   assert.equal(ledgerAt(dir).packets[0].evidence, undefined);
+});
+
+/**
+ * The closed-issue verdict (issue #40). Deliberately a sibling of `classifyCompetition`: same
+ * question shape — a live GitHub fact the CLI fetches and the engine judges — and the same posture
+ * word, "stand down", that docs/02-good-neighbor.md rule 8 uses for a competing PR.
+ */
+test("issueStandDownReason refuses a closed issue and names why, and passes an open one", () => {
+  const target = { repoId: "ravidsrk/orca-fleet", issueNumber: 71 };
+
+  assert.equal(
+    issueStandDownReason(target, { state: "open", isPullRequest: false }),
+    undefined,
+    "an open issue is the whole point; the gate must not fire on it",
+  );
+  assert.equal(
+    issueStandDownReason(target, { state: "open", stateReason: "reopened", isPullRequest: false }),
+    undefined,
+    "a reopened issue is open",
+  );
+
+  const completed = issueStandDownReason(
+    target,
+    { state: "closed", stateReason: "completed", isPullRequest: false, closedBy: "ravidsrk" },
+    "https://github.com/ravidsrk/orca-fleet/pull/72",
+  );
+  assert.ok(completed);
+  assert.match(completed!, /ravidsrk\/orca-fleet#71/);
+  assert.match(completed!, /closed/);
+  // `/ravidsrk/` alone would be satisfied by the repo id in the key, so pin the phrase.
+  assert.match(completed!, /closed by ravidsrk/, "who closed it");
+  assert.match(completed!, /pull\/72/, "the closing reference, so the operator can go look");
+
+  // `not_planned` is a different message because it is a different fact: nobody fixed this, the
+  // maintainers decided against it. An operator reading "already resolved" would go looking for a
+  // fix that does not exist.
+  const notPlanned = issueStandDownReason(target, {
+    state: "closed",
+    stateReason: "not_planned",
+    isPullRequest: false,
+  });
+  assert.ok(notPlanned);
+  assert.match(notPlanned!, /not planned/i);
+  assert.equal(/already/i.test(notPlanned!), false, "nothing resolved a not-planned issue");
+
+  // No `state_reason` at all (GitHub returns null on older closes) still refuses.
+  const bare = issueStandDownReason(target, { state: "closed", isPullRequest: false });
+  assert.ok(bare, "a closed issue with no reason is still closed");
+
+  // A roster row naming a pull request number is a config error, not a scoutable issue.
+  const isPr = issueStandDownReason(target, { state: "open", isPullRequest: true });
+  assert.ok(isPr);
+  assert.match(isPr!, /pull request/i);
+  assert.match(isPr!, /allowlist/i, "the fix is in allowlist.yaml, so the message says so");
+});
+
+test("tick skips a closed named issue and records why, without consuming the row", () => {
+  // The wiring, not just the predicate. `pickCandidate` falls back to walking `allowlist.yaml`'s
+  // `firstIssues` directly, so leaving a closed issue out of `live` does NOT stop it being
+  // selected — only the blocked set does. Drop `closedIssues` from that set and this goes green
+  // again while the factory scouts an issue GitHub closed.
+  const closed = applyTick(blank(), [], [], [], [
+    { key: "ravidsrk/orca-fleet#71", reason: "ravidsrk/orca-fleet#71 is closed (completed) by ravidsrk" },
+  ]);
+  assert.ok(closed.packet, "the tick must move on to the next named row, not idle");
+  assert.notEqual(`${closed.packet!.repoId}#${closed.packet!.issueNumber}`, "ravidsrk/orca-fleet#71");
+  assert.ok(
+    closed.state.events.some(
+      (e) => /ravidsrk\/orca-fleet#71/.test(e.message) && /closed \(completed\) by ravidsrk/.test(e.message),
+    ),
+    `the ledger must say why a named row went unscouted:\n${JSON.stringify(closed.state.events, null, 2)}`,
+  );
+
+  // Skipped, never consumed: nothing is written against the issue, so a reopen makes it selectable
+  // on the next tick with no hand edit. (Issue #40 asks for this by pointing at "the parked-issue
+  // stranding issue"; no such issue exists in this repo's tracker — untracked — so the requirement
+  // is pinned here instead of cited.)
+  assert.equal(
+    closed.state.packets.some((p) => p.issueNumber === 71),
+    false,
+    "a skip must not leave a packet behind",
+  );
+  // Tick again over the ledger the skip produced — events and all — with only the live fact
+  // changed back. (The packet the first tick scouted is dropped first: it holds the one in-flight
+  // slot, which would abort the second tick for an unrelated reason.)
+  const slotFree = {
+    ...closed.state,
+    packets: closed.state.packets.filter((p) => p.id !== closed.packet!.id),
+  };
+  const reopened = applyTick(slotFree, [], [], [], []);
+  assert.equal(
+    `${reopened.packet?.repoId}#${reopened.packet?.issueNumber}`,
+    "ravidsrk/orca-fleet#71",
+    "with the issue open again the same row is selectable, no hand edit required",
+  );
 });

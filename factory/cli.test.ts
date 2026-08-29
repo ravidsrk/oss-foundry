@@ -7,6 +7,8 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { ALLOWLIST } from "./allowlist.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
+import { buildPacket } from "./packet.ts";
+import { emptyScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import type { FactoryState } from "./types.ts";
 
@@ -56,35 +58,89 @@ function writeState(state: FactoryState): string {
 }
 
 /**
+ * GitHub's answer for one `GET /repos/{owner}/{repo}/issues/{n}`, keyed `owner/repo#n`.
+ *
+ * `"unreadable"` is the fail-closed input: GitHub answers 500, so the CLI knows nothing about the
+ * issue's state. The default for an unnamed key is an OPEN issue, on the same principle as
+ * `livePrs` below — a test states only the one fact it changes, so a refusal can only come from
+ * the fact the test set.
+ */
+type IssueFact =
+  | {
+      state: "open" | "closed";
+      /** GitHub's `state_reason`: completed | not_planned | reopened | null. */
+      reason?: string;
+      /** The number names a pull request, which GitHub also serves from the issues endpoint. */
+      isPr?: boolean;
+      closedBy?: string;
+      /** A pull request the issue's timeline cross-references, as the closing reference. */
+      closedByPr?: string;
+    }
+  | "unreadable";
+
+/**
  * Replace global `fetch` before the CLI's entry module runs, and log every call.
  *
  * The log is the proof: "refused before contacting GitHub" is only demonstrated by showing that no
  * request was made, not by the absence of an error string that only appears when a request WAS
  * made. `secondaryLimit` additionally answers the open-draft pre-flight and then returns GitHub's
  * secondary-rate-limit body for the create, which is the only way to reach the halt-write path.
+ *
+ * The read routes are served in every mode, because the live-state reads are pre-flight for the
+ * create: a mode that 404s `GET /issues/{n}` would refuse fail-closed and never reach the POST.
  */
-function githubStub(mode: "record" | "secondary-limit"): { preload: string; log: string } {
+function githubStub(
+  mode: "record" | "secondary-limit",
+  issues: Record<string, IssueFact> = {},
+): { preload: string; log: string } {
   const dir = mkdtempSync(join(tmpdir(), "foundry-stub-"));
   const log = join(dir, "fetch.log");
   const preload = join(dir, "preload.mjs");
-  const routes =
+  const create =
     mode === "secondary-limit"
       ? `
   if (method === "POST" && /\\/pulls$/.test(u)) {
     return json(403, { message: "You have exceeded a secondary rate limit. Please wait a few minutes before you try again." });
-  }
-  if (/\\/pulls\\?state=open/.test(u)) return json(200, []);
-  if (/\\/timeline\\?/.test(u)) return json(200, []);`
+  }`
       : "";
   writeFileSync(
     preload,
     `import { appendFileSync } from "node:fs";
+const facts = ${JSON.stringify(issues)};
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   const method = (init?.method ?? "GET").toUpperCase();
-  appendFileSync(${JSON.stringify(log)}, method + " " + u + "\\n");${routes}
+  appendFileSync(${JSON.stringify(log)}, method + " " + u + "\\n");${create}
+  const path = new URL(u).pathname;
+  // The timeline path is a prefix extension of the issue path, so it is matched first.
+  const tl = /^\\/repos\\/([^/]+)\\/([^/]+)\\/issues\\/(\\d+)\\/timeline$/.exec(path);
+  if (tl) {
+    const fact = facts[tl[1] + "/" + tl[2] + "#" + tl[3]];
+    const ref = fact && fact !== "unreadable" ? fact.closedByPr : undefined;
+    return json(200, ref
+      ? [
+          { event: "cross-referenced", source: { issue: { state: "closed", pull_request: {}, html_url: ref } } },
+          { event: "closed", commit_id: null },
+        ]
+      : []);
+  }
+  const iss = /^\\/repos\\/([^/]+)\\/([^/]+)\\/issues\\/(\\d+)$/.exec(path);
+  if (iss) {
+    const fact = facts[iss[1] + "/" + iss[2] + "#" + iss[3]] ?? { state: "open" };
+    if (fact === "unreadable") return json(500, { message: "boom" });
+    return json(200, {
+      number: Number(iss[3]),
+      html_url: "https://github.com/" + iss[1] + "/" + iss[2] + "/issues/" + iss[3],
+      state: fact.state,
+      state_reason: fact.reason ?? null,
+      closed_at: fact.state === "closed" ? "2026-08-27T11:30:05Z" : null,
+      closed_by: fact.closedBy ? { login: fact.closedBy } : null,
+      ...(fact.isPr ? { pull_request: { url: "https://api.github.com/x" } } : {}),
+    });
+  }
+  if (/\\/pulls\\?state=open/.test(u)) return json(200, []);
   return json(404, { message: "unstubbed " + method + " " + u });
 };
 `,
@@ -647,4 +703,188 @@ test("reconcile calls a contradiction DIVERGENCE and a re-witness debt ADVISORY,
     new RegExp(`divergences=${claimedMerged.length} advisories=1`),
     `the counters must follow the buckets they count:\n${run.out}`,
   );
+});
+
+/**
+ * A ledger with nothing in it, so `tick` walks `allowlist.yaml`'s named `firstIssues` from the top
+ * and the Wave-0 rows are the only selectable ones. Wave 1+ needs two attested Wave 0 merges, and
+ * there are none here — which fixes the candidate order to orca-fleet#71 then frontguard#195.
+ */
+function emptyLedger(): FactoryState {
+  return {
+    version: 6,
+    packets: [],
+    events: [],
+    scorecard: emptyScorecard(),
+    ticksRun: 0,
+    lastTickAt: null,
+    mergedTotal: 0,
+    bans: 0,
+    humanApprovalsRemaining: 20,
+  };
+}
+
+/** A `gated` packet on the roster's first named issue — the state `approve` is the next step from. */
+function gatedOn71(): FactoryState {
+  return {
+    ...emptyLedger(),
+    packets: [
+      buildPacket({
+        repoId: "ravidsrk/orca-fleet",
+        issueNumber: 71,
+        issueTitle: "[P2] Validator: one unreadable SKILL.md must not abort the catalog",
+        issueUrl: "https://github.com/ravidsrk/orca-fleet/issues/71",
+      }),
+    ],
+  };
+}
+
+test("tick stands down on a named first issue GitHub has already closed", () => {
+  // The live case, not a hypothetical: `allowlist.yaml`'s first named row IS
+  // ravidsrk/orca-fleet#71, and GitHub closed it (state_reason completed) on 2026-08-27. Before
+  // this gate the factory scouted it anyway, because competing-work detection reads only OPEN
+  // pull requests — a merged-and-closed fix is byte-identical to an untouched issue there.
+  const stub = githubStub("record", {
+    "ravidsrk/orca-fleet#71": {
+      state: "closed",
+      reason: "completed",
+      closedBy: "ravidsrk",
+      closedByPr: "https://github.com/ravidsrk/orca-fleet/pull/72",
+    },
+    // A roster row whose number turns out to name a pull request. Same read, same refusal — the
+    // issues endpoint serves both, so without this the config error reads as a healthy issue.
+    "github/awesome-copilot#2684": { state: "open", isPr: true },
+  });
+  const path = writeState(emptyLedger());
+  const ticked = runCli(["tick", "--state", path], tmpdir(), { preload: stub.preload });
+  assert.equal(ticked.code, 0, ticked.out);
+
+  // Skipped, not consumed: the next named row is scouted in the same tick.
+  assert.match(ticked.stdout, /ravidsrk\/frontguard#195/, ticked.out);
+  assert.equal(
+    /ravidsrk\/orca-fleet#71/.test(ticked.stdout),
+    false,
+    `a closed issue must not become a packet:\n${ticked.out}`,
+  );
+  assert.match(ticked.out, /stand down: ravidsrk\/orca-fleet#71 is closed/, ticked.out);
+  assert.match(ticked.out, /closed/, ticked.out);
+  // Who resolved it, so the operator can go look rather than guess.
+  assert.match(ticked.out, /pull\/72/, ticked.out);
+  assert.match(ticked.out, /github\/awesome-copilot#2684 is a pull request, not an issue/, ticked.out);
+
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  assert.equal(
+    onDisk.packets.some((p) => p.issueNumber === 71),
+    false,
+    "no packet may exist for the closed issue",
+  );
+  // Durable, not just a terminal line: the ledger has to explain why a named row went unscouted.
+  assert.ok(
+    onDisk.events.some((e) => /orca-fleet#71/.test(e.message) && /closed/.test(e.message)),
+    `the ledger must record the skip and its reason:\n${JSON.stringify(onDisk.events, null, 2)}`,
+  );
+
+  // With every selectable row closed there is nothing left to move on to, and this is where the
+  // blocked set earns its keep: `pickCandidate` falls back to walking `allowlist.yaml` itself, so
+  // omitting a candidate from the scouted list does NOT keep it out — only `applyTick`'s blocked
+  // keys do. Doctrine here is docs/04-stations.md §1: the tick idles, it does not invent work.
+  const allClosed = githubStub("record", {
+    "ravidsrk/orca-fleet#71": { state: "closed", reason: "completed" },
+    "ravidsrk/frontguard#195": { state: "closed", reason: "completed" },
+  });
+  const idlePath = writeState(emptyLedger());
+  const idle = runCli(["tick", "--state", idlePath], tmpdir(), { preload: allClosed.preload });
+  assert.equal(idle.code, 0, idle.out);
+  assert.match(idle.stdout, /^idle$/m, idle.out);
+  const idleDisk = JSON.parse(readFileSync(idlePath, "utf8")) as FactoryState;
+  assert.deepEqual(
+    idleDisk.packets.map((p) => `${p.repoId}#${p.issueNumber}`),
+    [],
+    `no closed row may be scouted through the allowlist fallback:\n${idle.out}`,
+  );
+});
+
+test("approve refuses the freeze when the issue closed since gating", () => {
+  // SPEC.md §4: the approval step re-checks for competing upstream work and stands down rather
+  // than proceed. An issue closed since gating is the strongest form of that — the work is done or
+  // unwanted — and it is invisible to the open-PR check the freeze already runs.
+  const path = writeState(gatedOn71());
+  const stub = githubStub("record", {
+    "ravidsrk/orca-fleet#71": { state: "closed", reason: "completed", closedBy: "ravidsrk" },
+  });
+  const refused = runCli(
+    ["approve", "pkt_ravidsrk_orca-fleet_71", "--note", "looks fine", "--by", "ravidsrk", "--state", path],
+    tmpdir(),
+    { preload: stub.preload },
+  );
+  assert.equal(refused.code, 1, refused.out);
+  assert.match(refused.out, /stand down/, refused.out);
+  assert.match(refused.out, /ravidsrk\/orca-fleet#71/, refused.out);
+  assert.match(refused.out, /closed/, refused.out);
+  assert.equal(/^approved /m.test(refused.stdout), false, "the freeze must not be reported as done");
+
+  // The refusal writes nothing: no attest, no status change. `reject` stays the operator's verb.
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const packet = onDisk.packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_71");
+  assert.equal(packet?.status, "gated", "a refused freeze must not move the packet");
+  assert.equal(packet?.humanAttest, undefined, "a refused freeze must not stamp an attestation");
+
+  // Not a blanket refusal: the same freeze on an open issue still lands.
+  const openPath = writeState(gatedOn71());
+  const allowed = runCli(
+    ["approve", "pkt_ravidsrk_orca-fleet_71", "--note", "looks fine", "--by", "ravidsrk", "--state", openPath],
+    tmpdir(),
+    { preload: githubStub("record").preload },
+  );
+  assert.equal(allowed.code, 0, allowed.out);
+  assert.match(allowed.stdout, /approved pkt_ravidsrk_orca-fleet_71/);
+});
+
+test("open-draft refuses a closed issue before any write reaches GitHub", () => {
+  // The moment of contact (SPEC.md §6). A check only at selection goes stale — an issue can close
+  // while a packet is in flight — and by here the implementation is already done, so the only thing
+  // left to protect is the maintainer's attention. The POST is what must not happen.
+  const stub = githubStub("record", {
+    "ColeMurray/background-agents#1476": {
+      state: "closed",
+      reason: "not_planned",
+      closedBy: "ColeMurray",
+    },
+  });
+  const path = writeState(draftReadyState());
+  const refused = runCli(
+    ["open-draft", DRAFT_READY_ID, "--head", "ravidsrk:foundry/issue-1476", "--state", path],
+    tmpdir(),
+    { preload: stub.preload, env: { FOUNDRY_PAT: "test-pat" } },
+  );
+  assert.equal(refused.code, 1, refused.out);
+  assert.match(refused.out, /stand down/, refused.out);
+  assert.match(refused.out, /ColeMurray\/background-agents#1476/, refused.out);
+  assert.match(refused.out, /not planned/i, refused.out);
+
+  // Proof, not a proxy: the stub logs every call, and no create may appear in it.
+  const calls = existsSync(stub.log) ? readFileSync(stub.log, "utf8") : "";
+  assert.equal(/^POST /m.test(calls), false, `no draft may be created:\n${calls}`);
+  assert.match(calls, /^GET https:\/\/api\.github\.com\/repos\/ColeMurray\/background-agents\/issues\/1476$/m, calls);
+
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const packet = onDisk.packets.find((p) => p.id === DRAFT_READY_ID);
+  assert.equal(packet?.status, "draft-ready", "a refused open-draft must not move the packet");
+  assert.equal(packet?.prUrl, undefined);
+});
+
+test("an unreadable issue refuses open-draft rather than proceeding blind", () => {
+  // Fail closed, like every other read on this path. "GitHub would not tell us" is not "the issue
+  // is open" — proceeding on a 500 opens exactly the PR the gate exists to stop.
+  const stub = githubStub("record", { "ColeMurray/background-agents#1476": "unreadable" });
+  const path = writeState(draftReadyState());
+  const refused = runCli(
+    ["open-draft", DRAFT_READY_ID, "--head", "ravidsrk:foundry/issue-1476", "--state", path],
+    tmpdir(),
+    { preload: stub.preload, env: { FOUNDRY_PAT: "test-pat" } },
+  );
+  assert.equal(refused.code, 1, refused.out);
+  assert.match(refused.out, /GitHub 500 reading ColeMurray\/background-agents#1476/, refused.out);
+  const calls = existsSync(stub.log) ? readFileSync(stub.log, "utf8") : "";
+  assert.equal(/^POST /m.test(calls), false, `no draft may be created:\n${calls}`);
 });
