@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { tmp } from "./tmp-dir.ts";
 import { maySelectRepo } from "./engine.ts";
 import { applySecondaryLimitHalt, clearFactoryHalt, factoryHalt } from "./halt.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 
 function tmpStatePath() {
-  return join(mkdtempSync(join(tmpdir(), "foundry-halt-")), "state.json");
+  return join(tmp("foundry-halt-"), "state.json");
 }
 
 test("a secondary-rate-limit halt survives the process that printed the banner", () => {

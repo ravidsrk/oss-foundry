@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { tmp } from "./tmp-dir.ts";
 import { buildPacket } from "./packet.ts";
 import { applyReviewToScorecard, emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 
 test("missing state file loads seed and does not invent a file", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "missing.json");
+  const path = join(tmp("foundry-"), "missing.json");
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true);
   if (!loaded.ok) return;
@@ -18,7 +18,7 @@ test("missing state file loads seed and does not invent a file", () => {
 });
 
 test("malformed state file is refused instead of falling back to seed", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "bad.json");
+  const path = join(tmp("foundry-"), "bad.json");
   writeFileSync(path, "{not json");
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, false);
@@ -29,7 +29,7 @@ test("malformed state file is refused instead of falling back to seed", () => {
 });
 
 test("incompatible state object is refused", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "v5.json");
+  const path = join(tmp("foundry-"), "v5.json");
   writeFileSync(path, JSON.stringify({ version: 5, packets: [] }));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, false);
@@ -38,7 +38,7 @@ test("incompatible state object is refused", () => {
 });
 
 test("nested malformed packet is refused", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "nested.json");
+  const path = join(tmp("foundry-"), "nested.json");
   const seed = seedState();
   writeFileSync(
     path,
@@ -66,7 +66,7 @@ test("malformed nested packet fields are refused", () => {
     { ...base, sandboxSession: { status: "dry-run" } },
   ];
   for (const packet of cases) {
-    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "fields.json");
+    const path = join(tmp("foundry-"), "fields.json");
     writeFileSync(path, JSON.stringify({ ...seed, packets: [packet] }));
     const loaded = loadFactoryState(path);
     assert.equal(loaded.ok, false, JSON.stringify(packet).slice(0, 80));
@@ -97,7 +97,7 @@ test("a stored witness may carry a toolchain string, and nothing else in that sl
     packets: [{ ...base, evidence: { ...base.evidence, witness: { ...witness, ...extra } } }],
   });
   const write = (state: unknown): string => {
-    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "toolchain.json");
+    const path = join(tmp("foundry-"), "toolchain.json");
     writeFileSync(path, JSON.stringify(state));
     return path;
   };
@@ -139,7 +139,7 @@ test("v6 ledger missing later-required fields is migrated, not stranded", () => 
   const row = { ...(seed.scorecard[0] as Record<string, unknown>) };
   delete row.closedUnmerged;
   delete row.lastTouch;
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "old-v6.json");
+  const path = join(tmp("foundry-"), "old-v6.json");
   writeFileSync(
     path,
     JSON.stringify({
@@ -172,7 +172,7 @@ test("stored scorecard without noReview is migrated to 0, not stranded", () => {
     delete row.noReview;
     return row;
   });
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "no-noreview.json");
+  const path = join(tmp("foundry-"), "no-noreview.json");
   writeFileSync(path, JSON.stringify({ ...seed, scorecard }));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true);
@@ -183,7 +183,7 @@ test("stored scorecard without noReview is migrated to 0, not stranded", () => {
 });
 
 test("valid state round-trips without becoming seed", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "ok.json");
+  const path = join(tmp("foundry-"), "ok.json");
   const seed = seedState();
   seed.ticksRun = 99;
   saveFactoryState(path, seed);
@@ -208,7 +208,7 @@ test("merge rate counts terminal outcomes; silence alone cannot trip the halt", 
 test("stored packet with dark-eligible lighting is refused", () => {
   const seed = seedState();
   const packet = { ...seed.packets[0], lighting: "dark-eligible" };
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "dark.json");
+  const path = join(tmp("foundry-"), "dark.json");
   writeFileSync(path, JSON.stringify({ ...seed, packets: [packet, ...seed.packets.slice(1)] }));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, false);
@@ -223,7 +223,7 @@ test("a hand-edited state file with more in-flight packets than the cap is refus
   const packets = seed.packets.map((p) =>
     p.id === secondInflightId ? { ...p, status: "gated" as const, station: "freeze" as const } : p,
   );
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "overcap.json");
+  const path = join(tmp("foundry-"), "overcap.json");
   writeFileSync(path, JSON.stringify({ ...seed, packets }));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, false);
@@ -235,7 +235,7 @@ test("a hand-edited state file with more in-flight packets than the cap is refus
 test("a state file at exactly the in-flight cap still loads", () => {
   const seed = seedState();
   assert.equal(seed.packets.filter((p) => p.status === "submitted").length, 1);
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "atcap.json");
+  const path = join(tmp("foundry-"), "atcap.json");
   writeFileSync(path, JSON.stringify(seed));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true);
@@ -253,7 +253,7 @@ test("a stored policy document must be well-formed and internally consistent", (
   const base = seed.packets[0];
   const doc = { name: "CONTRIBUTING", chars: 10, excerpt: "0123456789", truncated: false };
   const write = (policyDocs: unknown): string => {
-    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "policydocs.json");
+    const path = join(tmp("foundry-"), "policydocs.json");
     writeFileSync(path, JSON.stringify({ ...seed, packets: [{ ...base, policyDocs }] }));
     return path;
   };
@@ -310,7 +310,7 @@ test("policy documents survive save and load unchanged", () => {
   assert.equal(built.policyDocs?.length, 2);
   assert.equal(built.policyDocs?.[1].truncated, true);
 
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "roundtrip.json");
+  const path = join(tmp("foundry-"), "roundtrip.json");
   saveFactoryState(path, { ...seed, packets: [built, ...seed.packets.filter((p) => p.status !== "submitted")] });
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true, "a freshly built packet must load back");
@@ -329,7 +329,7 @@ test("a ledger written before the review counters existed migrates to 0, never t
     delete row.humanReviewedPrs;
     return row;
   });
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "pre-39.json");
+  const path = join(tmp("foundry-"), "pre-39.json");
   writeFileSync(path, JSON.stringify({ ...seed, scorecard }));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true, loaded.ok ? "" : loaded.error);
@@ -352,7 +352,7 @@ test("a scorecard row whose review counters are the wrong type is refused, not c
   for (const field of ["humanReviewedPrs", "humanReviewComments", "reviewCommentsAvg", "noReview", "reverts"]) {
     const seed = seedState();
     const scorecard = seed.scorecard.map((r, i) => (i === 0 ? ({ ...r, [field]: "2" } as unknown) : r));
-    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), `bad-${field}.json`);
+    const path = join(tmp("foundry-"), `bad-${field}.json`);
     writeFileSync(path, JSON.stringify({ ...seed, scorecard }));
     assert.equal(
       loadFactoryState(path).ok,
@@ -361,7 +361,7 @@ test("a scorecard row whose review counters are the wrong type is refused, not c
     );
   }
   // The control: the same seed, untouched, still loads — so the refusals above are about the edit.
-  const clean = join(mkdtempSync(join(tmpdir(), "foundry-")), "clean.json");
+  const clean = join(tmp("foundry-"), "clean.json");
   writeFileSync(clean, JSON.stringify(seedState()));
   assert.equal(loadFactoryState(clean).ok, true);
 });
@@ -382,7 +382,7 @@ test("the review split and merge facts a sync records survive a round trip", () 
         }
       : p,
   );
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-")), "prmeta.json");
+  const path = join(tmp("foundry-"), "prmeta.json");
   saveFactoryState(path, { ...seed, packets });
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, true, loaded.ok ? "" : loaded.error);
@@ -396,7 +396,7 @@ test("the review split and merge facts a sync records survive a round trip", () 
   const broken = loaded.state.packets.map((p) =>
     p.prMeta ? { ...p, prMeta: { ...p.prMeta, humanReview: { reviews: "1", comments: 1 } } } : p,
   );
-  const badPath = join(mkdtempSync(join(tmpdir(), "foundry-")), "bad-prmeta.json");
+  const badPath = join(tmp("foundry-"), "bad-prmeta.json");
   writeFileSync(badPath, JSON.stringify({ ...loaded.state, packets: broken }));
   assert.equal(loadFactoryState(badPath).ok, false);
 
@@ -412,7 +412,7 @@ test("the review split and merge facts a sync records survive a round trip", () 
     const corrupt = loaded.state.packets.map((p) =>
       p.prMeta ? { ...p, prMeta: { ...p.prMeta, [field]: bad } } : p,
     );
-    const path = join(mkdtempSync(join(tmpdir(), "foundry-")), `bad-${field}.json`);
+    const path = join(tmp("foundry-"), `bad-${field}.json`);
     writeFileSync(path, JSON.stringify({ ...loaded.state, packets: corrupt }));
     assert.equal(
       loadFactoryState(path).ok,
@@ -426,7 +426,7 @@ test("the review split and merge facts a sync records survive a round trip", () 
       ? { ...p, prMeta: { ...p.prMeta, mergeCommitSha: undefined, mergedAt: undefined, baseRef: undefined } }
       : p,
   );
-  const absentPath = join(mkdtempSync(join(tmpdir(), "foundry-")), "absent-prmeta.json");
+  const absentPath = join(tmp("foundry-"), "absent-prmeta.json");
   writeFileSync(absentPath, JSON.stringify({ ...loaded.state, packets: absent }));
   assert.equal(loadFactoryState(absentPath).ok, true, "optional must still mean optional");
 });

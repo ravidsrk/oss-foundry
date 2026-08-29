@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { tmp } from "./tmp-dir.ts";
 import { ALLOWLIST } from "./allowlist.ts";
 import { assertDisjointCounts } from "./fixture-counts.ts";
 import { applySecondaryLimitHalt } from "./halt.ts";
@@ -55,7 +56,7 @@ function runCli(
 }
 
 function writeState(state: FactoryState): string {
-  const path = join(mkdtempSync(join(tmpdir(), "foundry-cli-")), "state.json");
+  const path = join(tmp("foundry-cli-"), "state.json");
   writeFileSync(path, JSON.stringify(state, null, 2));
   return path;
 }
@@ -96,7 +97,7 @@ function githubStub(
   mode: "record" | "secondary-limit",
   issues: Record<string, IssueFact> = {},
 ): { preload: string; log: string } {
-  const dir = mkdtempSync(join(tmpdir(), "foundry-stub-"));
+  const dir = tmp("foundry-stub-");
   const log = join(dir, "fetch.log");
   const preload = join(dir, "preload.mjs");
   const create =
@@ -236,7 +237,7 @@ function prFactsStub(
   // a clean one return the same commits and the same verdict — the clock has to tell them apart.
   commitReads: { fail?: string[]; truncate?: string[] } = {},
 ): string {
-  const preload = join(mkdtempSync(join(tmpdir(), "foundry-prfacts-")), "preload.mjs");
+  const preload = join(tmp("foundry-prfacts-"), "preload.mjs");
   writeFileSync(
     preload,
     `const facts = ${JSON.stringify(table)};
@@ -353,7 +354,7 @@ test("the state path is anchored to the repo root, not the cwd", () => {
   // A decoy exactly where the ledger used to be read from. Under the old cwd-relative path this
   // file WAS the state; the canary tick count is what proves it is not consulted now — a path
   // assertion alone would still pass if the CLI printed one path and read another.
-  const decoyDir = mkdtempSync(join(tmpdir(), "foundry-anchor-"));
+  const decoyDir = tmp("foundry-anchor-");
   writeFileSync(
     join(decoyDir, ".foundry-state.json"),
     JSON.stringify({ ...seedState(), ticksRun: 90210 }),
@@ -416,7 +417,7 @@ test("a test that spawns the CLI without --state cannot write the repo-root ledg
 });
 
 test("a seed-backed run says so instead of presenting the seed as live truth", () => {
-  const missing = join(mkdtempSync(join(tmpdir(), "foundry-cli-")), "absent.json");
+  const missing = join(tmp("foundry-cli-"), "absent.json");
   const seeded = runCli(["status", "--state", missing], tmpdir());
   assert.equal(seeded.code, 0);
   assert.match(seeded.out, /no state file/i);
@@ -936,7 +937,7 @@ test("attach-draft binds the same PR once its body carries the verbatim block", 
  * nothing would notice — which is the whole failure class `applyAttachDraft` now guards.
  */
 function createStub(): string {
-  const preload = join(mkdtempSync(join(tmpdir(), "foundry-create-")), "preload.mjs");
+  const preload = join(tmp("foundry-create-"), "preload.mjs");
   writeFileSync(
     preload,
     `let created = null;
@@ -992,7 +993,7 @@ test("open-draft records its own POST through the same disclosure gate", () => {
     JSON.stringify("PLACEHOLDER"),
     JSON.stringify(packet.evidence!.reviewedSha!),
   );
-  const preloadPath = join(mkdtempSync(join(tmpdir(), "foundry-create2-")), "preload.mjs");
+  const preloadPath = join(tmp("foundry-create2-"), "preload.mjs");
   writeFileSync(preloadPath, preload);
 
   const run = runCli(

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { tmp } from "./tmp-dir.ts";
 
 /**
  * The entry-point guard on `factory/cli.ts`, driven as a process.
@@ -34,7 +34,7 @@ test("importing cli.ts does not run the CLI", () => {
   // exactly the shape `node --test factory/engine.test.ts` presents. If `main()` runs anyway it
   // reaches `usage()`, and the pre-guard code then called `process.exit(0)` from module scope:
   // the marker below would never print and the exit status would still be 0.
-  const dir = mkdtempSync(join(tmpdir(), "foundry-entry-"));
+  const dir = tmp("foundry-entry-");
   const importer = join(dir, "import-cli.mjs");
   writeFileSync(
     importer,
@@ -74,7 +74,7 @@ test("the entry point is recognised through a symlinked checkout", () => {
   // because Node resolves symlinks when it loads a module. Comparing them without canonicalising
   // argv[1] makes the CLI exit 0 having printed nothing whenever the checkout is reached through a
   // link — a silent success, which is worse than the crash the guard replaced.
-  const dir = mkdtempSync(join(tmpdir(), "foundry-symlink-"));
+  const dir = tmp("foundry-symlink-");
   const link = join(dir, "foundry-checkout");
   symlinkSync(REPO_ROOT, link, "dir");
 
