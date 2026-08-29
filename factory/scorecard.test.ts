@@ -13,9 +13,9 @@ const MERGE = "36d0f23708adbdf911e4df050ed516821278a9fc";
 const MERGED_AT = "2026-08-27T07:04:52Z";
 
 test("the revert window is closed at the deadline instant", () => {
-  // "within 30 days of merge" includes the instant the window closes (issue #76). Day 1 and day 31
-  // cannot see `<=` flipped to `<`. Closed, not open: both halves share this predicate, and a
-  // rollback dated exactly 30 days after the merge is still within 30 days.
+  // "within 30 days of merge" includes the closing instant (issue #76). Closed, not open:
+  // applyRevert already records day 30. GitHub's commit `until` is exclusive ("before this date"),
+  // so the mechanical read never feeds this instant; the operator `--at` path can, and must agree.
   const deadline = new Date(Date.parse(MERGED_AT) + REVERT_WINDOW_DAYS * 86_400_000).toISOString();
   const atDeadline = revertWindow(MERGED_AT, deadline);
   assert.equal(atDeadline.known, true);
