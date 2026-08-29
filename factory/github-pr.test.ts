@@ -16,6 +16,7 @@ import {
   nextPageUrl,
   revertCheck,
   syncGithubPr,
+  MAX_LIST_PAGES,
 } from "./github-pr.ts";
 import { REVERT_WINDOW_DAYS } from "./scorecard.ts";
 
@@ -812,11 +813,22 @@ test("fetchHumanReview fails closed on a thrown fetch, a bad status, and a non-l
 
   // A 200 whose body is not a list. Without the guard `.filter` throws and the failure arrives as
   // "fetch failed", which is a different and untrue account of what happened.
-  const notList = await fetchHumanReview("ravidsrk/orca-fleet", 70, async (url) =>
+  //
+  // Now asserted PER ENDPOINT rather than against one combined "the review endpoints" message.
+  // Paginating both reads through one helper (issue #69) made the message name which endpoint
+  // returned the non-list, so this tightened rather than moved: the old assertion passed whichever
+  // of the two had failed, and these two cannot.
+  const notListComments = await fetchHumanReview("ravidsrk/orca-fleet", 70, async (url) =>
     String(url).includes("/comments") ? jsonResponse(200, { message: "Not Found" }) : jsonResponse(200, []),
   );
-  assert.equal(notList.ok, false);
-  if (!notList.ok) assert.match(notList.error, /non-list for the review endpoints/);
+  assert.equal(notListComments.ok, false);
+  if (!notListComments.ok) assert.match(notListComments.error, /non-list on review comments/);
+
+  const notListReviews = await fetchHumanReview("ravidsrk/orca-fleet", 70, async (url) =>
+    String(url).includes("/reviews") ? jsonResponse(200, { message: "Not Found" }) : jsonResponse(200, []),
+  );
+  assert.equal(notListReviews.ok, false);
+  if (!notListReviews.ok) assert.match(notListReviews.error, /non-list on reviews/);
 
   const badRepo = await fetchHumanReview("orca-fleet", 70, async () => jsonResponse(200, []));
   assert.equal(badRepo.ok, false);
@@ -835,4 +847,137 @@ test("listCommitsSince refuses a 200 whose body is not a list of commits", async
   });
   assert.equal(threw.ok, false);
   if (!threw.ok) assert.match(threw.error, /network down/);
+});
+
+/**
+ * Issue #69: five list reads shared `listCommitsSince`'s pre-#39 shape — `per_page=100`, no `page`,
+ * no Link follow, no truncation signal — so a truncated success was byte-identical to a complete one.
+ * `:61` was the sharpest: it feeds the competing-work gate, an active repository with more than 100
+ * open pull requests is ordinary, and a missed open PR means opening a duplicate against work already
+ * in flight — the outcome docs/PRODUCT.md §2 exists to prevent.
+ *
+ * Each read is driven across a page boundary, because "it paginates" is a claim about the SECOND
+ * page and a one-page fixture cannot see it.
+ */
+function paged(pages: unknown[][]): typeof fetch {
+  // Per ENDPOINT, not one shared counter: `fetchHumanReview` reads `/reviews` and `/comments` in
+  // parallel, and a single counter handed each of them one page and then ran off the end — which
+  // looked like "pagination works" while proving the opposite.
+  const served = new Map<string, number>();
+  return (async (url: string | URL | Request) => {
+    const key = String(url).split("?")[0];
+    const n = served.get(key) ?? 0;
+    served.set(key, n + 1);
+    const body = pages[n] ?? [];
+    const isLast = n >= pages.length - 1;
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: isLast
+        ? { "Content-Type": "application/json" }
+        : { "Content-Type": "application/json", link: `<${String(url)}&page=${n + 2}>; rel="next"` },
+    });
+  }) as typeof fetch;
+}
+
+test("every paginated list read follows the cursor to the second page", async () => {
+  const pulls = await listOpenPulls(
+    "ravidsrk/orca-fleet",
+    paged([
+      [{ number: 1, html_url: "https://github.com/ravidsrk/orca-fleet/pull/1", head: { ref: "a" } }],
+      [{ number: 2, html_url: "https://github.com/ravidsrk/orca-fleet/pull/2", head: { ref: "b" } }],
+    ]),
+  );
+  assert.equal(pulls.ok, true);
+  if (pulls.ok) {
+    assert.deepEqual(pulls.pulls.map((p) => p.number), [1, 2], "the second page of open pulls was not read");
+    assert.equal(pulls.truncated, false);
+  }
+
+  const crossRefs = await listCrossReferencingOpenPulls(
+    "ravidsrk/orca-fleet",
+    71,
+    paged([
+      [{ event: "labeled" }],
+      [
+        {
+          event: "cross-referenced",
+          source: { issue: { state: "open", html_url: "https://github.com/x/y/pull/9", pull_request: {} } },
+        },
+      ],
+    ]),
+  );
+  assert.equal(crossRefs.ok, true);
+  // The only cross-reference lives on page 2: a one-page read reports "no competing work" here.
+  if (crossRefs.ok) assert.deepEqual(crossRefs.urls, ["https://github.com/x/y/pull/9"]);
+
+  const review = await fetchHumanReview(
+    "ravidsrk/orca-fleet",
+    70,
+    paged([[{ user: { login: "a", type: "User" } }], [{ user: { login: "b", type: "User" } }]]),
+  );
+  assert.equal(review.ok, true);
+  // Two pages per endpoint, both endpoints sharing the stub: 2 reviews and 2 comments.
+  if (review.ok) assert.deepEqual(review.humanReview, { reviews: 2, comments: 2 });
+
+  const closing = await fetchIssueClosingRef(
+    "ravidsrk/orca-fleet",
+    71,
+    paged([[{ event: "labeled" }], [{ event: "closed", commit_id: "abcdef1234567890" }]]),
+  );
+  assert.equal(closing, "commit abcdef1", "the closing commit on page 2 was not seen");
+});
+
+test("a capped read is distinguishable from a complete one", async () => {
+  // A stub that never stops offering a next page: the cap is what ends it, and `truncated` is the
+  // only thing that says so — the items and the verdict look exactly like a clean read.
+  const endless: typeof fetch = (async (url: string | URL | Request) =>
+    new Response(JSON.stringify([{ number: 1, html_url: "https://github.com/x/y/pull/1", head: { ref: "a" } }]), {
+      status: 200,
+      headers: { "Content-Type": "application/json", link: `<${String(url)}>; rel="next"` },
+    })) as typeof fetch;
+
+  const capped = await listOpenPulls("ravidsrk/orca-fleet", endless);
+  assert.equal(capped.ok, true, "a capped read is still a successful read");
+  if (capped.ok) {
+    assert.equal(capped.truncated, true, "the cap was hit and nothing said so");
+    assert.equal(capped.pulls.length, MAX_LIST_PAGES, "one item per page, so the cap bounds the read");
+  }
+
+  const cappedRefs = await listCrossReferencingOpenPulls("ravidsrk/orca-fleet", 71, endless);
+  if (cappedRefs.ok) assert.equal(cappedRefs.truncated, true);
+
+  const cappedReview = await fetchHumanReview("ravidsrk/orca-fleet", 70, endless);
+  if (cappedReview.ok) assert.equal(cappedReview.truncated, true);
+
+  // EACH endpoint on its own. `truncated` is an OR over two reads, and an endless stub truncates
+  // both, so it could not tell the OR from a read of `reviews` alone. Comments-only is the half that
+  // was unpinned — and it is the more likely one, since a busy PR has far more review comments than
+  // reviews.
+  const commentsOnly: typeof fetch = (async (url: string | URL | Request) => {
+    const u = String(url);
+    const body = u.includes("/comments") ? [{ user: { login: "a", type: "User" } }] : [];
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: u.includes("/comments")
+        ? { "Content-Type": "application/json", link: `<${u}>; rel="next"` }
+        : { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+  const halfCapped = await fetchHumanReview("ravidsrk/orca-fleet", 70, commentsOnly);
+  assert.equal(halfCapped.ok, true);
+  if (halfCapped.ok) {
+    assert.equal(halfCapped.truncated, true, "a capped comments read alone must still report truncation");
+    assert.equal(halfCapped.humanReview.reviews, 0);
+  }
+});
+
+/**
+ * The SHIPPED cap, not just the mechanism. #83 spent three rounds on exactly this distinction: the
+ * terminal boundary's mechanism was thoroughly tested while its default stream list was not, and
+ * deleting `process.stderr` left the suite green. A cap the tests read out of the constant they are
+ * checking cannot notice the constant changing, so the number is written down here once.
+ */
+test("the page cap is ten, and both list caps agree", () => {
+  assert.equal(MAX_LIST_PAGES, 10);
+  assert.equal(MAX_COMMIT_PAGES, 10, "the commit read and the list reads must bound alike");
 });

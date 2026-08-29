@@ -54,24 +54,30 @@ export interface OpenPull {
 export async function listOpenPulls(
   repoId: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true; pulls: OpenPull[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; pulls: OpenPull[]; truncated: boolean } | { ok: false; error: string }> {
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`, {
-      headers: githubApiHeaders(),
-    });
-    if (!res.ok) return { ok: false, error: `GitHub ${res.status} listing pulls on ${repoId}` };
-    const body = (await res.json()) as {
+    // The highest-severity of the five sites issue #69 names: this feeds the competing-work gate,
+    // and a repository with more than 100 open pull requests is ordinary. A missed open PR means
+    // Foundry opens a duplicate against work already in flight, which is the outcome
+    // docs/PRODUCT.md §2 exists to prevent.
+    const read = await listAllPages<{
       number: number;
       title?: string;
       body?: string | null;
       html_url: string;
       head?: { ref?: string };
-    }[];
+    }>(
+      `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`,
+      `listing pulls on ${repoId}`,
+      fetchImpl,
+    );
+    if (!read.ok) return read;
     return {
       ok: true,
-      pulls: body.map((p) => ({
+      truncated: read.truncated,
+      pulls: read.items.map((p) => ({
         number: p.number,
         title: p.title ?? "",
         body: p.body ?? "",
@@ -89,21 +95,20 @@ export async function listCrossReferencingOpenPulls(
   repoId: string,
   issueNumber: number,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true; urls: string[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; urls: string[]; truncated: boolean } | { ok: false; error: string }> {
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
-    const res = await fetchImpl(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/timeline?per_page=100`,
-      { headers: githubApiHeaders() },
-    );
-    if (!res.ok) {
-      return { ok: false, error: `GitHub ${res.status} reading timeline for ${repoId}#${issueNumber}` };
-    }
-    const body = (await res.json()) as {
+    const read = await listAllPages<{
       event?: string;
       source?: { issue?: { state?: string; html_url?: string; pull_request?: unknown } };
-    }[];
+    }>(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/timeline?per_page=100`,
+      `reading timeline for ${repoId}#${issueNumber}`,
+      fetchImpl,
+    );
+    if (!read.ok) return read;
+    const body = read.items;
     const urls = body
       .filter(
         (e) =>
@@ -113,7 +118,7 @@ export async function listCrossReferencingOpenPulls(
           typeof e.source.issue.html_url === "string",
       )
       .map((e) => e.source!.issue!.html_url as string);
-    return { ok: true, urls: [...new Set(urls)] };
+    return { ok: true, urls: [...new Set(urls)], truncated: read.truncated };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
   }
@@ -212,16 +217,21 @@ export async function fetchIssueClosingRef(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return undefined;
   try {
-    const res = await fetchImpl(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/timeline?per_page=100`,
-      { headers: githubApiHeaders() },
-    );
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as {
+    // Paginated for the same reason as its sibling above, but deliberately WITHOUT a truncation
+    // signal: this function is best-effort by contract (see the docblock), returns `undefined`
+    // rather than an error so it can never turn a refusal into a proceed, and is called only after a
+    // refusal is already decided. A capped read here degrades a message; it cannot change a verdict.
+    const read = await listAllPages<{
       event?: string;
       commit_id?: string | null;
       source?: { issue?: { html_url?: string; pull_request?: unknown } };
-    }[];
+    }>(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/timeline?per_page=100`,
+      `reading timeline for ${repoId}#${issueNumber}`,
+      fetchImpl,
+    );
+    if (!read.ok) return undefined;
+    const body = read.items;
     // A commit that closed the issue outright is the more specific answer, so it outranks a
     // cross-reference that merely names it.
     const closingCommit = body.find((e) => e.event === "closed" && typeof e.commit_id === "string");
@@ -405,23 +415,28 @@ export async function fetchHumanReview(
   repoId: string,
   number: number,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true; humanReview: { reviews: number; comments: number } } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; humanReview: { reviews: number; comments: number }; truncated: boolean }
+  | { ok: false; error: string }
+> {
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
     const base = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`;
-    const [reviewsRes, commentsRes] = await Promise.all([
-      fetchImpl(`${base}/reviews?per_page=100`, { headers: githubApiHeaders() }),
-      fetchImpl(`${base}/comments?per_page=100`, { headers: githubApiHeaders() }),
+    // A busy PR undercounts human review on a single page, which is the exact metric issue #39
+    // exists to make computable — so an under-read here is a wrong KPI, not a missing one.
+    type Actor = { user?: { login?: string; type?: string } | null };
+    const [reviewsRead, commentsRead] = await Promise.all([
+      listAllPages<Actor>(`${base}/reviews?per_page=100`, "on reviews", fetchImpl),
+      listAllPages<Actor>(`${base}/comments?per_page=100`, "on review comments", fetchImpl),
     ]);
-    if (!reviewsRes.ok) return { ok: false, error: `GitHub ${reviewsRes.status} on reviews` };
-    if (!commentsRes.ok) return { ok: false, error: `GitHub ${commentsRes.status} on review comments` };
-    const reviews = (await reviewsRes.json()) as { user?: { login?: string; type?: string } | null }[];
-    const comments = (await commentsRes.json()) as { user?: { login?: string; type?: string } | null }[];
-    if (!Array.isArray(reviews) || !Array.isArray(comments)) {
-      return { ok: false, error: "GitHub returned a non-list for the review endpoints" };
-    }
-    return { ok: true, humanReview: countHumanReview({ reviews, comments }) };
+    if (!reviewsRead.ok) return reviewsRead;
+    if (!commentsRead.ok) return commentsRead;
+    return {
+      ok: true,
+      humanReview: countHumanReview({ reviews: reviewsRead.items, comments: commentsRead.items }),
+      truncated: reviewsRead.truncated || commentsRead.truncated,
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
   }
@@ -435,6 +450,52 @@ export function nextPageUrl(link: string | null | undefined): string | undefined
     if (match) return match[1];
   }
   return undefined;
+}
+
+/**
+ * How many pages any one list read may follow. Ten pages is 1,000 items — the same bound, and the
+ * same reason, as `MAX_COMMIT_PAGES`: this runs unattended every six hours, and an unbounded follow
+ * is the "excessive automated bulk activity" the AUP names (docs/07-github-app.md).
+ */
+export const MAX_LIST_PAGES = 10;
+
+/**
+ * Every page of a GitHub list endpoint, to a stated cap, saying so when it stops short.
+ *
+ * ONE HOME, because the alternative was five copies. Issue #39 fixed `listCommitsSince` after it was
+ * found truncating in production, and left five siblings with the identical shape — `per_page=100`,
+ * no `page`, no Link follow, no truncation signal. Copying its loop five times would have been five
+ * places for the rule to drift, which is the defect `fixture-counts.ts` was created to end.
+ * `listCommitsSince` reads through here too, so there is one loop and not "the good one plus four".
+ *
+ * `truncated` exists because a short read and a complete one return the same items and the same
+ * verdict. Every consumer already shouts about a read that FAILED; nothing could tell them about one
+ * that merely stopped early.
+ *
+ * `res.headers?.get` is optional because GitHub omits `Link` entirely on a single-page response, and
+ * absent means "no next page" — not an error.
+ */
+async function listAllPages<T>(
+  firstUrl: string,
+  what: string,
+  fetchImpl: typeof fetch,
+  cap: number = MAX_LIST_PAGES,
+): Promise<{ ok: true; items: T[]; truncated: boolean } | { ok: false; error: string }> {
+  let url = firstUrl;
+  const items: T[] = [];
+  for (let page = 0; page < cap; page += 1) {
+    const res = await fetchImpl(url, { headers: githubApiHeaders() });
+    if (!res.ok) return { ok: false, error: `GitHub ${res.status} ${what}` };
+    const body = await res.json();
+    if (!Array.isArray(body)) return { ok: false, error: `GitHub returned a non-list ${what}` };
+    items.push(...(body as T[]));
+    // GitHub's own cursor, followed verbatim rather than a `page=` this code increments: the header
+    // is what the API documents, and the only thing that says "there is more".
+    const next = nextPageUrl(res.headers?.get("link"));
+    if (!next) return { ok: true, items, truncated: false };
+    url = next;
+  }
+  return { ok: true, items, truncated: true };
 }
 
 /**
@@ -484,31 +545,29 @@ export async function listCommitsSince(
   // `revertCheck` below, which is the only caller that can compute it.
   if (opts.until) query.set("until", opts.until);
   if (opts.sha) query.set("sha", opts.sha);
-  let url = `https://api.github.com/repos/${owner}/${repo}/commits?${query}`;
-  const commits: { sha: string; message: string; committedAt: string }[] = [];
   try {
-    for (let page = 0; page < MAX_COMMIT_PAGES; page += 1) {
-      const res = await fetchImpl(url, { headers: githubApiHeaders() });
-      if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
-      const body = (await res.json()) as {
-        sha?: string;
-        commit?: { message?: string; committer?: { date?: string } | null };
-      }[];
-      if (!Array.isArray(body)) return { ok: false, error: "GitHub returned a non-list for commits" };
-      for (const c of body) {
-        commits.push({
-          sha: c.sha ?? "",
-          message: c.commit?.message ?? "",
-          committedAt: c.commit?.committer?.date ?? "",
-        });
-      }
-      // GitHub's own cursor, followed verbatim rather than a `page=` this code increments: the
-      // header is what the API documents, and it is also the only thing that says "there is more".
-      const next = nextPageUrl(res.headers.get("link"));
-      if (!next) return { ok: true, commits, truncated: false };
-      url = next;
-    }
-    return { ok: true, commits, truncated: true };
+    // Through the same loop as the other five list reads (issue #69). This one was correct first —
+    // #39 wrote it after finding the truncation in production — and it stays the reference, but as a
+    // CALLER of the shared loop rather than the one good copy beside four broken ones.
+    const read = await listAllPages<{
+      sha?: string;
+      commit?: { message?: string; committer?: { date?: string } | null };
+    }>(
+      `https://api.github.com/repos/${owner}/${repo}/commits?${query}`,
+      "for commits",
+      fetchImpl,
+      MAX_COMMIT_PAGES,
+    );
+    if (!read.ok) return read;
+    return {
+      ok: true,
+      truncated: read.truncated,
+      commits: read.items.map((c) => ({
+        sha: c.sha ?? "",
+        message: c.commit?.message ?? "",
+        committedAt: c.commit?.committer?.date ?? "",
+      })),
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
   }

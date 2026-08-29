@@ -2281,3 +2281,43 @@ test("the clock says so when the commit read fails, and when it merely stops sho
     `a complete read must stay quiet or the advisory means nothing:\n${clean.out}`,
   );
 });
+
+/**
+ * Issue #69, the operator-visible half: a competing-work read that stops at the page cap must refuse,
+ * not proceed.
+ *
+ * The gate exists to assert the ABSENCE of a competing pull request, and an absence is the one thing
+ * a short read cannot establish. Before the fix these reads stopped silently at 100 items and a
+ * truncated success was byte-identical to a complete one; now the cap is 1,000, so this is a loud
+ * stop rather than a likely one — but it has to be a stop, because proceeding would publish "no
+ * competing pull request" as a fact the run never checked.
+ *
+ * Driven through the real CLI rather than asserted on the reader's return value: the reader returning
+ * `truncated` and the verb acting on it are two different claims, and only the second one protects
+ * an operator.
+ */
+test("a competing-work read that stops at the page cap refuses the tick", () => {
+  const dir = tmp("foundry-cap-");
+  const preload = join(dir, "preload.mjs");
+  writeFileSync(
+    preload,
+    `const json = (status, body, headers = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+globalThis.fetch = async (url) => {
+  const u = String(url);
+  // Always another page: the cap is what ends this read, which is the condition under test.
+  if (/\\/pulls\\?state=open/.test(u)) return json(200, [], { link: "<" + u + "&page=2>; rel=\\"next\\"" });
+  return json(404, { message: "unstubbed " + u });
+};
+`,
+  );
+  const path = join(dir, "state.json");
+  writeFileSync(path, JSON.stringify(emptyLedger()));
+
+  const run = runCli(["tick", "--state", path], tmpdir(), { preload });
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /page cap/, run.out);
+  // The message must name the consequence, not just the mechanism: an operator reading "stopped at
+  // the cap" needs to be told what claim it invalidates.
+  assert.match(run.out, /no competing pull request/, run.out);
+});

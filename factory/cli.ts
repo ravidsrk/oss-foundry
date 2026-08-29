@@ -34,6 +34,7 @@ import {
   fetchRepoFile,
   listCrossReferencingOpenPulls,
   listOpenPulls,
+  MAX_LIST_PAGES,
   parsePrUrl,
   revertCheck,
   syncGithubPr,
@@ -176,6 +177,23 @@ const ARGV = process.argv.slice(2);
 // The ledger belongs to the repository, not to whatever directory the operator happened to be in.
 // A cwd-relative path silently served the committed seed as live truth from anywhere else, and a
 // mutating command forked a second state file next to it.
+/**
+ * A capped competing-work read cannot support "nothing is in flight".
+ *
+ * The gate exists to assert the ABSENCE of a competitor, and an absence is the one thing a short read
+ * cannot establish. Before issue #69 these reads stopped silently at 100 items; they now follow
+ * GitHub's cursor to a 10-page cap, so this is a loud stop rather than a likely one — but it is
+ * refused rather than warned, because proceeding would publish "no competing pull request" as a fact
+ * the run did not check. Its own message, so a capped read stays distinguishable from a failed one.
+ */
+function refuseIfCapped(reads: { truncated?: boolean }[], what: string): void {
+  if (!reads.some((r) => r.truncated)) return;
+  console.error(
+    `${what}: a competing-work read stopped at the ${MAX_LIST_PAGES}-page cap, so "no competing pull request" is not a fact this run can assert. Narrow the target or raise the cap deliberately.`,
+  );
+  process.exit(1);
+}
+
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const STATE_FILE_FLAG = flag(ARGV, "--state");
 const STATE_FILE = resolve(STATE_FILE_FLAG ?? resolve(REPO_ROOT, ".foundry-state.json"));
@@ -338,6 +356,7 @@ async function tickWithGithub(state: FactoryState) {
       console.error(pulls.error);
       process.exit(1);
     }
+    refuseIfCapped([pulls], repo.id);
     const agentsMd = await fetchRepoFile(repo.id, "AGENTS.md");
     const contributing =
       (await fetchRepoFile(repo.id, "CONTRIBUTING.md")) ??
@@ -542,6 +561,11 @@ async function main() {
       )
         ? { ok: true as const, urls: [] as string[] }
         : await listCrossReferencingOpenPulls(packetForFreeze.repoId, packetForFreeze.issueNumber);
+      if (!crossRefs.ok) {
+        console.error(crossRefs.error);
+        process.exit(1);
+      }
+      refuseIfCapped([pulls, crossRefs], packetForFreeze.repoId);
       if (!crossRefs.ok) {
         console.error(crossRefs.error);
         process.exit(1);
@@ -978,6 +1002,7 @@ async function main() {
       console.error(!pulls.ok ? pulls.error : (crossRefs as { error: string }).error);
       process.exit(1);
     }
+    refuseIfCapped([pulls, crossRefs], packet.repoId);
     const verdict = classifyCompetition(
       { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
       packet.issueNumber,
@@ -1268,6 +1293,7 @@ async function main() {
         console.error(!pulls.ok ? pulls.error : !crossRefs.ok ? crossRefs.error : "");
         process.exit(1);
       }
+      refuseIfCapped([pulls, crossRefs], packetForDraft.repoId);
       const others = pulls.pulls.filter((p) => p.number !== parsed.number);
       const otherRefs = crossRefs.urls.filter((u) => parsePrUrl(u)?.number !== parsed.number);
       const verdict = classifyCompetition(
