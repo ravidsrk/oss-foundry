@@ -40,37 +40,23 @@ const HUMAN_REVIEW_STATEMENTS: RegExp[] = [
 ];
 
 /**
- * The instruments a human must sign, by family. Presence is not a requirement — polarity is
- * decided per occurrence by `signaturePolarity`.
+ * The instruments a human must sign. Presence is not a requirement — `signaturePolarity` decides.
  *
- * WHY A BARE `\bcla\b` IS HERE. It was not, and that was the fail-open at the centre of issue #52.
- * The only CLA-acronym patterns were `sign(?:ing)?\s+the\s+cla` and `\bcla\s+(?:is\s+)?required\b`,
- * both defeated by an interposed "not", so five realistic "waive the DCO, assert the CLA" documents
- * held on `main` only by the ACCIDENT of an un-negated `\bdco\b` elsewhere in the sentence —
- * measured, every one of them reporting `human=["DCO"]` and nothing about the CLA. Make the DCO
- * negation-aware without adding this token and all five fail open.
+ * The bare CLA acronym is the fix for issue #52. Without it the only CLA patterns were
+ * `sign(?:ing)?\s+the\s+cla` and `\bcla\s+(?:is\s+)?required\b`, both defeated by an interposed
+ * "not", so five realistic "waive the DCO, assert the CLA" documents held on `main` only by the
+ * ACCIDENT of an un-negated `\bdco\b` in the same sentence — each reporting `human=["DCO"]` and
+ * nothing about the CLA. Negate the DCO without adding this and all five fail open.
  *
- * `contributor\s+agreement` is separate from `contributor\s+licen[cs]e\s+agreement` because the
- * short form is common and was unmatched. Neither is a bare `/agreement/i`: "you signal your
- * agreement with the Code of Conduct" must not read as a CLA, which is the over-block direction.
+ * Plurals are a P1 from review: `\bcla\b` misses `CLAs`, so "No DCO. CLAs are mandatory." waived
+ * the DCO and saw nothing — this issue's defect in a new spelling. `\bclas?\b` cannot match
+ * "class" (the optional `s` still needs a boundary after it), and a corpus row asserts that.
  *
- * `signed[-\s]?off[-\s]?by` and `sign[-\s]?off` sit in the DCO family because that is what they
- * are. On `main` "All commits must carry a Signed-off-by line." reached ALLOW with EMPTY matched
- * phrases — a real signature requirement the scanner could not see at all.
+ * Not a bare `/agreement/i`: "your agreement with the Code of Conduct" is not a CLA. Sign-off
+ * vocabulary is DCO family because it is one — on `main` "All commits must carry a Signed-off-by
+ * line." reached ALLOW matching nothing at all.
  */
 const SIGNATURE_FAMILIES: { family: string; token: string }[] = [
-  /**
-   * The acronyms are PLURAL-TOLERANT, and that was a P1 fail-open in the first version of this
-   * change: `\bcla\b` does not match `CLAs`, so "No DCO. CLAs are mandatory." waived the DCO, saw
-   * nothing about the CLA, and reached ALLOW for a repository that demands a signature — the exact
-   * defect this issue exists to close, reintroduced in its own fix in a new spelling. Measured:
-   * "CLAs are required for all contributors." and "We require DCOs on every commit." were both
-   * SILENT, matching nothing at all.
-   *
-   * `\bclas?\b` cannot match "class": the optional `s` still needs a word boundary after it, and
-   * "class" has another letter there. The spelled-out forms already matched inside their own plurals
-   * by substring; the explicit `s?` says so rather than leaving it to be rediscovered.
-   */
   {
     family: "CLA",
     token: String.raw`(?:\bclas?\b|contributor\s+licen[cs]e\s+agreements?|contributor\s+agreements?)`,
@@ -92,19 +78,10 @@ const ESCAPE_HATCH = String.raw`(?:bypass|exception|exemption|waiver|opt[-\s]?ou
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;
 
 /**
- * There is deliberately NO "asserts a requirement" list here, and its absence is a finding rather
- * than an omission.
- *
- * One was written — the usual `required|mandatory|must|sign\w*|…` roster — and the injection pass on
- * the differential harness showed the harness could not see it being deleted. The reason is that it
- * could never decide anything: an occurrence that matches no waiver already returns `"required"` on
- * the line below, so the list and the fallback had the same answer and the list was unreachable. An
- * unreachable roster of authoritative-looking vocabulary is exactly what issue #75 is about — the
- * thing someone wires up later without re-reading.
- *
- * So the rule is one sentence: a signature instrument is WAIVED only if a waiver pattern governs it,
- * and REQUIRED otherwise. Two corpus rows pin that the fallback is `required` and not `waived`
- * ("See our CLA for details.", "We dropped the CLA requirement."), verified by flipping it.
+ * There is deliberately NO "asserts a requirement" roster. One was written, and the injection pass
+ * showed the harness could not see it deleted: an occurrence matching no waiver already returns
+ * `"required"`, so the list and the fallback gave the same answer and it was unreachable — the #75
+ * orphan shape. The rule is one sentence: WAIVED only if a waiver governs it, REQUIRED otherwise.
  */
 
 /**
@@ -113,17 +90,16 @@ const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\
  * Two different spans on purpose, and getting this wrong was a fail-open in the first draft of this
  * function:
  *
- * - The WAIVER and the requirement verb are read from the CLAUSE, so two instruments in one
- *   sentence cannot borrow each other's verb. "No DCO, contributor agreement required." needs this.
- * - The SCOPE LIMITER is read from the whole SENTENCE, because "except" routinely sits in the next
- *   clause. "A CLA is not required, except for new dependencies." read the waiver and never saw the
- *   exception, so a scoped requirement came out as a blanket waiver — the exact fail-open class this
- *   issue is about, reproduced inside its own fix. Caught by probing before it shipped.
+ * - The WAIVER is read from the CLAUSE, so two instruments in one sentence cannot borrow each
+ *   other's verb ("No DCO, contributor agreement required.").
+ * - The SCOPE LIMITER is read from the SENTENCE, because "except" sits in the next clause. Reading
+ *   it from the clause made "A CLA is not required, except for new dependencies." a blanket waiver
+ *   — this issue's fail-open class inside its own fix, caught by probing before it shipped.
  *
- * The ORDER is the rest of the design. Every waiver pattern that can swallow a requirement word
- * does so explicitly — `no DCO is required` is one pattern, not "a negation" and "a requirement"
- * fighting over one clause. The previous attempt made the DCO negation-aware and left the CLA
- * invisible, and 8 of 10 realistic documents regressed to ALLOW.
+ * The ORDER is the rest: every waiver that can swallow a requirement word does so explicitly, so
+ * `no DCO is required` is one pattern rather than a negation and a requirement fighting over a
+ * clause. The previous attempt negated the DCO and left the CLA invisible — 8 of 10 documents
+ * regressed to ALLOW.
  */
 function signaturePolarity(clause: string, sentence: string, token: string): "required" | "waived" {
   const T = token;
@@ -131,10 +107,9 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
   const waivers = [
     String.raw`\bno\s+${T}\s+(?:is\s+|are\s+)?(?:required|needed|necessary|expected)\b`,
     String.raw`${T}\s*:?\s*(?:is\s+|are\s+)?not\s+(?:required|needed|necessary|expected)\b`,
-    // The filler is bounded and stops at any clause break, so it cannot reach across a comma or a
-    // full stop to borrow a waiver from a neighbouring clause. It exists because "do not need TO
-    // SIGN a contributor license agreement" puts an infinitive between the verb and the token — a
-    // shape the corpus caught and the first draft of this list missed.
+    // Bounded filler, stopping at any clause break so it cannot borrow a neighbour's waiver. It
+    // exists because "do not need TO SIGN a contributor license agreement" puts an infinitive
+    // between verb and token — a shape the corpus caught and the first draft of this list missed.
     String.raw`\b(?:do(?:es)?\s+not|don['’]t|doesn['’]t|will\s+not|won['’]t)\s+(?:require|need|ask\s+for|expect)\b[^.;,\n]{0,25}?${T}`,
     String.raw`\bthere\s+(?:is|are)\s+no\s+${T}`,
     String.raw`\bno\s+${T}\b`,
@@ -146,23 +121,15 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
     // dependencies" means a packet touching one needs it. Read from the sentence, not the clause.
     if (SCOPE_LIMITER.test(sentence)) return "required";
     /**
-     * A WAIVER GOVERNS ONLY THE OCCURRENCE IT NAMES. Raised as P1 by review: polarity was decided
-     * once for the whole clause from the FIRST match, so
+     * A WAIVER GOVERNS ONLY THE OCCURRENCE IT NAMES — a P1 from review. Polarity was decided once
+     * per clause from the first match, so "No CLA is required for documentation and a CLA is
+     * required for code." matched the waiver, never saw the second occurrence, and reached ALLOW.
+     * Removing the waived span and asking whether the instrument is still mentioned settles it
+     * without guessing at conjunctions; any surviving mention is ungoverned, so it reads as required.
      *
-     *   "No CLA is required for documentation and a CLA is required for code contributions."
-     *
-     * matched the waiver, never looked at the second occurrence, and reached ALLOW for a repository
-     * that requires a signature. "and" is not a clause delimiter and should not have to be: taking
-     * the waived text out and asking whether the instrument is still mentioned answers it without
-     * guessing at English conjunctions. Any surviving mention is an occurrence no waiver spoke for,
-     * and under this repo's asymmetry that reads as required.
-     */
-    /**
-     * One instrument can be NAMED TWICE in a row — "a DCO sign-off" is a single thing, and both
-     * "DCO" and "sign-off" are DCO-family tokens. So a mention abutting the waiver's own span is
-     * absorbed into it before the leftovers are inspected; without that,
-     * "We don't require a DCO sign-off on contributions." saw "sign-off" as an ungoverned second
-     * occurrence and flipped a plain waiver into a hold.
+     * One instrument can be named twice in a row, though: "a DCO sign-off" is a single thing and
+     * both words are DCO-family tokens, so a mention abutting the waiver's span is absorbed first.
+     * Without that, "We don't require a DCO sign-off on contributions." became a hold.
      */
     let tail = clause.slice(hit.index + hit[0].length);
     for (let abut = new RegExp(String.raw`^[\s\-]{0,3}${T}`, "i").exec(tail); abut; ) {
@@ -172,22 +139,17 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
     if (new RegExp(T, "i").test(`${clause.slice(0, hit.index)} ${tail}`)) return "required";
     return "waived";
   }
-  /**
-   * Undecided reads as REQUIRED, which is the repo's stated asymmetry rather than a shrug: a false
-   * hold costs the operator one look, a false allow opens a draft into a repository that demands a
-   * signature, and `docs/PRODUCT.md` §3 constraint 4 is "Never forge CLA/DCO". A bare "see our CLA"
-   * with no verb is exactly the case where the tool should make a human decide.
-   */
+  // Undecided reads as REQUIRED — the repo's asymmetry, not a shrug. A false hold costs one look; a
+  // false allow opens a draft into a repo demanding a signature, and PRODUCT.md §3 says never forge.
   return "required";
 }
 
 /**
  * A sentence boundary is a terminator followed by whitespace and something that starts a sentence.
  *
- * Requiring the capital (or an opening quote/bracket) is what keeps `e.g.` and `i.e.` from ending a
- * sentence mid-clause — the same hazard the `W` window above spells out abbreviation by
- * abbreviation. A newline also ends one, because policy documents are markdown and a list item is a
- * sentence whether or not it carries a full stop.
+ * Requiring the capital keeps `e.g.` and `i.e.` from ending a sentence mid-clause — the hazard the
+ * `W` window above spells out abbreviation by abbreviation. A newline ends one too: these are
+ * markdown, and a list item is a sentence whether or not it carries a full stop.
  */
 function sentencesOf(text: string): string[] {
   return text

@@ -394,27 +394,22 @@ test("deny-by-default covers the no-evidence case, not the missed-ban case", () 
 /**
  * ISSUE #52 — the CLA/DCO fail-open, and the corpus that has to keep it closed.
  *
- * WHAT WAS BROKEN ON `main`, measured rather than described. All five of the realistic
- * "waive the DCO, assert the CLA" documents below did produce a hold — and every one of them did it
- * through `human=["DCO"]`, with nothing matched about the CLA at all. `HUMAN_STATEMENTS` had no bare
- * `\bcla\b`; its only CLA-acronym patterns were `sign(?:ing)?\s+the\s+cla` and
- * `\bcla\s+(?:is\s+)?required\b`, both defeated by an interposed "not". So the correct verdict was an
- * ACCIDENT of an un-negated `\bdco\b` sitting in the same sentence. Making the DCO negation-aware —
- * which the repo needs, because "No CLA. No DCO. Conventional commits." is the live Wave-1 seed text
- * and was being parked — removes the accident, and 8 of 10 such documents fail open with nothing to
- * replace it. That is what happened to the previous attempt.
+ * WHAT WAS BROKEN ON `main`, measured rather than described. All five "waive the DCO, assert the
+ * CLA" documents below did hold — every one through `human=["DCO"]`, with nothing matched about the
+ * CLA. There was no bare `\bcla\b`; the only CLA patterns were `sign(?:ing)?\s+the\s+cla` and
+ * `\bcla\s+(?:is\s+)?required\b`, both defeated by an interposed "not". The correct verdict was an
+ * ACCIDENT. Negating the DCO — which the repo needs, since "No CLA. No DCO. Conventional commits."
+ * is the live Wave-1 seed text and was being parked — removes the accident with nothing behind it,
+ * which is what happened to the previous attempt.
  *
- * Two further holes the same measurement turned up, neither in the issue:
- *   - "All commits must carry a Signed-off-by line." reached ALLOW with EMPTY matched phrases. A
- *     plain signature requirement the scanner could not see.
- *   - "No DCO, contributor agreement required." held only via the DCO accident; the short form
- *     `contributor agreement` was unmatched.
+ * Two more holes the same measurement found, neither in the issue: "All commits must carry a
+ * Signed-off-by line." reached ALLOW matching NOTHING, and the short form `contributor agreement`
+ * was unmatched, so "No DCO, contributor agreement required." also held only by the accident.
  *
- * CORPUS PROVENANCE, which is the part issue #37's park note says to settle before touching a
- * regex. Not one row below is derived from a constant in `policy.ts`. They come from: the documents
- * quoted in #52 and #50, ordinary CONTRIBUTING.md phrasing, and deliberate paraphrase of each into
- * shapes the implementation does not name. A corpus drawn from the code under test measures whether
- * the code does what it does.
+ * CORPUS PROVENANCE — the part #37's park note says to settle before touching a regex. No row below
+ * is derived from a constant in `policy.ts`. They come from the documents quoted in #52 and #50,
+ * ordinary CONTRIBUTING.md phrasing, and paraphrase into shapes the implementation does not name. A
+ * corpus drawn from the code under test only measures that the code does what it does.
  */
 type Polarity = "required" | "waived" | "silent";
 
@@ -534,12 +529,10 @@ test("the signature corpus classifies every phrasing correctly, in both directio
 });
 
 /**
- * Size floors, and they are not decoration. Issue #37's round 3 shipped `suite ok`, exit 0, with its
- * headline corpus EMPTIED and a known regression reintroduced, because `CORPUS` had no floor while
- * `LEXICON` did. Emptying a roster has to cost a second visible edit.
- *
- * Both directions are floored separately, because a corpus that is all must-hold rows measures only
- * recall and would let the over-block class back in — which is how round 1 of #37 failed.
+ * Size floors, not decoration: #37's round 3 shipped `suite ok`, exit 0, with its headline corpus
+ * EMPTIED and a known regression reintroduced, because it had no floor. Emptying a roster must cost
+ * a second visible edit. Both directions are floored separately — an all-must-hold corpus measures
+ * only recall and lets the over-block class back in, which is how round 1 of #37 failed.
  */
 test("the signature corpus cannot be quietly emptied or made one-sided", () => {
   assert.ok(SIGNATURE_CORPUS.length >= 40, `corpus has ${SIGNATURE_CORPUS.length} rows; the floor is 40`);
@@ -596,19 +589,13 @@ test("a waived signature does not park the packet", () => {
 });
 
 /**
- * The quote an operator reads is the CLAUSE, not the whole sentence.
- *
- * This is what `clausesOf` is for, and it needs saying because the clause split no longer changes
- * any VERDICT: the per-occurrence governance rule handles mixed polarity on its own, so removing the
- * comma from the splitter leaves every row of the corpus above passing. What it does change is what
- * the freeze shows. "No DCO, contributor agreement required." must point the operator at the six
- * words that assert the CLA, not hand back the whole sentence with the waiver still in it — a quote
- * that contains its own contradiction is the thing a human then has to re-read the document to
- * resolve.
- *
- * Pinned rather than deleted, and pinned rather than left as a survivor: an unpinned redundancy is
- * the shape this repo keeps filing issues about (#75), and the answer is either a reason or a
- * removal. This is the reason.
+ * The quote an operator reads is the CLAUSE, not the whole sentence — which is what `clausesOf` is
+ * for, and worth saying because it no longer changes any VERDICT: per-occurrence governance handles
+ * mixed polarity alone, so dropping the comma from the splitter leaves every corpus row passing.
+ * What it changes is the freeze. "No DCO, contributor agreement required." must point at the six
+ * words asserting the CLA, not a sentence with the waiver still inside it, because a quote holding
+ * its own contradiction sends a human back to the document. An unpinned redundancy is the #75 shape;
+ * the answer is a reason or a removal, and this is the reason.
  */
 test("a mixed-polarity sentence quotes each instrument's own clause, not the whole sentence", () => {
   const s = scanPolicyText("No DCO, contributor agreement required.");
