@@ -78,6 +78,17 @@ const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:bypass|exception|exemption|w
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;
 
 /**
+ * ONE conjunction roster, because there were five hand-written copies and a P1 from review found
+ * `yet` missing from all of them. Adding the word to five places would have left the sixth.
+ *
+ * Deliberately NOT split into contrastive and coordinating words. That distinction was written here
+ * and then deleted: a mutant merging the two changed no verdict across every enumeration on this
+ * branch, because a comma already ends the clause wherever one of these words starts a new statement,
+ * and `COORDINATED` already reads the ones that do not. An unfalsifiable rule is worse than none.
+ */
+const CONJUNCTION_WORDS = String.raw`(?:and|or|plus|but|however|yet|though|although|whereas|while|nevertheless|nonetheless)`;
+
+/**
  * The words a requirement is asserted WITH, when its subject has been elided.
  *
  * ONE roster, because there were two and they drifted: the waiver patterns knew `expected` and this
@@ -165,10 +176,25 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
      * the limiter behind it was never in view, and a scoped requirement reached ALLOW. Third P1 from
      * review, and the third wrong span for this one decision.
      */
-    for (const span of spans) {
+    {
+      // ANY occurrence in the clause will do, and this is the one place that deserves a note saying
+      // so, because a loop over all of them lived here first.
+      //
+      // A clause holds no comma or semicolon — those are what split it — so every occurrence inside
+      // it shares one downstream truncation point. `forward` therefore covers the clause from an
+      // occurrence rightwards and `leading` covers it leftwards, and between them the pair sees the
+      // whole clause from either end. Picking the earliest, the latest, or the first match found all
+      // give the same verdict; that was measured across every enumeration here, in both directions,
+      // rather than reasoned about and hoped for.
+      const span = spans[0]!;
       const at = clauseAt + span.at;
       const after = sentence.slice(at + span.length);
-      const conjunction = after.search(/\b(?:and|or|but|however)\b/i);
+      // A conjunction ends this statement only where it BEGINS a clause, which is where a comma
+      // or semicolon puts it. Truncating at any conjunction cut "for documentation or code except
+      // for third-party contributions" at the `or` — a scope coordination, not a new statement —
+      // and lost the exception behind it: a P1 from review, and the fail-open mirror of the
+      // over-block that put truncation here in the first place.
+      const conjunction = after.search(new RegExp(String.raw`[,;]\s*${CONJUNCTION_WORDS}\b`, "i"));
       const forward = conjunction === -1 ? after : after.slice(0, conjunction);
       const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
       if (SCOPE_LIMITER.test(forward) || leading) return "required";
@@ -193,7 +219,7 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
     // "No CLA is required for docs. Required for code." has no conjunction to find. A P1 from review
     // reached ALLOW on exactly that, the fix for the fragment having stopped one step short.
     // A list marker may stand after the separator too, since the joined fragment keeps its bullet.
-    const COORDINATED = String.raw`(?:\b(?:and|or|but|however)\s+|[.;:]\s+)(?:(?:[-*+>]|\d+[.)])\s*)?(?:(?:it|they)\s+)?(?:is|are)?\s*(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`;
+    const COORDINATED = String.raw`(?:\b${CONJUNCTION_WORDS}\s+|[.;:]\s+)(?:(?:[-*+>]|\d+[.)])\s*)?(?:(?:it|they)\s+)?(?:is|are)?\s*(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`;
     if (new RegExp(COORDINATED, "i").test(clause)) {
       return "required";
     }
@@ -268,7 +294,7 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
  * guide.", where the participle modifies a noun and the sentence genuinely is a new statement.
  */
 const CONTINUATION = new RegExp(
-  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|and|or|but|however)\b|${PREDICATE}\b${SCOPE_FOLLOWS})`,
+  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|${PREDICATE}\b${SCOPE_FOLLOWS})`,
   "i",
 );
 
@@ -308,7 +334,7 @@ function sentencesOf(text: string): string[] {
 function clausesOf(sentence: string): { text: string; at: number }[] {
   const out: { text: string; at: number }[] = [];
   let cursor = 0;
-  for (const part of sentence.split(/[,;]|\bbut\b|\bhowever\b/i)) {
+  for (const part of sentence.split(/[,;]/)) {
     const text = part.trim();
     if (!text) continue;
     // Only the splitting delimiter lies between `cursor` and this clause, so the first match from
@@ -359,7 +385,7 @@ export function scanPolicyText(text: string): {
      * signature for code: a P1 from review, and this issue's fail-open class again. `SCOPE_FOLLOWS`
      * is what keeps a bare participle from matching a noun modifier.
      */
-    const CONJUNCTION = String.raw`(?:(?:and|or|but|however)\s+)?`;
+    const CONJUNCTION = String.raw`(?:${CONJUNCTION_WORDS}\s+)?`;
     const anaphoric = parts.some(
       ({ text: c }) =>
         (new RegExp(String.raw`^${CONJUNCTION}(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||

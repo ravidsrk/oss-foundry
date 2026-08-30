@@ -467,6 +467,13 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "A CLA is not required, except for new dependencies.", want: "required", why: "limiter behind a comma" },
   { doc: "No DCO is needed, unless you are adding a new module.", want: "required", why: "limiter behind a comma" },
   { doc: "No CLA is required, other than for vendored code.", want: "required", why: "limiter behind a comma" },
+  // A conjunction ends the waiver's statement only where it BEGINS a clause. Truncating at ANY
+  // conjunction cut this at the `or` - which coordinates two SCOPES, not two statements - and lost
+  // the exception behind it. A P1 from review, and the fail-open mirror of the over-block that put
+  // truncation here to begin with, so both directions are pinned together.
+  { doc: "No CLA is required for documentation or code except for third-party contributions.", want: "required", why: "'or' coordinates scopes; the exception still applies" },
+  { doc: "No DCO is needed for docs or tests, unless vendored.", want: "required", why: "same, with the limiter behind a comma" },
+  { doc: "No CLA is required for docs plus tests, other than for dependencies.", want: "required", why: "'plus' coordinates scopes too" },
   { doc: "A CLA is not required; except for new dependencies.", want: "required", why: "limiter behind a semicolon" },
   { doc: "Except for new dependencies, a CLA is not required.", want: "required", why: "leading limiter, waiver is the main clause" },
   // ...and it must NOT reach a waiver it has nothing to do with. Reading it from the whole sentence
@@ -543,6 +550,14 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "A CLA is not required for documentation, but is required for code contributions.", want: "required", why: "elided subject after 'but'" },
   { doc: "No DCO is needed for docs, but is required for code.", want: "required", why: "same shape, DCO family" },
   { doc: "A CLA is not required, however it is mandatory for vendored trees.", want: "required", why: "'it is mandatory' after 'however'" },
+  // The conjunction roster was written out five times and `yet` was in none of them, so this reached
+  // ALLOW. A P1 from review, fixed by giving every site one pair of rosters - contrastive words end
+  // a clause, coordinating words do not - rather than by adding the one missing word.
+  { doc: "No CLA is required for docs, yet required for code.", want: "required", why: "'yet' is contrastive and was unlisted" },
+  { doc: "No CLA is required for docs, though required for code.", want: "required", why: "'though'" },
+  { doc: "No CLA is required for docs, whereas required for code.", want: "required", why: "'whereas'" },
+  { doc: "No CLA is required for docs, nevertheless required for code.", want: "required", why: "'nevertheless'" },
+  { doc: "No CLA is required while the repo is in beta.", want: "waived", why: "temporal 'while' asserts no requirement" },
   // ...and a later clause with its OWN subject must not flip anything, or the rule over-blocks.
   { doc: "No CLA is required, and tests are required.", want: "waived", why: "'tests' is the subject, not the CLA" },
   // English drops the copula, and a participle-initial clause was invisible: the waiver read as
