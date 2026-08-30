@@ -556,6 +556,21 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // ...and the noun-modifier reading is a NEW statement, not a continuation, in both spellings.
   { doc: "No CLA is required.\nRequired reading is the style guide.", want: "waived", why: "'Required reading' modifies a noun" },
   { doc: "No CLA is required.\nExpected turnaround is one week.", want: "waived", why: "'Expected turnaround' modifies a noun" },
+  // The word between predicate and scope is a CLOSED set of adverbs. It was any word once, so
+  // "It is required reading for new contributors." read as a requirement and held a repository that
+  // waives the CLA outright - a fail-closed P1 from review. `reading` is a noun the predicate
+  // modifies, not an adverb qualifying it, and only the copula branch was missing the guard.
+  { doc: "No CLA is required. It is required reading for new contributors.", want: "waived", why: "copula + noun modifier asserts nothing" },
+  { doc: "No CLA is required. It is required knowledge for reviewers.", want: "waived", why: "same shape, other noun" },
+  { doc: "No DCO is needed.\n- It is expected practice in this organisation.", want: "waived", why: "same, behind a bullet" },
+  // ...and the real copula requirement, which shares every word except the noun, must still hold.
+  { doc: "No CLA is required. It is required for code.", want: "required", why: "copula requirement, scope follows directly" },
+  { doc: "No CLA is required. It is needed only for release.", want: "required", why: "closed-set qualifier between predicate and scope" },
+  // Same shapes with the anaphor in the SAME sentence as its antecedent, which is the only place the
+  // clause-level matcher can reach: across a sentence boundary the fragment has no antecedent to
+  // attach to, so a row split by a full stop leaves that matcher untested.
+  { doc: "No CLA is required, it is required reading for new contributors.", want: "waived", why: "same-sentence copula + noun modifier" },
+  { doc: "No CLA is required, it is required for code.", want: "required", why: "same-sentence copula requirement" },
   // The SAME waiver stated twice, scoped only on the later copy. Position came from asking the
   // sentence where the match was, which answers with the first copy, so the later waiver's forward
   // span was cut at the intervening conjunction and its limiter never seen — ALLOW. Third P1.

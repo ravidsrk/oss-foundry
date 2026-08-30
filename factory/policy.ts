@@ -102,10 +102,16 @@ const PREDICATE = String.raw`(?:required|needed|necessary|expected|mandatory|obl
  * What must follow a bare `PREDICATE` for it to be a requirement rather than a noun modifier.
  *
  * Without a copula there is no verb to anchor on, so the SCOPE anchors instead: "required for code"
- * asserts something about the instrument, "required reading is the style guide" does not. One adverb
- * may intervene, so "needed only for release" still counts.
+ * asserts something about the instrument, "required reading is the style guide" does not.
+ *
+ * The word that may stand between predicate and scope is a CLOSED set of adverbs, not any word. It
+ * was any word once, so "It is required reading for new contributors." read as a requirement and
+ * held a repository that waives the CLA outright — a fail-closed P1 from review. "needed only for
+ * release" still counts; "required reading for contributors" does not, because `reading` is a noun
+ * this predicate is modifying rather than an adverb qualifying it.
  */
-const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:\w+\s+)?(?:for|on|in|when|with|of|from)\b))`;
+const QUALIFIER = String.raw`(?:only|also|still|always|never|sometimes|generally|usually|normally|strictly|explicitly|absolutely)`;
+const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:${QUALIFIER}\s+)?(?:for|on|in|when|with|of|from)\b))`;
 
 /**
  * A waiver's own statement ends where the NEXT statement begins, and the text between them is scope.
@@ -322,9 +328,14 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
  * for code." — which a P1 from review found detached, leaving a blanket waiver and a token-less
  * fragment. `SCOPE_FOLLOWS` is what keeps that from swallowing "Required reading is the style
  * guide.", where the participle modifies a noun and the sentence genuinely is a new statement.
+ *
+ * On the COPULA branch that same guard is inert, and measured to be: joining is the safe direction,
+ * and `COORDINATED` re-applies `SCOPE_FOLLOWS` to whatever gets joined, so a noun modifier cannot
+ * survive being pulled in. It is kept because these two matchers drifting apart was itself a P1, and
+ * a reader comparing them should find them saying the same thing.
  */
 const CONTINUATION = new RegExp(
-  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b|${PREDICATE}\b${SCOPE_FOLLOWS})`,
+  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}|${PREDICATE}\b${SCOPE_FOLLOWS})`,
   "i",
 );
 
@@ -426,7 +437,7 @@ export function scanPolicyText(text: string): {
     // no family token matched, so the guard that used to live here was unreachable — a mutant
     // deleting it changed nothing, which is how it was found.
     const isAnaphoric = (c: string) =>
-      new RegExp(String.raw`^${CONJUNCTION}(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||
+      new RegExp(String.raw`^${CONJUNCTION}(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(c) ||
       new RegExp(String.raw`^${CONJUNCTION}(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(c);
     /**
      * An elided subject refers to the instrument most recently NAMED, so the requirement lands on
