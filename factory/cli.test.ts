@@ -178,6 +178,9 @@ interface LivePr {
    * reviewed it" — the distinction the two review KPIs are built on (issue #39).
    */
   reviewsUnreadable?: boolean;
+  /** A never-ending review cursor, so the read caps. Unlike `reviewsUnreadable`, retrying will not
+   * help (issue #69). */
+  reviewsTruncated?: boolean;
 }
 
 /** What `GET /repos/{owner}/{repo}/commits?since=…` answers, keyed by repo id. */
@@ -277,7 +280,14 @@ globalThis.fetch = async (url) => {
   // pull, so they are matched before the pull itself.
   if (parts[5] === "reviews" || parts[5] === "comments") {
     if (pr.reviewsUnreadable) return json(500, { message: "review endpoints unavailable" });
-    return json(200, actors(parts[5] === "reviews" ? pr.reviews : pr.reviewComments));
+    const reviewBody = actors(parts[5] === "reviews" ? pr.reviews : pr.reviewComments);
+    if (pr.reviewsTruncated) {
+      // Same shape as the commit cursor above: only the page cap ever stops this read.
+      const rp = Number(new URL(u).searchParams.get("page") ?? "1") + 1;
+      const rnext = "https://api.github.com/repos/" + parts[1] + "/" + parts[2] + "/pulls/" + parts[4] + "/" + parts[5] + "?page=" + rp;
+      return json(200, reviewBody, { link: '<' + rnext + '>; rel="next"' });
+    }
+    return json(200, reviewBody);
   }
   return json(200, {
     html_url: "https://github.com/" + path,
@@ -2280,4 +2290,144 @@ test("the clock says so when the commit read fails, and when it merely stops sho
     false,
     `a complete read must stay quiet or the advisory means nothing:\n${clean.out}`,
   );
+});
+
+/**
+ * Issue #69's operator-visible half: a capped competing-work read must refuse, since proceeding
+ * publishes "no competing pull request" as a fact the run never checked. Driven through the real CLI,
+ * because the reader returning `truncated` and the verb acting on it are two claims.
+ */
+test("a competing-work read that stops at the page cap refuses the tick", () => {
+  const dir = tmp("foundry-cap-");
+  const preload = join(dir, "preload.mjs");
+  writeFileSync(
+    preload,
+    `const json = (status, body, headers = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+globalThis.fetch = async (url) => {
+  const u = String(url);
+  // Always another page: the cap is what ends this read, which is the condition under test.
+  if (/\\/pulls\\?state=open/.test(u)) return json(200, [], { link: "<" + u + "&page=2>; rel=\\"next\\"" });
+  return json(404, { message: "unstubbed " + u });
+};
+`,
+  );
+  const path = join(dir, "state.json");
+  writeFileSync(path, JSON.stringify(emptyLedger()));
+
+  const run = runCli(["tick", "--state", path], tmpdir(), { preload });
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /page cap/, run.out);
+  // The message must name the consequence, not just the mechanism: an operator reading "stopped at
+  // the cap" needs to be told what claim it invalidates.
+  assert.match(run.out, /no competing pull request/, run.out);
+});
+
+/** The same refusal for the OTHER read feeding that verdict: checking open-pulls alone let a capped
+ * timeline reach `classifyCompetition`. Open-pulls answers cleanly, so only the timeline caps. */
+test("a capped cross-reference timeline refuses the tick too", () => {
+  const dir = tmp("foundry-cap2-");
+  const preload = join(dir, "preload.mjs");
+  writeFileSync(
+    preload,
+    `const json = (status, body, headers = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+globalThis.fetch = async (url) => {
+  const u = String(url);
+  // Clean, complete open-pulls read, so the timeline read is reached.
+  if (u.includes("/pulls?state=open")) return json(200, []);
+  // The timeline never runs out of pages.
+  if (u.includes("/timeline")) return json(200, [], { link: "<" + u + "&page=2>; rel=" + String.fromCharCode(34) + "next" + String.fromCharCode(34) });
+  if (/\\/issues\\/\\d+$/.test(u)) {
+    return json(200, {
+      number: 71,
+      html_url: "https://github.com/ravidsrk/orca-fleet/issues/71",
+      state: "open",
+      state_reason: null,
+      closed_at: null,
+      closed_by: null,
+    });
+  }
+  return json(404, { message: "unstubbed " + u });
+};
+`,
+  );
+  const path = join(dir, "state.json");
+  writeFileSync(path, JSON.stringify(emptyLedger()));
+
+  const run = runCli(["tick", "--state", path], tmpdir(), { preload });
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /page cap/, run.out);
+});
+
+/**
+ * A CAPPED review read is neither a failure nor an observation. Not storing the partial count is
+ * right, but leaving the field simply absent is what an OUTAGE leaves too, so the operator got retry
+ * advice for a condition that reproduces every run. Driven side by side, because "distinguishable"
+ * is a claim one condition cannot show.
+ */
+test("a capped review read is told apart from an outage, in BOTH verbs", () => {
+  // The cap advisory once lived in `reconcile` alone, beside the generic "re-run when GitHub
+  // answers" line, so one run said both re-run and do-not-re-run. It now rides `LivePrLite`.
+  const BLIND = "pkt_ravidsrk_frontguard_195";
+  const blind = reviewBlindState(BLIND);
+  const stranded = blind.packets.find((p) => p.id === BLIND)!;
+
+  const capped = runCli(["reconcile", "--state", writeState(blind)], tmpdir(), {
+    preload: prFactsStub(livePrs({ [stranded.prUrl!]: { reviewsTruncated: true } })),
+  });
+  assert.equal(capped.code, 0, capped.out);
+  assert.match(
+    capped.out,
+    new RegExp(`^ADVISORY ${BLIND}: the human-review read on .* stopped at its page cap`, "m"),
+    `a capped review read must name the cap:\n${capped.out}`,
+  );
+  // Actionable and true: a re-run caps again.
+  assert.match(capped.out, /re-run will cap again/, capped.out);
+  assert.equal(
+    /Run `reconcile` on a pass where GitHub answers/.test(capped.out),
+    false,
+    `the cap advisory and the outage advice cannot both be printed for one PR:\n${capped.out}`,
+  );
+
+  // The outage, for contrast — same packet, same verb, the other message and no cap wording.
+  const outage = runCli(["reconcile", "--state", writeState(blind)], tmpdir(), {
+    preload: prFactsStub(livePrs({ [stranded.prUrl!]: { reviewsUnreadable: true } })),
+  });
+  assert.equal(outage.code, 0, outage.out);
+  assert.match(outage.out, new RegExp(`^ADVISORY ${BLIND}: the ledger records no human-review`, "m"), outage.out);
+  assert.equal(
+    /stopped at its page cap/.test(outage.out),
+    false,
+    `an outage must not report itself as a capped read:\n${outage.out}`,
+  );
+});
+
+
+/**
+ * Both `packetChecks` call sites supply the same facts. This unit shipped the one-call-site defect
+ * three times — `revert`, `revertTruncated`, `reviewTruncated` — because an omitted optional field is
+ * a runtime `undefined` here, never a compile error. By source and not by a drive, deliberately: the
+ * clock reads the COMMITTED SEED, where every merged packet carries an observation, so the review
+ * advisory is UNREACHABLE from it — unavailable rather than inconvenient.
+ */
+test("reconcile and verify-ledger hand packetChecks the same fields", () => {
+  // Only the fields NOT carried by the shared `live` object: reconcile spreads `live`, the clock
+  // lists fields inline, and that difference in form is fine. The truncation flags are not in either.
+  const callSite = (rel: string) => {
+    const source = readFileSync(new URL(rel, import.meta.url), "utf8");
+    const at = source.indexOf("packetChecks(");
+    assert.notEqual(at, -1, `${rel}: packetChecks call site not found — this guard has drifted`);
+    return source.slice(at, source.indexOf("});", at));
+  };
+  for (const rel of ["./cli.ts", "./verify-ledger.ts"]) {
+    const call = callSite(rel);
+    for (const field of ["revert", "revertTruncated", "reviewTruncated"]) {
+      assert.match(
+        call,
+        new RegExp(`\\b${field}:`),
+        `${rel} stopped handing packetChecks \`${field}\`, so that check silently reports it did not run`,
+      );
+    }
+  }
 });

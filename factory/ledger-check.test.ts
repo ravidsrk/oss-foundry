@@ -591,3 +591,39 @@ test("the revert FATAL names the step that can actually green it — the seed ed
   assert.match(line, /reconcile/);
   assert.match(line, /revert pkt_ravidsrk_orca-fleet_42 --reason/);
 });
+
+test("a missing review observation is not advised while the outcome itself is a FATAL", () => {
+  // liveTerminal: while ledger and GitHub disagree about merged-vs-open, the FATAL is the sentence
+  // the operator should read. Widening `live.merged || live.state === "closed"` to true would emit
+  // the KPI advisory beside that FATAL — noise on a line that already stops the clock (issue #76).
+  const merged = seedState().packets.find((p) => p.id === "pkt_ravidsrk_orca-fleet_42")!;
+  const blind = { ...merged, prMeta: { ...merged.prMeta!, humanReview: undefined } };
+  const disagreeing = {
+    state: "open" as const,
+    merged: false,
+    draft: merged.prMeta!.draft,
+    headSha: merged.prMeta!.headSha,
+    body: VERBATIM_BODY,
+  };
+  const checks = packetChecks(blind, disagreeing);
+  assert.equal(checks.fatal.some((f) => /ledger says merged/.test(f)), true, checks.fatal.join("\n"));
+  assert.equal(
+    checks.advisory.some((a) => /no human-review observation/.test(a)),
+    false,
+    `the KPI advisory must not ride along with the outcome FATAL:\n${checks.advisory.join("\n")}`,
+  );
+
+  const agreeing = packetChecks(blind, {
+    state: "closed",
+    merged: true,
+    draft: merged.prMeta!.draft,
+    headSha: merged.prMeta!.headSha,
+    body: VERBATIM_BODY,
+    revert: { reverted: false, why: "none" },
+  });
+  assert.equal(
+    agreeing.advisory.some((a) => /no human-review observation/.test(a)),
+    true,
+    `the same hole must still surface once the outcome agrees:\n${agreeing.advisory.join("\n")}`,
+  );
+});

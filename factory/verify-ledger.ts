@@ -57,6 +57,9 @@ for (const packet of withPr) {
     // the same `reverted: false` a complete one does, so without this the clock cannot tell a
     // clean base branch from one it only half-read — and it would print `ledger ok` over both.
     revertTruncated: reverted?.ok ? reverted.truncated : undefined,
+    // And the same for the review read (issue #69): a capped one records nothing, and the operator
+    // needs to be told the cap did it rather than an outage.
+    reviewTruncated: synced.reviewTruncated,
   });
   fatal.push(...checks.fatal);
   advisory.push(...checks.advisory);

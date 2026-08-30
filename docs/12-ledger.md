@@ -206,10 +206,11 @@ scorecard read `0` forever, correct or not.
    literal `rel="next"` and always did, but the only fixture exercising it built
    `` `<next>; rel="next", <next>; rel="last"` `` — both rels pointing at the same URL, `next`
    first — and its page 2 carried no `Link` at all, so relaxing the match to `rel="[a-z]+"` left
-   the suite green. On the header GitHub actually serves for a middle page (`prev`, `next`, `last`,
-   `first`, four distinct URLs) a relaxed parser returns the **`prev`** cursor: pages 1↔2 ping-pong
-   to the cap, a false `truncated: true`, and pages ≥3 never read. A middle-page fixture now kills
-   that mutant.
+   the suite green. On the header GitHub actually serves for a middle page of the **pulls** endpoint
+   (`prev`, `next`, `last`, `first`, four distinct URLs) a relaxed parser returns the **`prev`**
+   cursor: pages 1↔2 ping-pong to the cap, a false `truncated: true`, and pages ≥3 never read. The
+   commits endpoint `listCommitsSince` reads serves `next`, `last`, `first`, `prev` — same four rels,
+   different order. The fixture uses the pulls order so the mutant still dies.
 
 **The evidence for all of the above is re-runnable, not asserted.**
 `node --experimental-strip-types scripts/mutation-audit.ts` applies one single-line mutation per row

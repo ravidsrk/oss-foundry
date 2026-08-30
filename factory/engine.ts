@@ -551,7 +551,13 @@ export function referencesIssue(
 ): boolean {
   const n = String(issueNumber);
   const bare = new RegExp(String.raw`(?<![\w/])#${n}(?!\d)`);
-  const prefixed = new RegExp(`(?<![\\w/])${escapeRe(repoId)}#${n}(?!\\d)`, "i");
+  // `.` and `-` joined the PREFIXED lookbehind because they were missing and a GitHub owner may
+  // contain both: `fork-ravidsrk` and `evil.ravidsrk` are valid, DIFFERENT owners whose names end
+  // with ours, and both bound `ravidsrk/orca-fleet#71` by suffix (issue #60). `\w` already excluded
+  // `notravidsrk`. The BARE pattern is left alone: the character before `#` there is the last letter
+  // of the repo name, so `\w` already blocks this class, and widening it would be a change no test
+  // can distinguish.
+  const prefixed = new RegExp(`(?<![\\w/.-])${escapeRe(repoId)}#${n}(?!\\d)`, "i");
   if (bare.test(text) || prefixed.test(text)) return true;
   return Boolean(issueUrl) && new RegExp(`${escapeRe(issueUrl)}(?!\\d)`).test(text);
 }
@@ -1016,10 +1022,13 @@ function recordTerminalReview(
 ): ScorecardRow[] {
   const observed = meta.humanReview;
   if (!observed) {
+    // NAMES BOTH REASONS: this reducer cannot tell an outage from a page cap (issue #69), and the
+    // advice differs — re-running recovers one and caps again on the other. `packetChecks` does know
+    // and says which; this line must stay true WITHOUT the fact, so it carries both.
     events.push(
       ev(
         "follow-up",
-        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}; run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ...")`,
+        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}. If the read FAILED, run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ..."). If it stopped at its PAGE CAP, a re-run will cap again — read the PR by hand or raise the cap deliberately`,
         id,
       ),
     );
@@ -1057,8 +1066,10 @@ function recordTerminalReview(
  * Apply a live PR sync to a submitted/followed-up packet.
  * merged → terminal + scorecard `merged`. closed unmerged → followed-up + scorecard `closedUnmerged`.
  * open: answered threads + ≥QUIET_RELEASE_DAYS quiet releases the in-flight slot; new maintainer
- * activity on a followed-up packet re-blocks the factory until answered; ≥STALE_INTENT_DAYS quiet
- * records a stale-intent note — closing stays a human act.
+ * activity on a followed-up packet re-blocks the factory until answered — unless a newer packet
+ * already holds the in-flight slot, in which case the older packet stays `followed-up` and records
+ * a `reply-owed:` note rather than doubling the count; ≥STALE_INTENT_DAYS quiet records a
+ * stale-intent note — closing stays a human act.
  */
 export function applyPrSync(
   state: FactoryState,

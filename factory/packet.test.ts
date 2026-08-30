@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { repoById } from "./allowlist.ts";
 import { assertDisjointCounts } from "./fixture-counts.ts";
 import { evidenceIsStale, needsRewitness, packetDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
@@ -85,13 +86,15 @@ const CLEAN_CONTRIBUTING =
 /** A phrasing `main`'s scanner already matches — the display is under test here, not the matcher. */
 const BAN_AGENTS_MD = "AI-generated pull requests are not welcome in this repository.";
 
-function freezePacket(docs: { agentsMd?: string; contributing?: string }) {
+function freezePacket(docs: { agentsMd?: string; contributing?: string; repoId?: string }) {
+  const repoId = docs.repoId ?? "mcp-use/mcp-use";
   return buildPacket({
-    repoId: "mcp-use/mcp-use",
+    repoId,
     issueNumber: 999,
     issueTitle: "docs typo",
-    issueUrl: "https://github.com/mcp-use/mcp-use/issues/999",
-    ...docs,
+    issueUrl: `https://github.com/${repoId}/issues/999`,
+    agentsMd: docs.agentsMd,
+    contributing: docs.contributing,
   });
 }
 
@@ -342,4 +345,41 @@ test("a document that was fetched but came back empty is an absence, not a clean
   assert.equal(/no ban statement matched/i.test(bothEmpty), false, bothEmpty);
   const oneReal = renderFreezeEvidence(freezePacket({ agentsMd: "", contributing: CLEAN_CONTRIBUTING }));
   assert.match(oneReal, new RegExp(`no ban statement matched in ${CLEAN_CONTRIBUTING.length} chars`, "i"));
+});
+
+/**
+ * Issue #72. The freeze promises policyNotes and the committed record (docs/04-stations.md);
+ * neither was pinned. A welcome quote lives only in the record block — matchedPhrases is empty on ALLOW.
+ */
+test("the freeze prints the allowlist policyNotes the scanner also read", () => {
+  // freezePacket's default repo has empty notes, so that fixture skips the block.
+  const packet = freezePacket({ contributing: CLEAN_CONTRIBUTING, repoId: "ColeMurray/background-agents" });
+  assert.equal(packet.policy.code, "ALLOW");
+  const notes = repoById(packet.repoId)?.policyNotes;
+  assert.ok(notes, "this repo is the fixture because it has notes; without them the block is skipped");
+
+  const lines = renderFreezeEvidence(packet).split("\n");
+  const header = `  allowlist.yaml policyNotes — ${notes.length} chars, written by us, not the repo:`;
+  assert.ok(lines.includes(header), `policyNotes header missing:\n${lines.join("\n")}`);
+  assert.ok(lines.includes(`  | ${notes}`), `policyNotes quote missing:\n${lines.join("\n")}`);
+});
+
+test("a welcome record's quote is shown only in the committed-record block", () => {
+  const packet = freezePacket({ contributing: CLEAN_CONTRIBUTING, repoId: "github/awesome-copilot" });
+  assert.equal(packet.policy.code, "ALLOW");
+  assert.equal(packet.policy.matchedPhrases.length, 0, "ALLOW must not quote the record via matchedPhrases");
+  const record = packet.policy.record;
+  assert.equal(record?.stance, "welcome");
+  assert.ok(record, "awesome-copilot is the fixture because it carries a welcome record");
+  assert.equal(CLEAN_CONTRIBUTING.includes(record.quote), false);
+
+  const lines = renderFreezeEvidence(packet).split("\n");
+  const header = `  Committed policy record — ${record.source} (fetched ${record.fetchedAt}, stance ${record.stance}):`;
+  assert.ok(lines.includes(header), `committed-record header missing:\n${lines.join("\n")}`);
+  assert.ok(lines.includes(`  | ${record.quote}`), `committed-record quote missing:\n${lines.join("\n")}`);
+  assert.equal(
+    lines.filter((line) => line.includes(record.quote)).length,
+    1,
+    "the quote must not also appear in fetched docs or matched phrases",
+  );
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -783,17 +783,62 @@ const VERBATIM_BODY = `## Summary\n\nFixes the thing.\n\n## Disclosure\n\n${DISC
  * quietly become a third version nobody ships. Issue #38.
  */
 test("every in-repo quotation of the disclosure block is the constant, byte for byte", () => {
-  const quoting = ["../docs/02-good-neighbor.md", "../docs/PRODUCT.md"];
-  for (const rel of quoting) {
-    const doc = readFileSync(new URL(rel, import.meta.url), "utf8");
+  /**
+   * DISCOVERED, not listed. This was `["../docs/02-good-neighbor.md", "../docs/PRODUCT.md"]` with
+   * `assert.equal(quoting.length, 2)` pinning it at exactly two — and there were already THREE
+   * quotations: `docs/evidence/pkt_ravidsrk_orca-fleet_71.md` was covered only incidentally, by a
+   * separate regeneration test. A new doc carrying a stale block shipped green, which is the class
+   * #38(b) was about (issue #68). `run-tests.ts:8` states the convention: "Discovered, not listed.
+   * A hand-maintained roster is the same silent hole this runner exists to close from the other end."
+   *
+   * THE DETECTOR CANNOT BE DERIVED FROM `DISCLOSURE`, and that is the whole difficulty. Matching on
+   * the constant is vacuous — a doc holding a STALE block does not contain it, so the miss defines
+   * itself out of the search. The first attempt used `DISCLOSURE_TAIL`, which review caught: a stale
+   * block whose SECOND or THIRD line drifted is skipped by that too, and the three real quotations
+   * still satisfy the floor, so the suite stays green over it.
+   *
+   * So these are deliberate LITERALS, one per line of the block, and a doc matching ANY of them must
+   * carry the whole current constant. Drift in one line leaves the other two fingerprints matching.
+   * They are asserted against the live constant below, which is what stops them rotting into
+   * something that describes no version at all.
+   */
+  const FINGERPRINTS = [
+    "prepared by Foundry",
+    "reviewed the packet, the diff, and the tests",
+    "The factory does not merge",
+  ];
+  for (const print of FINGERPRINTS) {
     assert.ok(
-      doc.includes(DISCLOSURE),
-      `${rel} quotes a disclosure block that is not \`DISCLOSURE\` — a doc showing maintainers a version this factory does not send`,
+      DISCLOSURE.includes(print),
+      `the fingerprint ${JSON.stringify(print)} no longer appears in DISCLOSURE, so it can only find blocks this factory never sent`,
     );
   }
-  // ...and the list is not empty of its own accord: a rename that moved these files would leave
-  // the loop above iterating over nothing and passing.
-  assert.equal(quoting.length, 2, "both quoting docs must stay in the list");
+
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
+    );
+  const candidates = [...walk(join(root, "docs")).filter((f) => f.endsWith(".md")), join(root, "README.md")];
+
+  const quoting: string[] = [];
+  for (const file of candidates) {
+    const doc = readFileSync(file, "utf8");
+    if (!FINGERPRINTS.some((print) => doc.includes(print))) continue;
+    quoting.push(file.slice(root.length));
+    assert.ok(
+      doc.includes(DISCLOSURE),
+      `${file.slice(root.length)} quotes a disclosure block that is not \`DISCLOSURE\` — a doc showing maintainers a version this factory does not send`,
+    );
+  }
+
+  // ...and the search is not vacuous: a rename, a moved directory, or a detector that stopped
+  // matching would leave the loop above iterating over nothing and passing. Three today, and the
+  // floor is what makes losing one cost a visible edit.
+  assert.ok(
+    quoting.length >= 3,
+    `only ${quoting.length} in-repo quotation(s) found (${quoting.join(", ")}) — the discovery has drifted`,
+  );
 });
 
 test("attach-draft refuses a PR body without the verbatim disclosure block", () => {
@@ -838,6 +883,35 @@ test("attach-draft refuses a PR body without the verbatim disclosure block", () 
   const ok = attach(`Fixes #${n}\n\n${DISCLOSURE}`);
   assert.equal(ok.error, undefined, ok.error);
   assert.equal(ok.state.packets[0].status, "submitted");
+
+  /**
+   * An UNSUPPLIED body refuses too, which is what `?? ""` buys and what nothing reached (issue #67).
+   * `body` is optional on the opts type, so rewriting the guard to
+   * `opts.body !== undefined && !opts.body.includes(DISCLOSURE)` — a natural "don't check what
+   * wasn't given" refactor — left the suite green: no test drove this gate without a body.
+   *
+   * `ledger-check.ts` makes the argument this pins: "forgetting a field is not a check". It made
+   * `body: string` REQUIRED and asserts an unsupplied one is reported, while the reducer carrying
+   * the same hazard had no such pin. Not exploitable today — both live call sites pass a body and
+   * both are independently pinned — so the hole is for the future third caller that file anticipates.
+   *
+   * The title has to carry the closing keyword: with no body, `mentionsIssue` reads
+   * `title + "\n"`, and without a match the reducer refuses at THAT gate instead and the disclosure
+   * check is never reached.
+   */
+  const unsupplied = applyAttachDraft(state, started.id, url, {
+    draft: true,
+    headSha: HEAD,
+    title: `Fixes #${n}`,
+  });
+  assert.ok(unsupplied.error, "an attach with no body at all must not bind to a packet");
+  assert.match(unsupplied.error!, /verbatim disclosure/, unsupplied.error!);
+  assert.equal(unsupplied.state.packets[0].status, "draft-ready");
+  assert.equal(
+    unsupplied.state.scorecard.find((r) => r.repoId === repoId)?.opened ?? 0,
+    openedBefore,
+    "a refused attach must not score an opened PR",
+  );
 });
 
 test("tick skips issues that already have a competing PR", () => {
@@ -965,6 +1039,61 @@ test("halt typed in GitHub's casing halts the roster's repo, not a repo that doe
   // Halting twice is idempotent on the counter — `bans` must stay 0 in the KPIs, so it must not
   // drift upward on a repeated stop (docs/08-operations.md).
   assert.equal(applyHalt(halted.state, "COLEMURRAY/BACKGROUND-AGENTS", "again").state.bans, 1);
+});
+
+/**
+ * The same halt against a ledger whose stored ids are OFF-canonical — which is what every ledger
+ * written before #44 looks like, and `loadFactoryState` accepts them. `.foundry-state.json` is the
+ * operator's live gitignored file, so this is the ordinary upgrade path rather than a contrived
+ * state.
+ *
+ * The test above cannot see these two lines, because the seed it uses is already canonical and plain
+ * `===` satisfies it. Reverting either `sameRepoId` in `applyHalt` to `===` left the suite at
+ * 327/327 (issue #57), and each revert reproduces verbatim the failure the function's own docblock
+ * says it prevents: report success, bump `bans`, and leave the work running.
+ */
+test("halt moves an off-canonical row and packet — the shape a pre-#44 ledger has", () => {
+  const canonical = "ColeMurray/background-agents";
+  const OFF = "COLEMURRAY/BACKGROUND-AGENTS";
+  const seed = seedState();
+  const inflightBefore = seed.packets.filter(
+    (p) => p.repoId === canonical && INFLIGHT_STATUSES.includes(p.status),
+  );
+  assert.ok(inflightBefore.length > 0, "the seed must hold an in-flight packet or this binds nothing");
+  assert.ok(
+    seed.scorecard.some((r) => r.repoId === canonical),
+    "the seed must hold the row this rewrites, or the fixture proves nothing",
+  );
+
+  const state: FactoryState = {
+    ...seed,
+    packets: seed.packets.map((p) => (p.repoId === canonical ? { ...p, repoId: OFF } : p)),
+    scorecard: seed.scorecard.map((r) => (r.repoId === canonical ? { ...r, repoId: OFF } : r)),
+  };
+
+  const halted = applyHalt(state, "colemurray/background-agents", "maintainer asked us to stop");
+  assert.equal(halted.error, undefined);
+  assert.equal(halted.repoId, canonical);
+
+  // The scorecard half. Under a raw `===` the row keeps tone=neutral/health=good while `bans`
+  // still counts the halt, so `status` reads as halted and `maySelectRepo` waves the repo through.
+  const row = halted.state.scorecard.find((r) => r.repoId === OFF)!;
+  assert.ok(row, "the off-canonical row disappeared instead of being updated");
+  assert.equal(row.maintainerTone, "banned", "the off-canonical row was not banned");
+  assert.equal(health(row), "stop");
+  assert.equal(halted.state.bans, 1);
+  const gate = maySelectRepo(halted.state, canonical);
+  assert.equal(gate.ok, false, "a halted repo whose row is stored off-canonical is still selectable");
+
+  // The packet half. Under a raw `===` the halt returns no error, bans the repo, and leaves the
+  // packet in flight — the exact "halted nothing" the sibling test's docblock names.
+  for (const before of inflightBefore) {
+    assert.equal(
+      halted.state.packets.find((p) => p.id === before.id)!.status,
+      "parked",
+      `${before.id} stayed in flight through a halt because its stored repoId is off-canonical`,
+    );
+  }
 });
 
 test("halt still refuses a repo the roster does not know, loudly", () => {
@@ -4461,6 +4590,10 @@ test("a terminal transition with no observed review split records nothing and sa
     false,
     `\`sync\` refuses a terminal packet, so naming it is advice that cannot be followed:\n${gap}`,
   );
+  // ...and the OTHER reason: this reducer cannot tell an outage from a page cap (issue #69), and a
+  // line offering only the retry was misleading for half the cases it fires on.
+  assert.match(gap, /PAGE CAP/, `the advice must cover a capped read as well as an outage:\n${gap}`);
+  assert.match(gap, /cap again/, gap);
   // Not a claim about the wording — a claim about the verb. `sync` really does refuse this packet.
   const refused = applyPrSync(
     merged.state,
@@ -4884,11 +5017,13 @@ test("revertNote reads notes only — a followUp of another kind cannot masquera
 });
 
 test("applyReviewToScorecard writes exactly one row, and counts rather than clamps", () => {
-  // The repo guard is the difference between a KPI and a headline. `factoryKpis()` sums `noReview`
-  // across every allowlist row, so a fold that forgot which row it was writing would multiply the
-  // published number by the size of the roster — eight rows today. The identical guard in
-  // `applyPacketToScorecard` is pinned; this one was not, so writing the WRONG row was caught and
-  // writing EVERY row was not.
+  // The repo guard is the difference between a KPI and a headline: a fold that forgot which row it
+  // was writing would multiply any factory-wide sum of `noReview` by the size of the roster — eight
+  // rows today. The identical guard in `applyPacketToScorecard` is pinned; this one was not, so
+  // writing the WRONG row was caught and writing EVERY row was not.
+  //
+  // The orphaned aggregator that used to compute that sum is deleted in this change (issue #75), so
+  // the comment names the hazard rather than a function no longer in the tree.
   const repo = "ravidsrk/orca-fleet";
   const rows = applyReviewToScorecard(emptyScorecard(), repo, { reviews: 0, comments: 0 });
   assert.equal(rows.filter((r) => r.noReview > 0).length, 1, "exactly one row may move");
@@ -5053,4 +5188,217 @@ test("applyRevert writes the note and the counter together", () => {
   assert.ok(refused.error);
   assert.equal(refused.state.scorecard.reduce((a, r) => a + r.reverts, 0), 0);
   assert.equal(refused.state.packets.filter((p) => revertNote(p)).length, 0);
+});
+
+/**
+ * The other two canonicalisation sites the #57 audit found unpinned.
+ *
+ * That issue said seven of the nine were pinned and asked for a sweep to confirm none was pinned
+ * only incidentally by a canonical fixture. The sweep disproved its own premise: reverting
+ * `engine.ts:183` or `scorecard.ts:114` to a raw `===` also left the suite green. Both are the same
+ * pre-#44 upgrade path as the halt above — a ledger whose stored ids are off-canonical, which
+ * `loadFactoryState` accepts.
+ */
+test("an off-canonical stored packet is still found, so the tick cannot build a second one", () => {
+  const first = applyQueueLive(blank(), live("ravidsrk/orca-fleet", 71));
+  assert.ok(first.packet, `the fixture must queue a packet or this binds nothing: ${first.reason}`);
+
+  // The same ledger, with the packet stored the way a pre-canonicalisation state file holds it —
+  // and TERMINAL, because `applyQueueLive` returns "in-flight" before it ever reaches the duplicate
+  // guard. A merged packet is the case that matters anyway: the guard exists so the factory does not
+  // work an issue it has already finished.
+  const off: FactoryState = {
+    ...first.state,
+    packets: first.state.packets.map((p) => ({ ...p, repoId: p.repoId.toUpperCase(), status: "merged" as const })),
+  };
+  const again = applyQueueLive(off, live("ravidsrk/orca-fleet", 71));
+  assert.equal(
+    again.reason,
+    "duplicate",
+    "the duplicate guard missed an off-canonical packet, so the tick queued a second packet for one issue",
+  );
+  assert.equal(
+    again.state.packets.length,
+    off.packets.length,
+    "the ledger grew a second packet for an issue that already had one",
+  );
+});
+
+test("applyReviewToScorecard finds an off-canonical row, and only that row", () => {
+  const rows = emptyScorecard().map((r) =>
+    r.repoId === "ravidsrk/orca-fleet" ? { ...r, repoId: "RAVIDSRK/ORCA-FLEET" } : r,
+  );
+  assert.ok(rows.length > 1, "more than one row, or 'only that row' is not a claim");
+
+  const after = applyReviewToScorecard(rows, "ravidsrk/orca-fleet", { reviews: 0, comments: 0 });
+  const row = after.find((r) => r.repoId === "RAVIDSRK/ORCA-FLEET")!;
+  // Under a raw `===` the observation is written to NO row: the KPI is silently dropped, which is
+  // worse than a failed read because nothing reports it.
+  assert.equal(row.noReview, 1, "the review observation was written to no row at all");
+  // ...and the guard must still be a guard: #39's review found that removing it wrote the split into
+  // every allowlist row, inflating the factory-wide sum 8x.
+  assert.equal(
+    after.filter((r) => r.noReview > 0).length,
+    1,
+    "the observation landed on more than the row it was for",
+  );
+});
+
+/**
+ * Issue #60: the owner-prefix lookbehind excluded `\w` and `/` but not `-` or `.`, so a DIFFERENT
+ * GitHub owner whose name ends with ours bound our issue by suffix. `fork-ravidsrk` and
+ * `evil.ravidsrk` are valid owners and neither is `ravidsrk`.
+ *
+ * Bounded rather than exploitable — `compareCommits` has already pinned the range to the packet's
+ * repo before the binding check runs, the PR-body tier requires a closing keyword and refuses it
+ * anyway, and the message is one the operator authored. It is still a matcher answering "same repo"
+ * when the truth is "a repo whose owner name ends with the same characters".
+ *
+ * Asserted in BOTH directions, because the fix is a widened exclusion and the way to get that wrong
+ * is to start refusing legitimate references. Only the PREFIXED lookbehind changed — the bare `#N`
+ * one is untouched, since the character before `#` there is the last letter of the repo name and
+ * `\w` already blocks this class. The markdown bullet forms below were checked against the widened
+ * bare version before it was reverted, and are kept as the standing guard on the legitimate side.
+ */
+test("a foreign owner whose name ends with ours does not bind our issue", () => {
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const repo = "ravidsrk/orca-fleet";
+  const refs = (text: string) => referencesIssue(text, 71, url, repo);
+
+  for (const foreign of [
+    "fork-ravidsrk/orca-fleet#71",
+    "evil.ravidsrk/orca-fleet#71",
+    "my.ravidsrk/orca-fleet#71",
+    "x-ravidsrk/orca-fleet#71",
+  ]) {
+    assert.equal(refs(foreign), false, `${foreign} is a different owner and must not bind our issue`);
+    // The PR-body tier refused it before this fix and must still: its closing keyword anchors the
+    // match, so the owner prefix can never be absorbed by leading whitespace.
+    assert.equal(mentionsIssue(`Closes ${foreign}`, 71, url, repo), false, foreign);
+  }
+  // Already refused by `\w`, kept as the control that the class was never about all prefixes.
+  assert.equal(refs("notravidsrk/orca-fleet#71"), false);
+  assert.equal(refs("other-owner/other-repo#71"), false);
+
+  // ...and every legitimate form still binds. The two markdown bullets are the ones the widened
+  // `bare` lookbehind could plausibly have broken.
+  for (const legit of [
+    "#71",
+    "- #71",
+    "* #71",
+    "(issue #71)",
+    "[#71]",
+    "PR #71",
+    "ravidsrk/orca-fleet#71",
+    "See ravidsrk/orca-fleet#71.",
+    url,
+    `${url}#issuecomment-1`,
+    `${url}/`,
+    `${url}?x=1`,
+    `see ${url}.`,
+  ]) {
+    assert.equal(refs(legit), true, `${legit} is a legitimate reference and must still bind`);
+  }
+  // The digit guard #42 added is untouched, on BOTH `#N` forms. The prefixed one was uncovered
+  // until this audit: removing `(?!\d)` from it alone left the suite green, because every existing
+  // longer-number case went through the bare pattern.
+  assert.equal(refs("#710"), false);
+  assert.equal(refs("ravidsrk/orca-fleet#710"), false);
+  assert.equal(refs(`${url}0`), false);
+});
+
+test("classifyCompetition treats a foreign owner's mention as no competitor at all", () => {
+  // The predicate's other consumer. Refusing a foreign owner here is CORRECT rather than a lost
+  // hold: a PR in someone else's fork is not competing work on our issue, so the right verdict is
+  // `clear` and not `adjacent`.
+  const url = "https://github.com/ravidsrk/orca-fleet/issues/71";
+  const repo = "ravidsrk/orca-fleet";
+  const verdict = classifyCompetition(
+    {
+      pulls: [
+        {
+          title: "unrelated work",
+          body: "tracks fork-ravidsrk/orca-fleet#71 in a fork",
+          url: "https://github.com/ravidsrk/orca-fleet/pull/9",
+        },
+      ],
+    },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(verdict.kind, "clear", `a fork's issue must not raise a hold on ours: ${JSON.stringify(verdict)}`);
+
+  // ...and the adjacent tier still fires for a real mention of OUR issue, so this is not just an
+  // assertion that the tier stopped working.
+  const ours = classifyCompetition(
+    {
+      pulls: [{ title: "refactor", body: "see also #71", url: "https://github.com/ravidsrk/orca-fleet/pull/3" }],
+    },
+    71,
+    url,
+    repo,
+  );
+  assert.equal(ours.kind, "adjacent");
+});
+
+/**
+ * The wake rule is stated in four places and #48 made it conditional in code while updating two of
+ * them. `applyPrSync`'s own docstring and `docs/SPEC.md` §7 kept asserting the old unconditional
+ * re-block — the engine one being the contract on the very function whose behaviour changed, and the
+ * first thing a reader of `applyPrSync` sees (issue #51).
+ *
+ * A drift check rather than a collapse to one source: the four serve different readers (a reducer
+ * contract, a normative spec, a product narrative, a station walkthrough) and merging them costs
+ * more than it saves. What must not happen is one of them saying the factory blocks when it does not.
+ *
+ * THREE things this had to get right, each found by getting it wrong first:
+ *
+ * - PER FILE, not an aggregate count. `docs/04-stations.md` states the rule without the word
+ *   "re-block" at all, so a `re-block`-only trigger never discovered it while two matches in
+ *   `engine.ts` satisfied a count of four — one of the four unvalidated, which review caught.
+ * - PROSE ONLY for `.ts`. `applyPrSync` emits a runtime event, "Maintainer activity … — answer
+ *   threads before any new tick", on the arm where the slot is NOT held; no exception belongs there
+ *   and scanning code strings would demand one.
+ * - NORMALISED. Both the docstring and SPEC.md wrap "new maintainer / activity" across lines, so a
+ *   contiguous match finds neither until the comment markers and newlines are collapsed.
+ *
+ * The exception is matched by CONCEPT, because the four say it differently on purpose —
+ * `repliesOwed` says "the slot was held by a newer packet" and reads perfectly. Requiring a literal
+ * would force four documents into one voice to satisfy a test.
+ */
+test("every statement of the wake rule carries the held-slot exception", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const SOURCES = ["factory/engine.ts", "docs/SPEC.md", "docs/PRODUCT.md", "docs/04-stations.md"];
+  /** Either phrasing states the rule; `docs/04-stations.md` uses only the second. */
+  const STATES_RULE = /re-block(?:s|ed|ing)?|maintainer activity/gi;
+  const EXCEPTION = /newer packet|holds the in-flight slot|slot was held|already holds the slot/i;
+
+  for (const rel of SOURCES) {
+    const raw = readFileSync(join(root, rel), "utf8");
+    const prose = rel.endsWith(".md")
+      ? raw
+      : raw
+          .split("\n")
+          .filter((line) => /^\s*(\*|\/\/|\/\*)/.test(line))
+          .map((line) => line.replace(/^\s*(\*\/?|\/\/|\/\*\*?)/, ""))
+          .join(" ");
+    const text = prose.replace(/\s+/g, " ");
+
+    const found = [...text.matchAll(STATES_RULE)];
+    assert.ok(
+      found.length > 0,
+      `${rel} no longer states the wake rule in any recognised phrasing — either it was reworded, in which case this guard needs the new one, or the statement was lost`,
+    );
+    for (const match of found) {
+      // A window, not the whole file: a file may state the rule twice and one copy must not cover
+      // for the other.
+      const window = text.slice(Math.max(0, match.index - 400), match.index + 400);
+      assert.match(
+        window,
+        EXCEPTION,
+        `${rel} states the wake rule without the held-slot exception, so it claims the factory blocks when it does not:\n…${window.slice(300, 560)}…`,
+      );
+    }
+  }
 });
