@@ -64,6 +64,16 @@ const SIGNATURE_FAMILIES: { family: string; token: string }[] = [
 const ANY_INSTRUMENT = `(?:${SIGNATURE_FAMILIES.map(({ token }) => token).join("|")})`;
 
 /**
+ * The words a requirement is asserted WITH, when its subject has been elided.
+ *
+ * ONE roster, because there were two and they drifted: the waiver patterns knew `expected` and this
+ * did not, so "No CLA is expected for docs and expected for code." waived the whole sentence and
+ * reached ALLOW — a P1 from review. A waiver and a requirement are the same vocabulary under
+ * opposite polarity, so a word this factory can waive is a word it must be able to require.
+ */
+const PREDICATE = String.raw`(?:required|needed|necessary|expected|mandatory|obligatory|compulsory)`;
+
+/**
  * "There is no DCO bypass" says the DCO is mandatory, not that it is waived. Checked BEFORE the
  * waivers, because it is literally a negation sitting next to the token and every waiver pattern
  * below would otherwise claim it.
@@ -81,6 +91,11 @@ const ANY_INSTRUMENT = `(?:${SIGNATURE_FAMILIES.map(({ token }) => token).join("
  * follows it: "No CLA is needed." puts `needed` where the hatch word would be, matches nothing here,
  * and stays a waiver. An open slot in front of a required anchor cannot over-match.
  *
+ * The slot cannot cross a requirement word. Unbounding it let "No CLA is required for optional
+ * contributions." reach `optional` across "is required for" and reverse a plain waiver — a
+ * fail-CLOSED P1 from review, caused by the previous commit. Past a `PREDICATE` this is no longer a
+ * "no X is <permission>" construction at all, so the temper says exactly that.
+ *
  * UNBOUNDED, and deliberately. It was capped at four words and review immediately produced a
  * five-word denial; any finite cap invites the next one, and the cap was arbitrary. It is safe to
  * remove because `\w+\s+` crosses neither punctuation nor a clause boundary, so the slot cannot
@@ -94,7 +109,7 @@ const ANY_INSTRUMENT = `(?:${SIGNATURE_FAMILIES.map(({ token }) => token).join("
  * needs punctuation tolerance inside the copula, which is one more widening in a pattern that has
  * produced a new gap for every widening so far. Recorded rather than fixed, and rather than hidden.
  */
-const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:\w+\s+)*?(?:bypass|except|exempt|waive|opt[-\s]?out|workaround|ways?\s+around|optional|voluntary|discretionary|up\s+to\s+you|at\s+your\s+discretion)`;
+const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:(?!${PREDICATE})\w+\s+)*?(?:bypass|except|exempt|waive|opt[-\s]?out|workaround|ways?\s+around|optional|voluntary|discretionary|up\s+to\s+you|at\s+your\s+discretion)`;
 
 /** Words that turn a waiver into a conditional requirement: it IS required, somewhere. */
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;
@@ -109,16 +124,6 @@ const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\
  * and `COORDINATED` already reads the ones that do not. An unfalsifiable rule is worse than none.
  */
 const CONJUNCTION_WORDS = String.raw`(?:and|or|plus|but|however|yet|though|although|whereas|while|nevertheless|nonetheless)`;
-
-/**
- * The words a requirement is asserted WITH, when its subject has been elided.
- *
- * ONE roster, because there were two and they drifted: the waiver patterns knew `expected` and this
- * did not, so "No CLA is expected for docs and expected for code." waived the whole sentence and
- * reached ALLOW — a P1 from review. A waiver and a requirement are the same vocabulary under
- * opposite polarity, so a word this factory can waive is a word it must be able to require.
- */
-const PREDICATE = String.raw`(?:required|needed|necessary|expected|mandatory|obligatory|compulsory)`;
 
 /**
  * What must follow a bare `PREDICATE` for it to be a requirement rather than a noun modifier.
@@ -282,7 +287,15 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
         const span = new RegExp(w, "i").exec(residual);
         if (!span) continue;
         let tail = residual.slice(span.index + span[0].length);
-        for (let abut = abuts.exec(tail); abut; abut = abuts.exec(tail)) tail = tail.slice(abut[0].length);
+        // Absorption only from a span that ENDS with an instrument. "We don't require a DCO sign-off"
+        // removes "...a DCO" and the next token continues that same noun phrase; "No DCO is required
+        // DCO is required for code." removes "...is required" and the next token starts a new
+        // statement. A one-space window cannot tell those apart, and eating the second one was a
+        // fail-open P1 from review. What the span ends with can tell them apart exactly.
+        const compound = new RegExp(String.raw`${T}\s*$`, "i").test(span[0]);
+        if (compound) {
+          for (let abut = abuts.exec(tail); abut; abut = abuts.exec(tail)) tail = tail.slice(abut[0].length);
+        }
         const next = `${residual.slice(0, span.index)} ${tail}`;
         // Progress is required, not assumed. Termination here rests on the residual getting shorter,
         // and nothing structural guaranteed it: a pattern whose removal leaves the length unchanged

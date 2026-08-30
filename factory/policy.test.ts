@@ -530,12 +530,19 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is simply optional.", want: "required", why: "same, adjectival hatch" },
   { doc: "No DCO is under any circumstances waived.", want: "required", why: "three words in the slot" },
   { doc: "No DCO is under any and all circumstances waived.", want: "required", why: "five words: the slot is unbounded, because any cap invites the next one" },
+  // ...but the slot stops at a requirement word. Unbounding it let this reach `optional` across "is
+  // required for" and reverse a plain waiver - a fail-closed P1 caused by the fix before it.
+  { doc: "No CLA is required for optional contributions.", want: "waived", why: "past a predicate this is no longer a 'no X is <permission>' construction" },
   { doc: "No CLA is needed.", want: "waived", why: "the slot cannot over-match: `needed` sits where a hatch word would and is not one" },
   // REBUTTED, and pinned so it cannot be reported a third time: review reported that two spaces
   // between a waiver and a same-family requirement let the absorption window eat the requirement.
   // It does not - the window is one space, so a second space stops it, and this already resolved
   // REQUIRED on the code as reviewed.
   { doc: "No DCO is required  DCO is required for code.", want: "required", why: "two spaces: the one-space window cannot cross them" },
+  { doc: "No DCO is required DCO is required for code.", want: "required", why: "one space, and the span ends with a predicate, so nothing is absorbed" },
+  // The other side of that is already above: "We don't require a DCO sign-off on contributions." still
+  // waives, because there the span ENDS with an instrument and the next token continues its noun
+  // phrase rather than starting a statement.
 
   // --- One verb waives only the instrument it actually reaches. ---
   //
