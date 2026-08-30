@@ -613,20 +613,34 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // ...and the noun-modifier reading is a NEW statement, not a continuation, in both spellings.
   { doc: "No CLA is required.\nRequired reading is the style guide.", want: "waived", why: "'Required reading' modifies a noun" },
   { doc: "No CLA is required.\nExpected turnaround is one week.", want: "waived", why: "'Expected turnaround' modifies a noun" },
-  // The word between predicate and scope is a CLOSED set of adverbs. It was any word once, so
-  // "It is required reading for new contributors." read as a requirement and held a repository that
-  // waives the CLA outright - a fail-closed P1 from review. `reading` is a noun the predicate
-  // modifies, not an adverb qualifying it, and only the copula branch was missing the guard.
-  { doc: "No CLA is required. It is required reading for new contributors.", want: "waived", why: "copula + noun modifier asserts nothing" },
-  { doc: "No CLA is required. It is required knowledge for reviewers.", want: "waived", why: "same shape, other noun" },
-  { doc: "No DCO is needed.\n- It is expected practice in this organisation.", want: "waived", why: "same, behind a bullet" },
+  // These four now hold for a DIFFERENT reason than when they were written. They arrived as
+  // fail-closed rows: `SCOPE_FOLLOWS` let any word sit between predicate and scope, so "required
+  // reading for contributors" read as a requirement. That fix stands and is still pinned by the
+  // pronoun-free rows below it. But a later P1 - "It applies to code, except for vendored trees." -
+  // showed a pronoun clause can qualify a waiver with no predicate at all, and resolving what `it`
+  // names is coreference. So a pronoun clause in a waiver's sentence holds, and these hold with it.
+  { doc: "No CLA is required. It is required reading for new contributors.", want: "required", why: "held: what `It` names is coreference, not something a regex resolves" },
+  { doc: "No CLA is required. It is required knowledge for reviewers.", want: "required", why: "same, held for the pronoun not the noun" },
+  { doc: "No DCO is needed.\n- It is expected practice in this organisation.", want: "required", why: "same, behind a bullet" },
   // ...and the real copula requirement, which shares every word except the noun, must still hold.
   { doc: "No CLA is required. It is required for code.", want: "required", why: "copula requirement, scope follows directly" },
   { doc: "No CLA is required. It is needed only for release.", want: "required", why: "closed-set qualifier between predicate and scope" },
   // Same shapes with the anaphor in the SAME sentence as its antecedent, which is the only place the
   // clause-level matcher can reach: across a sentence boundary the fragment has no antecedent to
   // attach to, so a row split by a full stop leaves that matcher untested.
-  { doc: "No CLA is required, it is required reading for new contributors.", want: "waived", why: "same-sentence copula + noun modifier" },
+  { doc: "No CLA is required, it is required reading for new contributors.", want: "required", why: "same-sentence pronoun clause" },
+  // The P1 that established the rule, and the reason it is not a vocabulary of verbs: after joining,
+  // "It applies to code." asserts a requirement with no predicate this file knows. Both the limiter
+  // variant and the bare one hold, so no `applies|covers|extends` roster was needed.
+  { doc: "No CLA is required for docs. It applies to code, except for vendored trees.", want: "required", why: "#52: pronoun continuation carrying a limiter" },
+  { doc: "No CLA is required for docs. It applies to code.", want: "required", why: "same, with no limiter and no known predicate" },
+  { doc: "No CLA is required for docs.\n- This covers code.", want: "required", why: "same, demonstrative behind a bullet" },
+  // The bound on that rule: a pronoun used as an OBJECT qualifies nothing, so it must not hold. The
+  // rule needs a pronoun followed by something - a clause - not a pronoun anywhere in the sentence.
+  { doc: "No CLA is required for that.", want: "waived", why: "'that' is an object here, not a subject asserting anything" },
+  // ...and the closed qualifier set still earns its keep with no pronoun in sight: reopening it to
+  // any word makes this join and read as a requirement, which is the fail-closed it was added for.
+  { doc: "No CLA is required. Required reading for contributors.", want: "waived", why: "'reading' is a noun, not an adverb before the scope" },
   { doc: "No CLA is required, it is required for code.", want: "required", why: "same-sentence copula requirement" },
   // The SAME waiver stated twice, scoped only on the later copy. Position came from asking the
   // sentence where the match was, which answers with the first copy, so the later waiver's forward

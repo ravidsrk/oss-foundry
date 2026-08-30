@@ -202,6 +202,9 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
      * phrasing, because the question is never asked.
      */
     if (SCOPE_LIMITER.test(sentence)) return "required";
+    // ...and a back-referring pronoun clause, for the same reason: what `it` points at is coreference,
+    // and the sentence cannot be read without knowing. See `PRONOUN_CLAUSE`.
+    if (PRONOUN_CLAUSE.test(sentence)) return "required";
     /**
      * A COORDINATED requirement on the same elided subject: "no CLA is required for docs and
      * required for code." `and` is not a clause delimiter, so this requirement lives inside the
@@ -299,7 +302,7 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
  * a reader comparing them should find them saying the same thing.
  */
 const CONTINUATION = new RegExp(
-  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}|${PREDICATE}\b${SCOPE_FOLLOWS})`,
+  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}|${PREDICATE}\b${SCOPE_FOLLOWS}|(?:it|this|that|they|these|those)\s+\w+)`,
   "i",
 );
 
@@ -310,6 +313,21 @@ const CONTINUATION = new RegExp(
  * the marker back first puts them in one sentence again.
  */
 const MARKER_ONLY = /^(?:[-*+>]|\d+[.)])\s*$/;
+
+/**
+ * A clause whose subject is a pronoun pointing at something already named.
+ *
+ * "No CLA is required for docs. It applies to code, except for vendored trees." — `It` is the CLA,
+ * and the sentence that qualifies the waiver was dropped because it names no instrument. A P1 from
+ * review, and the seventh continuation shape to arrive.
+ *
+ * It is the last one that gets a shape-specific fix, because the next one would need a vocabulary of
+ * applicability verbs (`applies`, `covers`, `extends to`) on top of the requirement vocabulary, and
+ * that is the road this branch already came down. A pronoun clause sharing a sentence with a waiver
+ * simply HOLDS: resolving what `it` refers to is coreference, which is further outside a regex than
+ * limiter attachment ever was.
+ */
+const PRONOUN_CLAUSE = /\b(?:it|this|that|they|these|those)\s+\w+/i;
 
 function sentencesOf(text: string): string[] {
   const out: string[] = [];
