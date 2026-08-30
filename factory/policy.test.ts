@@ -467,6 +467,24 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is required, and all patches are welcome except spam.", want: "waived", why: "the 'except' is about spam" },
   { doc: "No DCO is needed, and we review everything except vendored trees.", want: "waived", why: "the 'except' is about review scope" },
   { doc: "No CLA. Reviews are quick, except during release weeks.", want: "waived", why: "limiter in a later sentence about something else" },
+  // The SAME waiver stated twice, scoped only on the later copy. Position came from asking the
+  // sentence where the match was, which answers with the first copy, so the later waiver's forward
+  // span was cut at the intervening conjunction and its limiter never seen — ALLOW. Third P1.
+  { doc: "No CLA is required for docs, and no CLA is required, except for new dependencies.", want: "required", why: "limiter belongs to the SECOND copy of an identical waiver" },
+  { doc: "A CLA is not required for docs, and a CLA is not required, unless you add a dependency.", want: "required", why: "same, in the not-required phrasing" },
+  { doc: "No DCO is needed for docs, and no DCO is needed, other than for vendored code.", want: "required", why: "same, DCO family" },
+  { doc: "No CLA is required, except for new dependencies, and no CLA is required for docs.", want: "required", why: "limiter belongs to the FIRST copy" },
+  // Rows above repeat a waiver but never byte-identically: case or a glued "and" keeps each clause
+  // text unique, so finding one BY its text lands right by luck. Here both copies are exactly
+  // `no CLA is required` with the conjunction between them as its own span, so a by-text search
+  // returns the first and the later copy's span is cut at that "and". Stilted on purpose — this
+  // reads a stranger's CONTRIBUTING.md, and a repo wanting ALLOW while demanding a signature has
+  // every reason to write awkwardly.
+  { doc: "For docs, no CLA is required, and, no CLA is required, except for new dependencies.", want: "required", why: "byte-identical clauses: the later copy must be found at its own offset" },
+  // ...and the repetition must not become an excuse to over-block. These are the fail-closed halves:
+  // identical clauses with no limiter anywhere, and a repeat whose trailing 'except' governs spam.
+  { doc: "No CLA is required, no CLA is required.", want: "waived", why: "verbatim repeat, nothing scopes either copy" },
+  { doc: "No CLA is required for docs, and no CLA is required, and all patches are welcome except spam.", want: "waived", why: "repeat, and the 'except' is still about spam" },
 
   // Anaphora (P1 from review): the requirement's subject is elided, so it lands in a token-less
   // clause the per-clause pass skipped, recording only the waiver.

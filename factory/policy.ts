@@ -80,21 +80,20 @@ const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\
 /**
  * Decide whether one occurrence of a signature token is REQUIRED or WAIVED.
  *
- * Two different spans on purpose, and getting this wrong was a fail-open in the first draft of this
- * function:
+ * Two different spans on purpose, and getting this wrong was a fail-open in the first draft:
  *
  * - The WAIVER is read from the CLAUSE, so two instruments in one sentence cannot borrow each
  *   other's verb ("No DCO, contributor agreement required.").
- * - The SCOPE LIMITER is read from the SENTENCE, because "except" sits in the next clause. Reading
- *   it from the clause made "A CLA is not required, except for new dependencies." a blanket waiver
- *   — this issue's fail-open class inside its own fix, caught by probing before it shipped.
+ * - The SCOPE LIMITER is read from the waiver's own STATEMENT, which crosses the clause boundary but
+ *   stops short of the whole sentence. Three wrong spans shipped for this one decision; the block at
+ *   the limiter check names each and why the current one is neither too narrow nor too wide.
  *
  * The ORDER is the rest: every waiver that can swallow a requirement word does so explicitly, so
  * `no DCO is required` is one pattern rather than a negation and a requirement fighting over a
  * clause. The previous attempt negated the DCO and left the CLA invisible — 8 of 10 documents
  * regressed to ALLOW.
  */
-function signaturePolarity(clause: string, sentence: string, token: string): "required" | "waived" {
+function signaturePolarity(clause: string, clauseAt: number, sentence: string, token: string): "required" | "waived" {
   const T = token;
   if (new RegExp(String.raw`\bno\s+${T}\s+${ESCAPE_HATCH}`, "i").test(clause)) return "required";
   const waivers = [
@@ -118,9 +117,15 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
      * packet that waives the CLA outright — P1 from review). So the span is the waiver's own
      * statement: its clause, what follows up to the first coordinating conjunction, and a leading
      * "Except for X, ..." it is the main clause of.
+     *
+     * The position is the clause's offset plus the match's offset inside it. Asking the SENTENCE
+     * where `hit[0]` is answers with the first copy, so a repeated waiver measured the later one from
+     * the earlier one's position: the forward span stopped at the intervening conjunction, the
+     * limiter behind it was never in view, and a scoped requirement reached ALLOW. Third P1 from
+     * review, and the third wrong span for this one decision.
      */
-    const at = sentence.toLowerCase().indexOf(hit[0].toLowerCase());
-    const after = at === -1 ? "" : sentence.slice(at + hit[0].length);
+    const at = clauseAt + hit.index;
+    const after = sentence.slice(at + hit[0].length);
     const conjunction = after.search(/\b(?:and|or|but|however)\b/i);
     const forward = conjunction === -1 ? after : after.slice(0, conjunction);
     const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
@@ -164,19 +169,32 @@ function sentencesOf(text: string): string[] {
 }
 
 /**
- * Clause-sized spans, so two instruments in one sentence are judged separately.
+ * Clause-sized spans, so two instruments in one sentence are judged separately, each with its own
+ * offset into the sentence.
  *
  * "No DCO, contributor agreement required." is the case that makes this necessary: one sentence
  * holding a waiver and a requirement. Splitting on the comma is what lets the DCO read as waived and
  * the contributor agreement as required, instead of one borrowing the other's verb. A code comment
  * in the previous attempt claimed a `NEG_FILLER` regex handled the comma and nothing tested it;
  * this is the same guarantee made structural.
+ *
+ * The offset is carried, not recovered later: a sentence can repeat a clause verbatim, and searching
+ * for its text answers with the first copy. The cursor only moves forward, so identical clauses still
+ * get their own positions.
  */
-function clausesOf(sentence: string): string[] {
-  return sentence
-    .split(/[,;]|\bbut\b|\bhowever\b/i)
-    .map((c) => c.trim())
-    .filter(Boolean);
+function clausesOf(sentence: string): { text: string; at: number }[] {
+  const out: { text: string; at: number }[] = [];
+  let cursor = 0;
+  for (const part of sentence.split(/[,;]|\bbut\b|\bhowever\b/i)) {
+    const text = part.trim();
+    if (!text) continue;
+    // Only the splitting delimiter lies between `cursor` and this clause, so the first match from
+    // `cursor` is this clause rather than a later repeat of it.
+    const at = sentence.indexOf(text, cursor);
+    out.push({ text, at });
+    cursor = at + text.length;
+  }
+  return out;
 }
 
 function quoteOf(match: RegExpExecArray): string {
@@ -214,15 +232,15 @@ export function scanPolicyText(text: string): {
      * keywords alone would over-block it.
      */
     const anaphoric = parts.some(
-      (c) =>
+      ({ text: c }) =>
         /^(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?(?:required|needed|necessary|mandatory|obligatory|compulsory)\b/i.test(c) &&
         !SIGNATURE_FAMILIES.some(({ token }) => new RegExp(token, "i").test(c)),
     );
-    for (const clause of parts) {
+    for (const { text: clause, at: clauseAt } of parts) {
       for (const { family, token } of SIGNATURE_FAMILIES) {
         if (!new RegExp(token, "i").test(clause)) continue;
         const quote = `${family}: ${clause.replace(/\s+/g, " ").trim().slice(0, 140)}`;
-        const polarity = signaturePolarity(clause, sentence, token);
+        const polarity = signaturePolarity(clause, clauseAt, sentence, token);
         if (polarity === "required" || anaphoric) signatureRequired.push(quote);
         else signatureWaived.push(quote);
       }
