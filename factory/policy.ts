@@ -60,6 +60,9 @@ const SIGNATURE_FAMILIES: { family: string; token: string }[] = [
   },
 ];
 
+/** Every signature instrument, as one alternation, so a filler can be told to stop at any of them. */
+const ANY_INSTRUMENT = `(?:${SIGNATURE_FAMILIES.map(({ token }) => token).join("|")})`;
+
 /**
  * "There is no DCO bypass" says the DCO is mandatory, not that it is waived. Checked BEFORE the
  * waivers, because it is literally a negation sitting next to the token and every waiver pattern
@@ -142,10 +145,25 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
   const waivers = [
     String.raw`\bno\s+${T}\s+(?:is\s+|are\s+)?${PREDICATE}\b`,
     String.raw`${T}\s*:?\s*(?:is\s+|are\s+)?not\s+${PREDICATE}\b`,
-    // Bounded filler, stopping at any clause break so it cannot borrow a neighbour's waiver. It
-    // exists because "do not need TO SIGN a contributor license agreement" puts an infinitive
-    // between verb and token — a shape the corpus caught and the first draft of this list missed.
-    String.raw`\b(?:do(?:es)?\s+not|don['’]t|doesn['’]t|will\s+not|won['’]t)\s+(?:require|need|ask\s+for|expect)\b[^.;,\n]{0,25}?${T}`,
+    // Bounded filler, because "do not need TO SIGN a contributor license agreement" puts an
+    // infinitive between verb and token — a shape the corpus caught and the first draft missed.
+    //
+    // The filler is TEMPERED, not merely bounded, and the difference was a fail-open: the character
+    // class stopped at punctuation but `and` is not punctuation, so "We do not require a CLA and a
+    // DCO is required." let the filler run past the CLA and waive a DCO the sentence demands. The
+    // comment here used to claim it "stops at any clause break"; it did not, and no test disagreed.
+    //
+    // The temper is ANOTHER INSTRUMENT, not a conjunction. Both were written and a mutant showed the
+    // conjunction half redundant — a filler only matters when it reaches an instrument, so being
+    // unable to pass one is the whole guarantee. It also states the invariant directly: a verb waives
+    // the instrument it reaches and never one behind another. The cost is that two family tokens
+    // sitting adjacent — "a contributor agreement sign-off" — hold rather than waive together, which
+    // is the same call taken for limiters: adjacent-or-coordinated is not something to guess at.
+    //
+    // The length bound stays for a non-behavioural reason, said plainly because no test defends it:
+    // a lazy quantifier inside a tempered class over adversarial input is a backtracking hazard, and
+    // this scanner reads a stranger's document.
+    String.raw`\b(?:do(?:es)?\s+not|don['’]t|doesn['’]t|will\s+not|won['’]t)\s+(?:require|need|ask\s+for|expect)\b(?:(?!${ANY_INSTRUMENT})[^.;,\n]){0,25}?${T}`,
     String.raw`\bthere\s+(?:is|are)\s+no\s+${T}`,
     String.raw`\bno\s+${T}\b`,
   ];

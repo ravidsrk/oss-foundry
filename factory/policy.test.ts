@@ -507,6 +507,23 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is discretionary.", want: "required", why: "synonym" },
   { doc: "There is no way around the DCO.", want: "required", why: "paraphrased escape hatch" },
 
+  // --- One verb waives only the instrument it actually reaches. ---
+  //
+  // The active-voice filler was bounded by punctuation, and `and` is not punctuation, so the filler
+  // crossed a conjunction AND another instrument: "We do not require a CLA and a DCO is required."
+  // waived a DCO the sentence demands. A fail-open P1 from review, and the comment above the pattern
+  // claimed it "stops at any clause break" while no test disagreed - a lie with a green suite.
+  { doc: "We do not require a CLA and a DCO is required.", want: "required", why: "#52: one verb cannot waive across a conjunction" },
+  { doc: "We do not require a CLA or a DCO sign-off.", want: "required", why: "object coordination is indistinguishable from statement coordination here, so it holds" },
+  // Two family tokens adjacent, no conjunction between them. This is the row that makes the temper
+  // ANOTHER INSTRUMENT rather than a conjunction: tempering on conjunctions alone waives both here.
+  // A deliberate hold - "a contributor agreement sign-off" may be one thing or two, and which it is
+  // is exactly the guess this scanner stopped making.
+  { doc: "We do not need a contributor agreement sign-off.", want: "required", why: "cross-family adjacency: held, not guessed" },
+  // ...and the shape the filler exists for still waives: an infinitive between verb and instrument.
+  { doc: "We do not need to sign a contributor license agreement.", want: "waived", why: "the infinitive the filler was added for" },
+  { doc: "We do not ask for a contributor agreement.", want: "waived", why: "ask-for phrasing, single instrument" },
+
   // --- Sentences from real CONTRIBUTING documents, quoted. ---
   //
   // Every other row here was invented to probe a rule. These were not: they are verbatim sentences
