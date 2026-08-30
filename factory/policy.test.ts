@@ -523,6 +523,10 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // ...and the shape the filler exists for still waives: an infinitive between verb and instrument.
   { doc: "We do not need to sign a contributor license agreement.", want: "waived", why: "the infinitive the filler was added for" },
   { doc: "We do not ask for a contributor agreement.", want: "waived", why: "ask-for phrasing, single instrument" },
+  // The absorption exception is for a COMPOUND NOUN - "a DCO sign-off" is one instrument, so the
+  // second token comes out with the first. A dash separating two statements is not that, and a
+  // three-character window ate the requirement behind one: a fail-open P1 from review.
+  { doc: "No DCO is required - DCO is required for code.", want: "required", why: "a dash separates statements; it is not a compound noun" },
 
   // --- Sentences from real CONTRIBUTING documents, quoted. ---
   //
@@ -638,6 +642,7 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // The bound on that rule: a pronoun used as an OBJECT qualifies nothing, so it must not hold. The
   // rule needs a pronoun followed by something - a clause - not a pronoun anywhere in the sentence.
   { doc: "No CLA is required for that.", want: "waived", why: "'that' is an object here, not a subject asserting anything" },
+  { doc: "No CLA is required. It, however, is required for code.", want: "required", why: "an aside between pronoun and verb does not detach the clause" },
   // ...and the closed qualifier set still earns its keep with no pronoun in sight: reopening it to
   // any word makes this join and read as a requirement, which is the fail-closed it was added for.
   { doc: "No CLA is required. Required reading for contributors.", want: "waived", why: "'reading' is a noun, not an adverb before the scope" },
@@ -799,6 +804,36 @@ test("the signature corpus classifies every phrasing correctly, in both directio
  * a second visible edit. Both directions are floored separately — an all-must-hold corpus measures
  * only recall and lets the over-block class back in, which is how round 1 of #37 failed.
  */
+/**
+ * The gate reads a stranger's CONTRIBUTING.md, so it must not be possible to hang it with one.
+ *
+ * This is a HANG detector, not a benchmark: the bound is generous and the shapes are the ones that
+ * make backtracking expensive — long filler runs, deep clause lists, a sentence with no punctuation
+ * to stop at, and repetition of every construct the scanner special-cases. Written after this file's
+ * own mutation harness produced a non-terminating run and the residual loop turned out to depend on
+ * the string shrinking rather than being made to.
+ */
+test("no adversarial document can hang the signature scanner", () => {
+  const documents: [string, string][] = [
+    ["long filler run", `We do not require ${"a ".repeat(400)}CLA.`],
+    ["filler reaching no instrument", `We do not require ${"a ".repeat(2000)}`],
+    ["instrument repeated inside the filler", `We do not require ${"a CLA ".repeat(300)}DCO.`],
+    ["deep clause list", `No CLA is required${", or code".repeat(1500)}, except forks.`],
+    ["no punctuation to stop at", `No CLA is required ${"and code ".repeat(2000)}`],
+    ["pronoun repetition", `No CLA is required. ${"It is it is ".repeat(2000)}`],
+    ["whitespace run inside a waiver", `We don't require${" ".repeat(5000)}a DCO sign-off`],
+    ["waiver repeated across sentences", "No CLA is required. ".repeat(2000)],
+    ["markdown bullet repetition", "- No CLA is required\n".repeat(2000)],
+    ["limiter repetition", `No CLA is required ${"except ".repeat(2000)}`],
+  ];
+  for (const [name, doc] of documents) {
+    const started = performance.now();
+    scanPolicyText(doc);
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 5000, `${name} (${doc.length} chars) took ${elapsed.toFixed(0)}ms`);
+  }
+});
+
 test("the signature corpus cannot be quietly emptied or made one-sided", () => {
   assert.ok(SIGNATURE_CORPUS.length >= 40, `corpus has ${SIGNATURE_CORPUS.length} rows; the floor is 40`);
   const count = (p: Polarity) => SIGNATURE_CORPUS.filter((r) => r.want === p).length;

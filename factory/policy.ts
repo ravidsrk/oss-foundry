@@ -246,7 +246,12 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
      * words are DCO-family tokens, so a mention abutting a removed span is absorbed with it.
      * Without that, "We don't require a DCO sign-off on contributions." became a hold.
      */
-    const abuts = new RegExp(String.raw`^[\s\-]{0,3}${T}`, "i");
+    // At most one space, or a hyphen with nothing around it: "a DCO sign-off" and "sign-off" are one
+    // instrument, so the second token is absorbed with the first. A DASH THAT SEPARATES STATEMENTS is
+    // not that — "No DCO is required - DCO is required for code." had its requirement eaten by an
+    // absorption window three characters wide, a fail-open P1 from review. The exception is for a
+    // compound noun and is now shaped like one.
+    const abuts = new RegExp(String.raw`^(?:[ \t]|-)?${T}`, "i");
     let residual = clause;
     for (let removed = true; removed; ) {
       removed = false;
@@ -255,7 +260,16 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
         if (!span) continue;
         let tail = residual.slice(span.index + span[0].length);
         for (let abut = abuts.exec(tail); abut; abut = abuts.exec(tail)) tail = tail.slice(abut[0].length);
-        residual = `${residual.slice(0, span.index)} ${tail}`;
+        const next = `${residual.slice(0, span.index)} ${tail}`;
+        // Progress is required, not assumed. Termination here rests on the residual getting shorter,
+        // and nothing structural guaranteed it: a pattern whose removal leaves the length unchanged
+        // spins forever. Every pattern above does shrink, so NO TEST DEFENDS THIS LINE and a mutant
+        // deleting it survives — said plainly rather than implied. It is here because the gate reads
+        // a stranger's document, a non-terminating loop is a denial of service, and the next pattern
+        // added to that list should not be able to cause one. The hang is not hypothetical: this
+        // file's own mutation harness produced one while the invariant was only conventional.
+        if (next.length >= residual.length) continue;
+        residual = next;
         removed = true;
         break;
       }
@@ -302,7 +316,7 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
  * a reader comparing them should find them saying the same thing.
  */
 const CONTINUATION = new RegExp(
-  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}|${PREDICATE}\b${SCOPE_FOLLOWS}|(?:it|this|that|they|these|those)\s+\w+)`,
+  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}|${PREDICATE}\b${SCOPE_FOLLOWS}|(?:it|this|that|they|these|those)[\s,;]+\w+)`,
   "i",
 );
 
