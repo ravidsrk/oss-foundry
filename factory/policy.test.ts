@@ -475,6 +475,18 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No DCO is needed. Unless you are adding a new module.", want: "required", why: "same, with a subject inside the fragment" },
   { doc: "No CLA is required. Other than for vendored trees.", want: "required", why: "multi-word limiter, sentence-initial" },
   { doc: "No CLA is required. Reviews are quick.", want: "waived", why: "next sentence is not a limiter at all" },
+  // The same defect at three more punctuations, all P1s from review: a continuation is not a new
+  // statement. A conjunction-initial fragment carries the REQUIREMENT rather than the scope, and a
+  // markdown list marker hid both - including an ordered marker, which the boundary rule splits off
+  // as its own fragment so that it stood between the waiver and its scope.
+  { doc: "A CLA is not required for documentation. But is required for code.", want: "required", why: "conjunction-initial requirement fragment" },
+  { doc: "No CLA is required.\n- Except for code contributions.", want: "required", why: "limiter behind a markdown bullet" },
+  { doc: "No CLA is required.\n1. Except for code.", want: "required", why: "ordered marker, split off on its own" },
+  { doc: "No CLA is required.\n> But required for code.", want: "required", why: "blockquote marker" },
+  // ...and a conjunction that asserts nothing must still not flip the waiver.
+  { doc: "No CLA is required. And we are friendly.", want: "waived", why: "conjunction with nothing required after it" },
+  { doc: "No CLA is required. However, reviews are quick.", want: "waived", why: "'however' with its own subject" },
+  { doc: "No CLA is required.\n- Please read the style guide.", want: "waived", why: "bullet that asserts nothing" },
   // The SAME waiver stated twice, scoped only on the later copy. Position came from asking the
   // sentence where the match was, which answers with the first copy, so the later waiver's forward
   // span was cut at the intervening conjunction and its limiter never seen — ALLOW. Third P1.

@@ -231,23 +231,43 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
  * `W` window above spells out abbreviation by abbreviation. A newline ends one too: these are
  * markdown, and a list item is a sentence whether or not it carries a full stop.
  *
- * A sentence STARTING with a scope limiter is not a new statement, it is the previous one's scope:
- * "No CLA is required. Except for code." Splitting them left a blanket waiver and a token-less
- * fragment nothing looked at, and the repo reached ALLOW while requiring a CLA for code — a P1 from
- * review. Joining it back is what lets every existing scope rule see it, rather than adding a second
- * way to decide scope.
+ * A CONTINUATION is not a new statement, it is more of the previous one, so it is joined back —
+ * which lets every existing clause and scope rule see it instead of adding a second way to decide
+ * scope. Three P1s from review, all the same defect at different punctuation:
  *
- * Sentence-INITIAL is the whole test, and it is what separates this from "No CLA. Reviews are quick,
- * except during release weeks.", where the limiter sits mid-sentence with its own subject and must
- * not reach the waiver. Where a fragment is genuinely ambiguous, joining over-blocks rather than
- * over-allows, which is the asymmetry `signaturePolarity` closes with.
+ * - "No CLA is required. Except for code." — the scope, split off as a token-less fragment.
+ * - "A CLA is not required for docs. But is required for code." — the requirement, same shape.
+ * - "No CLA is required.\n- Except for code." — the same again behind a markdown list marker, which
+ *   the first version of this rule did not allow for.
+ *
+ * Each left a blanket waiver and a fragment nothing looked at, and the repo reached ALLOW while
+ * requiring a signature. What makes a continuation is its FIRST word: a scope limiter or a
+ * coordinating conjunction, after any list marker or opening quote. That is what separates them from
+ * "No CLA. Reviews are quick, except during release weeks.", where the limiter sits mid-sentence
+ * with its own subject and must not reach the waiver.
+ *
+ * A fragment that is genuinely ambiguous joins, and joining over-blocks rather than over-allows —
+ * the asymmetry `signaturePolarity` closes with, applied to punctuation.
  */
+const CONTINUATION = new RegExp(
+  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|and|or|but|however)\b`,
+  "i",
+);
+
+/**
+ * A fragment that is nothing but a list marker. `1.` ends in a terminator followed by a capital, so
+ * the boundary rule above splits an ordered item into a marker and a body — and the marker then stood
+ * between a waiver and its scope, so the scope joined to the marker instead of the waiver. Joining
+ * the marker back first puts them in one sentence again.
+ */
+const MARKER_ONLY = /^(?:[-*+>]|\d+[.)])\s*$/;
+
 function sentencesOf(text: string): string[] {
   const out: string[] = [];
   for (const sentence of text.split(/(?<=[.!?])\s+(?=["'(\[]?[A-Z])|\n+/).map((s) => s.trim()).filter(Boolean)) {
-    const anaphoricScope = new RegExp(String.raw`^["'(\[]*${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}\b`, "i").test(sentence);
     const previous = out.at(-1);
-    if (anaphoricScope && previous !== undefined) out[out.length - 1] = `${previous} ${sentence}`;
+    const continues = CONTINUATION.test(sentence) || MARKER_ONLY.test(sentence);
+    if (previous !== undefined && continues) out[out.length - 1] = `${previous} ${sentence}`;
     else out.push(sentence);
   }
   return out;
