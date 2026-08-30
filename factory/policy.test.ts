@@ -506,6 +506,17 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is voluntary.", want: "required", why: "synonym" },
   { doc: "No CLA is discretionary.", want: "required", why: "synonym" },
   { doc: "There is no way around the DCO.", want: "required", why: "paraphrased escape hatch" },
+  // Plural hatch nouns. Review reported these as a fail-open — that the singular-only vocabulary
+  // misses them and the broad `no <instrument>` matcher then reads them as waivers. It does not: the
+  // hatch nouns carry no trailing word boundary, so `exception` already matches inside `exceptions`.
+  // Verified by mutation rather than by argument — deleting a plural group from the pattern changes
+  // no verdict, so there was nothing to add. These rows exist so the claim cannot be made a third
+  // time without a test contradicting it.
+  { doc: "There are no DCO exceptions.", want: "required", why: "plural noun, matched as a prefix" },
+  { doc: "No CLA waivers are available.", want: "required", why: "plural waiver-of-the-waiver" },
+  { doc: "There are no CLA bypasses.", want: "required", why: "-es plural" },
+  { doc: "No DCO exemptions exist.", want: "required", why: "plural exemption" },
+  { doc: "There are no ways around the DCO.", want: "required", why: "plural of the multi-word hatch" },
 
   // --- One verb waives only the instrument it actually reaches. ---
   //
