@@ -517,6 +517,13 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "There are no CLA bypasses.", want: "required", why: "-es plural" },
   { doc: "No DCO exemptions exist.", want: "required", why: "plural exemption" },
   { doc: "There are no ways around the DCO.", want: "required", why: "plural of the multi-word hatch" },
+  // Inflections, and the reason the hatch words are STEMS. `waiver` did not cover "waived" and
+  // `exemption` did not cover "exempt", so both fell through to the broad `no <instrument>` matcher
+  // and read as waivers - a fail-open P1 from review. The nouns carry no trailing word boundary, so
+  // a stem covers every inflection at once instead of a list that keeps missing one.
+  { doc: "No DCO is waived.", want: "required", why: "#52: inflected hatch, `waive` stem" },
+  { doc: "No CLA is exempt.", want: "required", why: "`exempt` stem, adjective form" },
+  { doc: "No DCO is exempted.", want: "required", why: "same stem, participle" },
 
   // --- One verb waives only the instrument it actually reaches. ---
   //
@@ -538,6 +545,7 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // second token comes out with the first. A dash separating two statements is not that, and a
   // three-character window ate the requirement behind one: a fail-open P1 from review.
   { doc: "No DCO is required - DCO is required for code.", want: "required", why: "a dash separates statements; it is not a compound noun" },
+  { doc: "No DCO is required-DCO is required for code.", want: "required", why: "same with no spaces: the window is one space and nothing else" },
 
   // --- Sentences from real CONTRIBUTING documents, quoted. ---
   //

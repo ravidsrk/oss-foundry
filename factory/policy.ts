@@ -75,7 +75,7 @@ const ANY_INSTRUMENT = `(?:${SIGNATURE_FAMILIES.map(({ token }) => token).join("
  * written with an adjective instead of a noun, which is why they share this check rather than
  * getting a rule of their own.
  */
-const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:bypass|exception|exemption|waiver|opt[-\s]?out|workaround|way\s+around|optional|voluntary|discretionary|up\s+to\s+you|at\s+your\s+discretion)`;
+const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:bypass|except|exempt|waive|opt[-\s]?out|workaround|ways?\s+around|optional|voluntary|discretionary|up\s+to\s+you|at\s+your\s+discretion)`;
 
 /** Words that turn a waiver into a conditional requirement: it IS required, somewhere. */
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;
@@ -246,12 +246,16 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
      * words are DCO-family tokens, so a mention abutting a removed span is absorbed with it.
      * Without that, "We don't require a DCO sign-off on contributions." became a hold.
      */
-    // At most one space, or a hyphen with nothing around it: "a DCO sign-off" and "sign-off" are one
-    // instrument, so the second token is absorbed with the first. A DASH THAT SEPARATES STATEMENTS is
-    // not that — "No DCO is required - DCO is required for code." had its requirement eaten by an
-    // absorption window three characters wide, a fail-open P1 from review. The exception is for a
-    // compound noun and is now shaped like one.
-    const abuts = new RegExp(String.raw`^(?:[ \t]|-)?${T}`, "i");
+    // ONE SPACE, and nothing else. "a DCO sign-off" is one instrument reached across a space, so the
+    // second token is absorbed with the first; a hyphen inside a token is already part of the token
+    // itself (`signed[-\s]?off`), so this window never needed one.
+    //
+    // Two fail-open P1s from review taught that, one per width. A three-character space-or-hyphen
+    // window ate the requirement in "No DCO is required - DCO is required for code."; narrowing it to
+    // one space OR one hyphen still ate "No DCO is required-DCO is required for code.", because an
+    // unspaced dash joins statements at least as often as it joins words. A window this narrow cannot
+    // reach across either.
+    const abuts = new RegExp(String.raw`^[ \t]?${T}`, "i");
     let residual = clause;
     for (let removed = true; removed; ) {
       removed = false;
