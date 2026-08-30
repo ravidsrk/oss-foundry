@@ -108,6 +108,33 @@ const PREDICATE = String.raw`(?:required|needed|necessary|expected|mandatory|obl
 const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:\w+\s+)?(?:for|on|in|when|with|of|from)\b))`;
 
 /**
+ * A waiver's own statement ends where the NEXT statement begins, and the text between them is scope.
+ *
+ * The boundary is a conjunction behind a comma or semicolon — necessary, not sufficient. "for
+ * documentation, or code, except for third-party contributions" puts a comma before the `or`, and
+ * "code" is still scope: a bare noun phrase closed by the next comma. A new statement is longer than
+ * that and carries a verb. So each candidate boundary is examined, scope items are skipped, and the
+ * span ends at the first candidate that reads as a statement.
+ *
+ * Both directions cost a P1 on this branch: truncating at every conjunction lost the exception,
+ * truncating at none of them reclassified "and all patches are welcome except spam" as a scoped
+ * requirement.
+ */
+const FINITE_VERB = /\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|will|would|can|could|may|might|must|should|shall|need|needs|require|requires|review|reviews|accept|accepts|welcome|apply|applies|ask|asks|expect|expects)\b/i;
+
+function truncateAtStatement(after: string): string {
+  const boundary = new RegExp(String.raw`[,;]\s*${CONJUNCTION_WORDS}\b`, "gi");
+  for (let hit = boundary.exec(after); hit; hit = boundary.exec(after)) {
+    const segment = after.slice(hit.index + hit[0].length).split(/[,;.]/)[0] ?? "";
+    const words = segment.trim().split(/\s+/).filter(Boolean);
+    // A scope item: short, and asserting nothing. Keep looking for a real statement boundary.
+    if (words.length <= 3 && !FINITE_VERB.test(segment)) continue;
+    return after.slice(0, hit.index);
+  }
+  return after;
+}
+
+/**
  * There is deliberately NO "asserts a requirement" roster. One was written, and the injection pass
  * showed the harness could not see it deleted: an occurrence matching no waiver already returns
  * `"required"`, so the list and the fallback gave the same answer and it was unreachable — the #75
@@ -189,13 +216,16 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
       const span = spans[0]!;
       const at = clauseAt + span.at;
       const after = sentence.slice(at + span.length);
-      // A conjunction ends this statement only where it BEGINS a clause, which is where a comma
-      // or semicolon puts it. Truncating at any conjunction cut "for documentation or code except
-      // for third-party contributions" at the `or` — a scope coordination, not a new statement —
-      // and lost the exception behind it: a P1 from review, and the fail-open mirror of the
-      // over-block that put truncation here in the first place.
-      const conjunction = after.search(new RegExp(String.raw`[,;]\s*${CONJUNCTION_WORDS}\b`, "i"));
-      const forward = conjunction === -1 ? after : after.slice(0, conjunction);
+      // A conjunction ends this statement only where it BEGINS a new one. A comma is necessary for
+      // that and not sufficient: "for documentation, or code, except for third-party contributions"
+      // has a comma before the `or`, yet "code" is another SCOPE, not another statement — truncating
+      // there lost the exception behind it. Two P1s from review, one for each half.
+      //
+      // A new statement carries a subject and a verb, so it is longer than a list item and it says
+      // something. A continued scope is a short noun phrase closed by the next comma. That is the
+      // test: skip a candidate whose following segment is a bare scope item, keep looking, and
+      // truncate at the first one that reads as a statement.
+      const forward = truncateAtStatement(after);
       const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
       if (SCOPE_LIMITER.test(forward) || leading) return "required";
     }
@@ -294,7 +324,7 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
  * guide.", where the participle modifies a noun and the sentence genuinely is a new statement.
  */
 const CONTINUATION = new RegExp(
-  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|${PREDICATE}\b${SCOPE_FOLLOWS})`,
+  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|${CONJUNCTION_WORDS})\b|(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b|${PREDICATE}\b${SCOPE_FOLLOWS})`,
   "i",
 );
 
@@ -339,6 +369,12 @@ function clausesOf(sentence: string): { text: string; at: number }[] {
     if (!text) continue;
     // Only the splitting delimiter lies between `cursor` and this clause, so the first match from
     // `cursor` is this clause rather than a later repeat of it.
+    //
+    // Behaviourally inert as the code stands, and said plainly rather than implied by a test that
+    // does not exist: a mutant searching from 0 changes no verdict here. It can only widen a later
+    // clause's span to an earlier clause's, and a wider span only ever ADDS a hold, so it cannot
+    // open the gate. Kept because measuring one clause at another clause's offset is wrong however
+    // the limiter rules are drawn, and `truncateAtStatement` above has already been redrawn twice.
     const at = sentence.indexOf(text, cursor);
     out.push({ text, at });
     cursor = at + text.length;

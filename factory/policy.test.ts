@@ -474,6 +474,19 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is required for documentation or code except for third-party contributions.", want: "required", why: "'or' coordinates scopes; the exception still applies" },
   { doc: "No DCO is needed for docs or tests, unless vendored.", want: "required", why: "same, with the limiter behind a comma" },
   { doc: "No CLA is required for docs plus tests, other than for dependencies.", want: "required", why: "'plus' coordinates scopes too" },
+  // A comma before the conjunction is NECESSARY for a statement boundary and not sufficient: in a
+  // scope LIST the item is a bare noun phrase closed by the next comma, and truncating there lost
+  // the exception behind it. A P1 from review. A real statement is longer and carries a verb, which
+  // is the test - so the rows below and the two after them are the same rule from both sides.
+  { doc: "No CLA is required for documentation, or code, except for third-party contributions.", want: "required", why: "comma before 'or', but 'code' is scope" },
+  { doc: "No CLA is required for docs, or tests, or code, unless vendored.", want: "required", why: "three-item scope list" },
+  { doc: "No DCO is needed for docs, and tests, other than vendored trees.", want: "required", why: "'and'-joined scope list" },
+  { doc: "No CLA is required for docs, and we review everything except vendored trees.", want: "waived", why: "a verb after the comma makes it a statement" },
+  { doc: "No CLA is required for docs, but the maintainers apply judgement except for forks.", want: "waived", why: "same, contrastive conjunction" },
+  // Both halves of "is this segment a scope item or a statement" earn their keep, and each of these
+  // rows fails without one of them. Short-with-a-verb is a statement; long-without-one is too.
+  { doc: "No CLA is required for docs, and tests apply, except for code.", want: "waived", why: "3 words but a verb: a statement, so the waiver's span ends" },
+  { doc: "No CLA is required for docs, and all other repositories in this organisation, except forks.", want: "waived", why: "verbless but long: also a statement" },
   { doc: "A CLA is not required; except for new dependencies.", want: "required", why: "limiter behind a semicolon" },
   { doc: "Except for new dependencies, a CLA is not required.", want: "required", why: "leading limiter, waiver is the main clause" },
   // ...and it must NOT reach a waiver it has nothing to do with. Reading it from the whole sentence
@@ -507,6 +520,11 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is required for docs.\nRequired for code.", want: "required", why: "predicate-initial continuation" },
   { doc: "No CLA is required for docs.\n- Required for code.", want: "required", why: "same, behind a bullet" },
   { doc: "No DCO is needed for docs.\nMandatory for vendored trees.", want: "required", why: "same, other predicate and family" },
+  // A continuation can also lead with the COPULA, which the clause-level anaphora matcher already
+  // accepted and this one did not - the two had drifted. A P1 from review.
+  { doc: "No CLA is required for docs. Is required for code.", want: "required", why: "copula-initial continuation" },
+  { doc: "No CLA is required for docs.\n- Is required for code.", want: "required", why: "same, behind a bullet" },
+  { doc: "No DCO is needed for docs. Are required for code.", want: "required", why: "plural copula" },
   // ...and the noun-modifier reading is a NEW statement, not a continuation, in both spellings.
   { doc: "No CLA is required.\nRequired reading is the style guide.", want: "waived", why: "'Required reading' modifies a noun" },
   { doc: "No CLA is required.\nExpected turnaround is one week.", want: "waived", why: "'Expected turnaround' modifies a noun" },
