@@ -23,6 +23,34 @@ test("forbidden phrase beats a welcome repo", () => {
   assert.equal(v.code, "DENY_FORBIDDEN");
 });
 
+test("an anaphoric requirement lands on the instrument last named, not on every family", () => {
+  // The corpus above asserts the VERDICT; this asserts which instrument the record blames, which is
+  // the half a sentence-wide flag got wrong and the half a human reads.
+  const cla = scanPolicyText("No CLA is required for docs, but is required for code, and no DCO is needed.");
+  assert.deepEqual(
+    cla.signatureRequired.map((q) => q.split(":")[0]),
+    ["CLA"],
+    "the CLA is the instrument the elided subject refers to",
+  );
+  assert.deepEqual(cla.signatureWaived.map((q) => q.split(":")[0]), ["DCO"], "the DCO is waived outright");
+
+  // Same sentence with the families swapped, so the rule cannot be passing by ordering luck.
+  const dco = scanPolicyText("No DCO is needed for docs, but is required for code, and no CLA is required.");
+  assert.deepEqual(dco.signatureRequired.map((q) => q.split(":")[0]), ["DCO"]);
+  assert.deepEqual(dco.signatureWaived.map((q) => q.split(":")[0]), ["CLA"]);
+
+  // Both families named BEFORE the anaphor, so "most recently named" and "first named" differ and
+  // only the nearest one is right. Without this the rule passes while attributing to whichever
+  // instrument happens to appear first.
+  const nearest = scanPolicyText("No DCO is needed, no CLA is required for docs, but is required for code.");
+  assert.deepEqual(
+    nearest.signatureRequired.map((q) => q.split(":")[0]),
+    ["CLA"],
+    "the CLA is the instrument named nearest the elided subject",
+  );
+  assert.deepEqual(nearest.signatureWaived.map((q) => q.split(":")[0]), ["DCO"]);
+});
+
 test("CLA parks needs-human", () => {
   const v = evaluatePolicy({
     repoId: "OpenHands/OpenHands",
@@ -578,6 +606,11 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is required while the repo is in beta.", want: "waived", why: "temporal 'while' asserts no requirement" },
   // ...and a later clause with its OWN subject must not flip anything, or the rule over-blocks.
   { doc: "No CLA is required, and tests are required.", want: "waived", why: "'tests' is the subject, not the CLA" },
+  // An elided subject refers to the instrument most recently NAMED. A sentence-wide flag put the
+  // requirement on both families, so a sentence waiving the DCO outright reported it as required -
+  // a P1 from review, and fail-CLOSED. The verdict was the same because the CLA really is required,
+  // but the freeze evidence named the wrong instrument, and that record is what a human signs off.
+  { doc: "No CLA is required for docs, but is required for code, and no DCO is needed.", want: "required", why: "anaphora belongs to the CLA, not the DCO" },
   // English drops the copula, and a participle-initial clause was invisible: the waiver read as
   // blanket and the repo was ALLOWED despite requiring a signature for code. A P1 from review.
   // With no verb to anchor on, the SCOPE anchors instead - a bare participle counts only when a

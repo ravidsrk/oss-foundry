@@ -422,18 +422,33 @@ export function scanPolicyText(text: string): {
      * is what keeps a bare participle from matching a noun modifier.
      */
     const CONJUNCTION = String.raw`(?:${CONJUNCTION_WORDS}\s+)?`;
-    const anaphoric = parts.some(
-      ({ text: c }) =>
-        (new RegExp(String.raw`^${CONJUNCTION}(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||
-          new RegExp(String.raw`^${CONJUNCTION}(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(c)) &&
-        !SIGNATURE_FAMILIES.some(({ token }) => new RegExp(token, "i").test(c)),
-    );
+    // No "and this clause names no instrument" test: the walk below only asks this of clauses where
+    // no family token matched, so the guard that used to live here was unreachable — a mutant
+    // deleting it changed nothing, which is how it was found.
+    const isAnaphoric = (c: string) =>
+      new RegExp(String.raw`^${CONJUNCTION}(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||
+      new RegExp(String.raw`^${CONJUNCTION}(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(c);
+    /**
+     * An elided subject refers to the instrument most recently NAMED, so the requirement lands on
+     * that family and no other. A sentence-wide flag put it on both: "No CLA is required for docs,
+     * but is required for code, and no DCO is needed." reported the DCO as required when the sentence
+     * waives it outright — a P1 from review, and a fail-CLOSED one. The verdict happened to be the
+     * same, because the CLA genuinely is required, but the freeze evidence named the wrong instrument
+     * and that record is what a human reads before signing.
+     */
+    const anaphoricFamilies = new Set<string>();
+    let named: string | undefined;
+    for (const { text: c } of parts) {
+      const here = SIGNATURE_FAMILIES.find(({ token }) => new RegExp(token, "i").test(c));
+      if (here) named = here.family;
+      else if (isAnaphoric(c) && named !== undefined) anaphoricFamilies.add(named);
+    }
     for (const { text: clause, at: clauseAt } of parts) {
       for (const { family, token } of SIGNATURE_FAMILIES) {
         if (!new RegExp(token, "i").test(clause)) continue;
         const quote = `${family}: ${clause.replace(/\s+/g, " ").trim().slice(0, 140)}`;
         const polarity = signaturePolarity(clause, clauseAt, sentence, token);
-        if (polarity === "required" || anaphoric) signatureRequired.push(quote);
+        if (polarity === "required" || anaphoricFamilies.has(family)) signatureRequired.push(quote);
         else signatureWaived.push(quote);
       }
     }
