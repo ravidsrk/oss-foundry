@@ -450,6 +450,13 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "There is no DCO bypass.", want: "required", why: "#52: escape-hatch framing" },
   { doc: "There is no CLA exception for small patches.", want: "required", why: "exception framing" },
   { doc: "No CLA waiver is available.", want: "required", why: "waiver-of-the-waiver" },
+  // Negating a PERMISSION asserts the requirement, and the adjectival forms were missing: they
+  // matched no waiver predicate and no hatch word, so the broad `no <token>` fallback consumed the
+  // mention and the repo reached ALLOW. A P1 from review.
+  { doc: "No CLA is optional.", want: "required", why: "#52: negated permission, adjectival" },
+  { doc: "No DCO is optional.", want: "required", why: "same, DCO family" },
+  { doc: "No CLA is voluntary.", want: "required", why: "synonym" },
+  { doc: "No CLA is discretionary.", want: "required", why: "synonym" },
   { doc: "There is no way around the DCO.", want: "required", why: "paraphrased escape hatch" },
 
   // --- Scoped waivers: it is required somewhere, so it holds. ---
@@ -487,6 +494,15 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is required. And we are friendly.", want: "waived", why: "conjunction with nothing required after it" },
   { doc: "No CLA is required. However, reviews are quick.", want: "waived", why: "'however' with its own subject" },
   { doc: "No CLA is required.\n- Please read the style guide.", want: "waived", why: "bullet that asserts nothing" },
+  // A continuation can lead with the PREDICATE itself, and then there is no conjunction to find -
+  // the joined fragment brings its full stop instead. Fixing the fragment without fixing the
+  // separator left this reaching ALLOW. A P1 from review.
+  { doc: "No CLA is required for docs.\nRequired for code.", want: "required", why: "predicate-initial continuation" },
+  { doc: "No CLA is required for docs.\n- Required for code.", want: "required", why: "same, behind a bullet" },
+  { doc: "No DCO is needed for docs.\nMandatory for vendored trees.", want: "required", why: "same, other predicate and family" },
+  // ...and the noun-modifier reading is a NEW statement, not a continuation, in both spellings.
+  { doc: "No CLA is required.\nRequired reading is the style guide.", want: "waived", why: "'Required reading' modifies a noun" },
+  { doc: "No CLA is required.\nExpected turnaround is one week.", want: "waived", why: "'Expected turnaround' modifies a noun" },
   // The SAME waiver stated twice, scoped only on the later copy. Position came from asking the
   // sentence where the match was, which answers with the first copy, so the later waiver's forward
   // span was cut at the intervening conjunction and its limiter never seen — ALLOW. Third P1.

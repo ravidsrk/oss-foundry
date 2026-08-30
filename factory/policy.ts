@@ -64,8 +64,15 @@ const SIGNATURE_FAMILIES: { family: string; token: string }[] = [
  * "There is no DCO bypass" says the DCO is mandatory, not that it is waived. Checked BEFORE the
  * waivers, because it is literally a negation sitting next to the token and every waiver pattern
  * below would otherwise claim it.
+ *
+ * `optional` and its synonyms belong here for the same reason, and a P1 from review found them
+ * missing: "No CLA is optional." asserts the CLA. They matched no waiver predicate and no hatch
+ * word, so the broad `no <token>` fallback consumed the mention and the repo reached ALLOW. Negating
+ * a PERMISSION is asserting the requirement — the same sentence as "no CLA waiver is available",
+ * written with an adjective instead of a noun, which is why they share this check rather than
+ * getting a rule of their own.
  */
-const ESCAPE_HATCH = String.raw`(?:bypass|exception|exemption|waiver|opt[-\s]?out|workaround|way\s+around)`;
+const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:bypass|exception|exemption|waiver|opt[-\s]?out|workaround|way\s+around|optional|voluntary|discretionary|up\s+to\s+you|at\s+your\s+discretion)`;
 
 /** Words that turn a waiver into a conditional requirement: it IS required, somewhere. */
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;
@@ -181,7 +188,12 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
      * a second waiver rather than a requirement. Both are excluded because a noun sits where the
      * copula or predicate has to be, which is a rule about position rather than a word list.
      */
-    const COORDINATED = String.raw`\b(?:and|or|but|however)\s+(?:(?:it|they)\s+)?(?:is|are)?\s*(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`;
+    // The separator is a conjunction OR a sentence terminator, because `sentencesOf` joins a
+    // continuation back into this sentence and a joined fragment brings its full stop with it:
+    // "No CLA is required for docs. Required for code." has no conjunction to find. A P1 from review
+    // reached ALLOW on exactly that, the fix for the fragment having stopped one step short.
+    // A list marker may stand after the separator too, since the joined fragment keeps its bullet.
+    const COORDINATED = String.raw`(?:\b(?:and|or|but|however)\s+|[.;:]\s+)(?:(?:[-*+>]|\d+[.)])\s*)?(?:(?:it|they)\s+)?(?:is|are)?\s*(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`;
     if (new RegExp(COORDINATED, "i").test(clause)) {
       return "required";
     }
@@ -249,8 +261,14 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
  * A fragment that is genuinely ambiguous joins, and joining over-blocks rather than over-allows —
  * the asymmetry `signaturePolarity` closes with, applied to punctuation.
  */
+/**
+ * A continuation may also lead with the PREDICATE itself — "No CLA is required for docs.\nRequired
+ * for code." — which a P1 from review found detached, leaving a blanket waiver and a token-less
+ * fragment. `SCOPE_FOLLOWS` is what keeps that from swallowing "Required reading is the style
+ * guide.", where the participle modifies a noun and the sentence genuinely is a new statement.
+ */
 const CONTINUATION = new RegExp(
-  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|and|or|but|however)\b`,
+  String.raw`^(?:[-*+>]|\d+[.)])?[\s"'(\[]*(?:(?:${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}|and|or|but|however)\b|${PREDICATE}\b${SCOPE_FOLLOWS})`,
   "i",
 );
 
