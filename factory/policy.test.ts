@@ -524,6 +524,17 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No DCO is waived.", want: "required", why: "#52: inflected hatch, `waive` stem" },
   { doc: "No CLA is exempt.", want: "required", why: "`exempt` stem, adjective form" },
   { doc: "No DCO is exempted.", want: "required", why: "same stem, participle" },
+  // An adverb may stand between the copula and the hatch word; these fell through to the broad
+  // matcher and read as waivers - a fail-open P1 from review.
+  { doc: "No DCO is ever waived.", want: "required", why: "#52: adverb before the hatch word" },
+  { doc: "No CLA is simply optional.", want: "required", why: "same, adjectival hatch" },
+  { doc: "No DCO is under any circumstances waived.", want: "required", why: "three words in the slot" },
+  { doc: "No CLA is needed.", want: "waived", why: "the slot cannot over-match: `needed` sits where a hatch word would and is not one" },
+  // REBUTTED, and pinned so it cannot be reported a third time: review reported that two spaces
+  // between a waiver and a same-family requirement let the absorption window eat the requirement.
+  // It does not - the window is one space, so a second space stops it, and this already resolved
+  // REQUIRED on the code as reviewed.
+  { doc: "No DCO is required  DCO is required for code.", want: "required", why: "two spaces: the one-space window cannot cross them" },
 
   // --- One verb waives only the instrument it actually reaches. ---
   //
