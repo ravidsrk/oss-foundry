@@ -484,6 +484,17 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // ...and the repetition must not become an excuse to over-block. These are the fail-closed halves:
   // identical clauses with no limiter anywhere, and a repeat whose trailing 'except' governs spam.
   { doc: "No CLA is required, no CLA is required.", want: "waived", why: "verbatim repeat, nothing scopes either copy" },
+  // One clause can waive the same instrument twice - "and" does not split a clause - and removing
+  // only the FIRST waived span left the second reading as an ungoverned requirement, parking a
+  // document that waives BOTH scopes. A P1 from review; every waived span comes out now.
+  { doc: "No CLA is required for documentation and no CLA is required for code.", want: "waived", why: "same waiver twice in ONE clause" },
+  { doc: "No DCO is needed for docs and no DCO is needed for code.", want: "waived", why: "same, DCO family" },
+  // ...and the limiter can scope the SECOND waiver inside that one clause. Deciding from the first
+  // occurrence alone cut the forward span at the intervening "and" and reached a blanket waiver.
+  // Found by adversarially probing the cross-clause fix above rather than reported - the same shape
+  // a repo would use to get ALLOW while demanding a signature, so it is checked per occurrence now.
+  { doc: "No DCO is needed for docs and no DCO is needed for tests, other than vendored trees.", want: "required", why: "limiter scopes the second waiver in ONE clause" },
+  { doc: "No CLA is required for docs and no CLA is required for tests, except for dependencies.", want: "required", why: "same, CLA family" },
   { doc: "No CLA is required for docs, and no CLA is required, and all patches are welcome except spam.", want: "waived", why: "repeat, and the 'except' is still about spam" },
 
   // Anaphora (P1 from review): the requirement's subject is elided, so it lands in a token-less
@@ -493,6 +504,19 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "A CLA is not required, however it is mandatory for vendored trees.", want: "required", why: "'it is mandatory' after 'however'" },
   // ...and a later clause with its OWN subject must not flip anything, or the rule over-blocks.
   { doc: "No CLA is required, and tests are required.", want: "waived", why: "'tests' is the subject, not the CLA" },
+  // English drops the copula, and a participle-initial clause was invisible: the waiver read as
+  // blanket and the repo was ALLOWED despite requiring a signature for code. A P1 from review.
+  // With no verb to anchor on, the SCOPE anchors instead - a bare participle counts only when a
+  // scope or the clause end follows, which is what separates it from a participle modifying a noun.
+  { doc: "A CLA is not required for documentation, but required for code.", want: "required", why: "copula elided as well as the subject" },
+  { doc: "No CLA is needed for docs, but required for vendored trees.", want: "required", why: "same shape, needed/required" },
+  { doc: "A CLA is not required for docs, however mandatory for dependencies.", want: "required", why: "copula-less after 'however'" },
+  { doc: "No CLA is required, needed only for release.", want: "required", why: "one adverb between participle and scope" },
+  { doc: "A CLA is not required for docs, but required.", want: "required", why: "bare participle, clause ends" },
+  // ...and the participle must be PREDICATIVE. Modifying a noun asserts nothing about the
+  // instrument, so these must stay waived or the rule over-blocks ordinary prose.
+  { doc: "No CLA is required, required reading is the style guide.", want: "waived", why: "'required reading' modifies a noun" },
+  { doc: "No CLA is required, necessary tooling is listed below.", want: "waived", why: "'necessary tooling' modifies a noun" },
 
   // --- Plain requirements, in the phrasings a real CONTRIBUTING.md uses. ---
   { doc: "Pull requests without a signed Contributor License Agreement will be closed.", want: "required", why: "#50: the phrasing most likely to appear for real" },

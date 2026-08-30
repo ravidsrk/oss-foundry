@@ -106,9 +106,24 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
     String.raw`\bthere\s+(?:is|are)\s+no\s+${T}`,
     String.raw`\bno\s+${T}\b`,
   ];
+  /**
+   * EVERY waiver occurrence in the clause, in the patterns' priority order. One is not enough: the
+   * limiter can scope the second waiver in a single clause ("no DCO is needed for docs and no DCO is
+   * needed for tests, other than vendored trees"), and deciding from the first occurrence alone cut
+   * the forward span at the intervening "and" and reached a blanket waiver. Found by adversarially
+   * probing the fix for the cross-clause version of exactly this, which is the shape a repo would
+   * use to get ALLOW while demanding a signature.
+   *
+   * The patterns overlap by design, so the same text yields several spans; that costs a few
+   * iterations and changes no verdict, because a limiter scoping ANY occurrence means the instrument
+   * is required somewhere.
+   */
+  const spans: { at: number; length: number }[] = [];
   for (const w of waivers) {
-    const hit = new RegExp(w, "i").exec(clause);
-    if (!hit) continue;
+    const re = new RegExp(w, "gi");
+    for (let m = re.exec(clause); m; m = re.exec(clause)) spans.push({ at: m.index, length: m[0].length });
+  }
+  if (spans.length > 0) {
     /**
      * A scoped waiver is a requirement in a waiver's clothes. The limiter must belong to THIS
      * waiver, and both wrong spans shipped here: the CLAUSE missed "A CLA is not required, except
@@ -119,17 +134,19 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
      * "Except for X, ..." it is the main clause of.
      *
      * The position is the clause's offset plus the match's offset inside it. Asking the SENTENCE
-     * where `hit[0]` is answers with the first copy, so a repeated waiver measured the later one from
-     * the earlier one's position: the forward span stopped at the intervening conjunction, the
-     * limiter behind it was never in view, and a scoped requirement reached ALLOW. Third P1 from
+     * where the matched text is answers with the first copy, so a repeated waiver measured the later
+     * one from the earlier one's position: the forward span stopped at the intervening conjunction,
+     * the limiter behind it was never in view, and a scoped requirement reached ALLOW. Third P1 from
      * review, and the third wrong span for this one decision.
      */
-    const at = clauseAt + hit.index;
-    const after = sentence.slice(at + hit[0].length);
-    const conjunction = after.search(/\b(?:and|or|but|however)\b/i);
-    const forward = conjunction === -1 ? after : after.slice(0, conjunction);
-    const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
-    if (SCOPE_LIMITER.test(clause) || SCOPE_LIMITER.test(forward) || leading) return "required";
+    for (const span of spans) {
+      const at = clauseAt + span.at;
+      const after = sentence.slice(at + span.length);
+      const conjunction = after.search(/\b(?:and|or|but|however)\b/i);
+      const forward = conjunction === -1 ? after : after.slice(0, conjunction);
+      const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
+      if (SCOPE_LIMITER.test(forward) || leading) return "required";
+    }
     /**
      * A WAIVER GOVERNS ONLY THE OCCURRENCE IT NAMES — a P1 from review. Polarity was decided once
      * per clause from the first match, so "No CLA is required for documentation and a CLA is
@@ -137,16 +154,31 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
      * Removing the waived span and asking whether the instrument is still mentioned settles it
      * without guessing at conjunctions; any surviving mention is ungoverned, so it reads as required.
      *
-     * One instrument can be named twice in a row, though: "a DCO sign-off" is a single thing and
-     * both words are DCO-family tokens, so a mention abutting the waiver's span is absorbed first.
+     * EVERY waived span comes out, not just this one — another P1, the mirror of the fix above. One
+     * clause can waive the same instrument twice ("no CLA is required for docs and no CLA is required
+     * for code", one span because "and" does not split a clause), and removing only the first left
+     * the second reading as an ungoverned requirement: a document waiving BOTH scopes was parked.
+     * Fail-closed rather than open, so it cost a look rather than a signature, but it was wrong.
+     *
+     * One instrument can also be named twice in a row: "a DCO sign-off" is a single thing and both
+     * words are DCO-family tokens, so a mention abutting a removed span is absorbed with it.
      * Without that, "We don't require a DCO sign-off on contributions." became a hold.
      */
-    let tail = clause.slice(hit.index + hit[0].length);
-    for (let abut = new RegExp(String.raw`^[\s\-]{0,3}${T}`, "i").exec(tail); abut; ) {
-      tail = tail.slice(abut[0].length);
-      abut = new RegExp(String.raw`^[\s\-]{0,3}${T}`, "i").exec(tail);
+    const abuts = new RegExp(String.raw`^[\s\-]{0,3}${T}`, "i");
+    let residual = clause;
+    for (let removed = true; removed; ) {
+      removed = false;
+      for (const w of waivers) {
+        const span = new RegExp(w, "i").exec(residual);
+        if (!span) continue;
+        let tail = residual.slice(span.index + span[0].length);
+        for (let abut = abuts.exec(tail); abut; abut = abuts.exec(tail)) tail = tail.slice(abut[0].length);
+        residual = `${residual.slice(0, span.index)} ${tail}`;
+        removed = true;
+        break;
+      }
     }
-    if (new RegExp(T, "i").test(`${clause.slice(0, hit.index)} ${tail}`)) return "required";
+    if (new RegExp(T, "i").test(residual)) return "required";
     return "waived";
   }
   // Undecided reads as REQUIRED — the repo's asymmetry, not a shrug. A false hold costs one look; a
@@ -230,10 +262,22 @@ export function scanPolicyText(text: string): {
      * (P1 from review). The clause must START with the verb, which is what elision looks like:
      * "and tests are required" has its own subject and must not flip the CLA, and matching the
      * keywords alone would over-block it.
+     *
+     * English drops the copula too — "..., but required for code." — and a participle-initial clause
+     * was invisible, so the waiver read as blanket and the repo was allowed despite requiring a
+     * signature for code (a P1 from review, and this issue's fail-open class again). Without the
+     * copula there is no verb to anchor on, so the SCOPE does the anchoring: a bare participle counts
+     * only when what follows is a scope or the clause ends. That is what separates "required for
+     * code" from "required reading is the style guide", where the participle modifies a noun and
+     * asserts nothing about the instrument. One adverb is allowed in between, so "needed only for
+     * release" still counts.
      */
+    const PREDICATE = String.raw`(?:required|needed|necessary|mandatory|obligatory|compulsory)`;
+    const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:\w+\s+)?(?:for|on|in|when|with|of|from)\b))`;
     const anaphoric = parts.some(
       ({ text: c }) =>
-        /^(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?(?:required|needed|necessary|mandatory|obligatory|compulsory)\b/i.test(c) &&
+        (new RegExp(String.raw`^(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||
+          new RegExp(String.raw`^(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(c)) &&
         !SIGNATURE_FAMILIES.some(({ token }) => new RegExp(token, "i").test(c)),
     );
     for (const { text: clause, at: clauseAt } of parts) {
