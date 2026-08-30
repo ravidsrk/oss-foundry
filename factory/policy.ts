@@ -270,15 +270,15 @@ function signaturePolarity(clause: string, sentence: string, token: string): "re
      * words are DCO-family tokens, so a mention abutting a removed span is absorbed with it.
      * Without that, "We don't require a DCO sign-off on contributions." became a hold.
      */
-    // ONE SPACE, and nothing else. "a DCO sign-off" is one instrument reached across a space, so the
-    // second token is absorbed with the first; a hyphen inside a token is already part of the token
-    // itself (`signed[-\s]?off`), so this window never needed one.
+    // One space. A hyphen inside an instrument is already part of the instrument's own pattern
+    // (`signed[-\s]?off`), so this window never needed to spell one.
     //
-    // Two fail-open P1s from review taught that, one per width. A three-character space-or-hyphen
-    // window ate the requirement in "No DCO is required - DCO is required for code."; narrowing it to
-    // one space OR one hyphen still ate "No DCO is required-DCO is required for code.", because an
-    // unspaced dash joins statements at least as often as it joins words. A window this narrow cannot
-    // reach across either.
+    // The WIDTH is no longer what decides anything, and that is worth saying because three commits
+    // were spent narrowing it — three characters, then one space or hyphen, then one space — chasing
+    // a fail-open each time. The `compound` gate below is the actual rule, and it subsumes width: a
+    // mutant widening this window back to allow a hyphen now changes no verdict, because a span
+    // ending in "required" is refused before the window is ever consulted. What the window still
+    // earns is the space itself — "a DCO sign-off" needs it, and a mutant removing it reds.
     const abuts = new RegExp(String.raw`^[ \t]?${T}`, "i");
     let residual = clause;
     for (let removed = true; removed; ) {
