@@ -114,49 +114,6 @@ const QUALIFIER = String.raw`(?:only|also|still|always|never|sometimes|generally
 const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:${QUALIFIER}\s+)?(?:for|on|in|when|with|of|from)\b))`;
 
 /**
- * A waiver's own statement ends where the NEXT statement begins, and the text between them is scope.
- *
- * The boundary is a conjunction behind a comma or semicolon — necessary, not sufficient. "for
- * documentation, or code, except for third-party contributions" puts a comma before the `or`, and
- * "code" is still scope: a bare noun phrase closed by the next comma. A new statement is longer than
- * that and carries a verb. So each candidate boundary is examined, scope items are skipped, and the
- * span ends at the first candidate that reads as a statement.
- *
- * Both directions cost a P1 on this branch: truncating at every conjunction lost the exception,
- * truncating at none of them reclassified "and all patches are welcome except spam" as a scoped
- * requirement.
- */
-const FINITE_VERB = /\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|will|would|can|could|may|might|must|should|shall|need|needs|require|requires|review|reviews|accept|accepts|welcome|apply|applies|ask|asks|expect|expects)\b/i;
-
-function truncateAtStatement(after: string, token: string): string {
-  const boundary = new RegExp(String.raw`\b${CONJUNCTION_WORDS}\b`, "gi");
-  for (let hit = boundary.exec(after); hit; hit = boundary.exec(after)) {
-    // What the conjunction introduces, up to the next punctuation OR the next limiter — whichever
-    // comes first. Stopping at the limiter is what keeps "or code except for third-party
-    // contributions" from reading as a six-word statement: the item is "code".
-    const rest = after.slice(hit.index + hit[0].length);
-    const end = rest.search(/[,;.]/);
-    const lim = rest.search(SCOPE_LIMITER);
-    const cut = [end, lim].filter((n) => n >= 0);
-    const segment = cut.length > 0 ? rest.slice(0, Math.min(...cut)) : rest;
-    const words = segment.trim().split(/\s+/).filter(Boolean);
-    // A scope item is short and asserts nothing. Anything else is a new statement, and the waiver's
-    // own span ends there. Punctuation is NOT part of this test: "No CLA is required for docs and all
-    // patches are welcome except spam." has no comma and is still two statements, and requiring one
-    // let the unrelated `except spam` scope the waiver — a fail-closed P1 from review.
-    if (words.length <= 3 && !FINITE_VERB.test(segment)) continue;
-    // A statement about THIS instrument does not end the waiver's reach either. "No DCO is needed
-    // for docs and no DCO is needed for tests, other than vendored trees." coordinates two waivers
-    // of one instrument, and the limiter past the second still means the DCO is required somewhere.
-    // Only a statement about something ELSE closes the span — that is the difference between this
-    // and "and all patches are welcome except spam", where the exception is about spam.
-    if (new RegExp(token, "i").test(segment)) continue;
-    return after.slice(0, hit.index);
-  }
-  return after;
-}
-
-/**
  * There is deliberately NO "asserts a requirement" roster. One was written, and the injection pass
  * showed the harness could not see it deleted: an occurrence matching no waiver already returns
  * `"required"`, so the list and the fallback gave the same answer and it was unreachable — the #75
@@ -179,7 +136,7 @@ function truncateAtStatement(after: string, token: string): string {
  * clause. The previous attempt negated the DCO and left the CLA invisible — 8 of 10 documents
  * regressed to ALLOW.
  */
-function signaturePolarity(clause: string, clauseAt: number, sentence: string, token: string): "required" | "waived" {
+function signaturePolarity(clause: string, sentence: string, token: string): "required" | "waived" {
   const T = token;
   if (new RegExp(String.raw`\bno\s+${T}\s+${ESCAPE_HATCH}`, "i").test(clause)) return "required";
   const waivers = [
@@ -192,71 +149,41 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
     String.raw`\bthere\s+(?:is|are)\s+no\s+${T}`,
     String.raw`\bno\s+${T}\b`,
   ];
-  /**
-   * EVERY waiver occurrence in the clause, in the patterns' priority order. One is not enough: the
-   * limiter can scope the second waiver in a single clause ("no DCO is needed for docs and no DCO is
-   * needed for tests, other than vendored trees"), and deciding from the first occurrence alone cut
-   * the forward span at the intervening "and" and reached a blanket waiver. Found by adversarially
-   * probing the fix for the cross-clause version of exactly this, which is the shape a repo would
-   * use to get ALLOW while demanding a signature.
-   *
-   * The patterns overlap by design, so the same text yields several spans; that costs a few
-   * iterations and changes no verdict, because a limiter scoping ANY occurrence means the instrument
-   * is required somewhere.
-   */
-  const spans: { at: number; length: number }[] = [];
-  for (const w of waivers) {
-    const re = new RegExp(w, "gi");
-    for (let m = re.exec(clause); m; m = re.exec(clause)) spans.push({ at: m.index, length: m[0].length });
-  }
-  if (spans.length > 0) {
+  // Undecided reads as REQUIRED — the repo's asymmetry, not a shrug. A false hold costs one look; a
+  // false allow opens a draft into a repo demanding a signature, and PRODUCT.md §3 says never forge.
+  // This is the only place that decision is taken. A second copy sat at the end of the function and a
+  // mutation showed it unreachable once this branch existed, so it is gone.
+  if (!waivers.some((w) => new RegExp(w, "i").test(clause))) return "required";
+  {
     /**
-     * A scoped waiver is a requirement in a waiver's clothes. The limiter must belong to THIS
-     * waiver, and both wrong spans shipped here: the CLAUSE missed "A CLA is not required, except
-     * for new dependencies." (fail-open), the whole SENTENCE reclassified "No CLA is required, and
-     * all patches are welcome except spam", where the except is about spam (fail-closed, parking a
-     * packet that waives the CLA outright — P1 from review). So the span is the waiver's own
-     * statement: its clause, what follows up to the first coordinating conjunction, and a leading
-     * "Except for X, ..." it is the main clause of.
+     * A LIMITER ANYWHERE IN THE SENTENCE HOLDS THE PACKET. Not "a limiter this waiver's span
+     * reaches" — anywhere.
      *
-     * The position is the clause's offset plus the match's offset inside it. Asking the SENTENCE
-     * where the matched text is answers with the first copy, so a repeated waiver measured the later
-     * one from the earlier one's position: the forward span stopped at the intervening conjunction,
-     * the limiter behind it was never in view, and a scoped requirement reached ALLOW. Third P1 from
-     * review, and the third wrong span for this one decision.
+     * Twelve of the twenty-two defects on this branch lived in the span that used to be computed
+     * here, and every one was the same mistake in a new dress: deciding which of two statements an
+     * `except` belongs to. Four different spans shipped, each correct on the corpus of the day, each
+     * broken by the next sentence a reviewer wrote down. Attaching a limiter is a parsing problem and
+     * this is a regex.
+     *
+     * So it is not attached. A waiver stands only in a sentence with nothing to argue about, and a
+     * sentence holding both a waived instrument and an `except` goes to a human instead. That is a
+     * deliberate over-block, and it reverses two findings that called the over-block a defect — named
+     * here so nobody has to guess whether it was noticed.
+     *
+     * It is affordable because it is nearly unreachable. Measured over 17 real CONTRIBUTING-style
+     * documents (Kubernetes, Node, Angular, .NET, Envoy, QEMU, gRPC, Podman, Gitea, Prometheus,
+     * Superset, Moby and the allowlist's own targets): 12 name a signature instrument, and all 12
+     * resolve to REQUIRED already. Not one real document waives an instrument it bothers to mention —
+     * documents with no signature requirement simply never name one. Of 88 sentences naming an
+     * instrument, 2 also carried a limiter, and both sit in documents that were already held.
+     *
+     * The waiver path therefore exists for bare denials — "No CLA. No DCO.", the Wave-1 seed shape —
+     * which carry no limiter and are untouched by this. What is given up is a sentence that waives an
+     * instrument AND discusses an exception to something else, which no document in the sample does.
+     * What is bought is that a scoped requirement can no longer be read as a blanket waiver, by any
+     * phrasing, because the question is never asked.
      */
-    {
-      // ANY occurrence in the clause will do, and this is the one place that deserves a note saying
-      // so, because a loop over all of them lived here first.
-      //
-      // A clause holds no comma or semicolon — those are what split it — so every occurrence inside
-      // it shares one downstream truncation point. `forward` therefore covers the clause from an
-      // occurrence rightwards and `leading` covers it leftwards, and between them the pair sees the
-      // whole clause from either end. Picking the earliest, the latest, or the first match found all
-      // give the same verdict; that was measured across every enumeration here, in both directions,
-      // rather than reasoned about and hoped for.
-      const span = spans[0]!;
-      // `clauseAt + span.at` rather than asking the sentence where this text is, which answers with
-      // the first copy of it. That was a P1 and had a failing row; the row no longer fails, because
-      // `truncateAtStatement` now continues through a statement about this same instrument and so
-      // reaches the limiter from either position. Measured, not assumed — the mutant survives the
-      // whole corpus today. Kept because a clause's position is not something to compute wrongly and
-      // rely on a neighbouring rule to cover, and that neighbouring rule has been redrawn four times.
-      const at = clauseAt + span.at;
-      const after = sentence.slice(at + span.length);
-      // A conjunction ends this statement only where it BEGINS a new one. A comma is necessary for
-      // that and not sufficient: "for documentation, or code, except for third-party contributions"
-      // has a comma before the `or`, yet "code" is another SCOPE, not another statement — truncating
-      // there lost the exception behind it. Two P1s from review, one for each half.
-      //
-      // A new statement carries a subject and a verb, so it is longer than a list item and it says
-      // something. A continued scope is a short noun phrase closed by the next comma. That is the
-      // test: skip a candidate whose following segment is a bare scope item, keep looking, and
-      // truncate at the first one that reads as a statement.
-      const forward = truncateAtStatement(after, T);
-      const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
-      if (SCOPE_LIMITER.test(forward) || leading) return "required";
-    }
+    if (SCOPE_LIMITER.test(sentence)) return "required";
     /**
      * A COORDINATED requirement on the same elided subject: "no CLA is required for docs and
      * required for code." `and` is not a clause delimiter, so this requirement lives inside the
@@ -315,9 +242,6 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
     if (new RegExp(T, "i").test(residual)) return "required";
     return "waived";
   }
-  // Undecided reads as REQUIRED — the repo's asymmetry, not a shrug. A false hold costs one look; a
-  // false allow opens a draft into a repo demanding a signature, and PRODUCT.md §3 says never forge.
-  return "required";
 }
 
 /**
@@ -381,8 +305,7 @@ function sentencesOf(text: string): string[] {
 }
 
 /**
- * Clause-sized spans, so two instruments in one sentence are judged separately, each with its own
- * offset into the sentence.
+ * Clause-sized spans, so two instruments in one sentence are judged separately.
  *
  * "No DCO, contributor agreement required." is the case that makes this necessary: one sentence
  * holding a waiver and a requirement. Splitting on the comma is what lets the DCO read as waived and
@@ -390,29 +313,16 @@ function sentencesOf(text: string): string[] {
  * in the previous attempt claimed a `NEG_FILLER` regex handled the comma and nothing tested it;
  * this is the same guarantee made structural.
  *
- * The offset is carried, not recovered later: a sentence can repeat a clause verbatim, and searching
- * for its text answers with the first copy. The cursor only moves forward, so identical clauses still
- * get their own positions.
+ * Clause OFFSETS were carried here for most of this branch's life, to place a limiter span inside the
+ * sentence. Nothing measures position now — a limiter is read from the whole sentence and never
+ * attached — so the offsets, the cursor that kept identical clauses apart, and the two defects that
+ * lived in them all went at once.
  */
-function clausesOf(sentence: string): { text: string; at: number }[] {
-  const out: { text: string; at: number }[] = [];
-  let cursor = 0;
-  for (const part of sentence.split(/[,;]/)) {
-    const text = part.trim();
-    if (!text) continue;
-    // Only the splitting delimiter lies between `cursor` and this clause, so the first match from
-    // `cursor` is this clause rather than a later repeat of it.
-    //
-    // Behaviourally inert as the code stands, and said plainly rather than implied by a test that
-    // does not exist: a mutant searching from 0 changes no verdict here. It can only widen a later
-    // clause's span to an earlier clause's, and a wider span only ever ADDS a hold, so it cannot
-    // open the gate. Kept because measuring one clause at another clause's offset is wrong however
-    // the limiter rules are drawn, and `truncateAtStatement` above has already been redrawn twice.
-    const at = sentence.indexOf(text, cursor);
-    out.push({ text, at });
-    cursor = at + text.length;
-  }
-  return out;
+function clausesOf(sentence: string): string[] {
+  return sentence
+    .split(/[,;]/)
+    .map((c) => c.trim())
+    .filter(Boolean);
 }
 
 function quoteOf(match: RegExpExecArray): string {
@@ -471,7 +381,7 @@ export function scanPolicyText(text: string): {
      */
     const anaphoricFamilies = new Set<string>();
     let named: string | undefined;
-    for (const { text: c } of parts) {
+    for (const c of parts) {
       // The family whose token sits LAST in the clause, not the first in the roster: one clause can
       // name both ("No CLA or DCO is required"), and the elided subject refers to the nearest — a
       // P1 from review, because the freeze evidence otherwise blames whichever the roster lists
@@ -489,11 +399,11 @@ export function scanPolicyText(text: string): {
       if (here) named = here;
       else if (isAnaphoric(c) && named !== undefined) anaphoricFamilies.add(named);
     }
-    for (const { text: clause, at: clauseAt } of parts) {
+    for (const clause of parts) {
       for (const { family, token } of SIGNATURE_FAMILIES) {
         if (!new RegExp(token, "i").test(clause)) continue;
         const quote = `${family}: ${clause.replace(/\s+/g, " ").trim().slice(0, 140)}`;
-        const polarity = signaturePolarity(clause, clauseAt, sentence, token);
+        const polarity = signaturePolarity(clause, sentence, token);
         if (polarity === "required" || anaphoricFamilies.has(family)) signatureRequired.push(quote);
         else signatureWaived.push(quote);
       }

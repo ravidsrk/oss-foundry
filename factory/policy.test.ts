@@ -507,48 +507,60 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is discretionary.", want: "required", why: "synonym" },
   { doc: "There is no way around the DCO.", want: "required", why: "paraphrased escape hatch" },
 
+  // --- Sentences from real CONTRIBUTING documents, quoted. ---
+  //
+  // Every other row here was invented to probe a rule. These were not: they are verbatim sentences
+  // from upstream policy files, and they are what the gate will actually meet. All of them assert a
+  // signature, which is the finding that shaped this scanner - across 17 such documents, 12 name an
+  // instrument and every one of the 12 requires it. A document with no signature requirement does not
+  // mention a signature at all, so the waiver rows below describe a rarer document than they look.
+  { doc: "We cannot accept code without a signed CLA.", want: "required", why: "angular/angular CONTRIBUTING.md" },
+  { doc: "The CLA bot will provide a prompt to sign the CLA through a comment on the pull-request.", want: "required", why: "dotnet/runtime CONTRIBUTING.md" },
+  { doc: "The sign-off is a simple line at the end of the explanation for the patch.", want: "required", why: "moby/moby CONTRIBUTING.md" },
+  { doc: "Again once your PR is assigned a reviewer, unless you need to fix DCO", want: "required", why: "envoyproxy/envoy - one of only 2 of 88 real sentences pairing an instrument with a limiter" },
+  { doc: "While the Signed-off-by tag is mandatory, there are a number of other tags that are commonly used during QEMU development.", want: "required", why: "qemu code-provenance.rst, backticks stripped" },
+
   // --- Scoped waivers: it is required somewhere, so it holds. ---
   { doc: "A CLA is not required except for new dependencies.", want: "required", why: "#50 comment: scoped waiver" },
   { doc: "No DCO is needed unless you are adding a new module.", want: "required", why: "unless-scoped" },
-  // Limiter across a clause boundary: reading it from the CLAUSE let a comma before "except" hide
-  // it, turning a scoped requirement into a blanket waiver.
   { doc: "A CLA is not required, except for new dependencies.", want: "required", why: "limiter behind a comma" },
   { doc: "No DCO is needed, unless you are adding a new module.", want: "required", why: "limiter behind a comma" },
   { doc: "No CLA is required, other than for vendored code.", want: "required", why: "limiter behind a comma" },
-  // A conjunction ends the waiver's statement only where it BEGINS a clause. Truncating at ANY
-  // conjunction cut this at the `or` - which coordinates two SCOPES, not two statements - and lost
-  // the exception behind it. A P1 from review, and the fail-open mirror of the over-block that put
-  // truncation here to begin with, so both directions are pinned together.
-  { doc: "No CLA is required for documentation or code except for third-party contributions.", want: "required", why: "'or' coordinates scopes; the exception still applies" },
-  { doc: "No DCO is needed for docs or tests, unless vendored.", want: "required", why: "same, with the limiter behind a comma" },
-  { doc: "No CLA is required for docs plus tests, other than for dependencies.", want: "required", why: "'plus' coordinates scopes too" },
-  // A comma before the conjunction is NECESSARY for a statement boundary and not sufficient: in a
-  // scope LIST the item is a bare noun phrase closed by the next comma, and truncating there lost
-  // the exception behind it. A P1 from review. A real statement is longer and carries a verb, which
-  // is the test - so the rows below and the two after them are the same rule from both sides.
-  { doc: "No CLA is required for documentation, or code, except for third-party contributions.", want: "required", why: "comma before 'or', but 'code' is scope" },
-  { doc: "No CLA is required for docs, or tests, or code, unless vendored.", want: "required", why: "three-item scope list" },
-  { doc: "No DCO is needed for docs, and tests, other than vendored trees.", want: "required", why: "'and'-joined scope list" },
-  { doc: "No CLA is required for docs, and we review everything except vendored trees.", want: "waived", why: "a verb after the comma makes it a statement" },
-  { doc: "No CLA is required for docs, but the maintainers apply judgement except for forks.", want: "waived", why: "same, contrastive conjunction" },
-  // Both halves of "is this segment a scope item or a statement" earn their keep, and each of these
-  // rows fails without one of them. Short-with-a-verb is a statement; long-without-one is too.
-  { doc: "No CLA is required for docs, and tests apply, except for code.", want: "waived", why: "3 words but a verb: a statement, so the waiver's span ends" },
-  { doc: "No CLA is required for docs, and all other repositories in this organisation, except forks.", want: "waived", why: "verbless but long: also a statement" },
-  // Punctuation is NOT part of the test. Requiring a comma before the conjunction let an unrelated
-  // exception scope the waiver whenever the author omitted one - a fail-closed P1 from review.
-  { doc: "No CLA is required for docs and all patches are welcome except spam.", want: "waived", why: "no comma, still two statements" },
-  { doc: "No DCO is needed for docs and we review everything except vendored trees.", want: "waived", why: "same, other family" },
-  // ...and a statement about THIS instrument does not end the span either, because a limiter past a
-  // second waiver of the same thing still means it is required somewhere. That case is already above
-  // ("limiter scopes the second waiver in ONE clause"); it is the line between these two groups, and
-  // all of them fail if it is drawn anywhere else.
   { doc: "A CLA is not required; except for new dependencies.", want: "required", why: "limiter behind a semicolon" },
   { doc: "Except for new dependencies, a CLA is not required.", want: "required", why: "leading limiter, waiver is the main clause" },
-  // ...and it must NOT reach a waiver it has nothing to do with. Reading it from the whole sentence
-  // over-blocked these (P1 from review) — a limiter past a conjunction is a different statement.
-  { doc: "No CLA is required, and all patches are welcome except spam.", want: "waived", why: "the 'except' is about spam" },
-  { doc: "No DCO is needed, and we review everything except vendored trees.", want: "waived", why: "the 'except' is about review scope" },
+  { doc: "No CLA is required for documentation or code except for third-party contributions.", want: "required", why: "'or' coordinates two scopes" },
+  { doc: "No DCO is needed for docs or tests, unless vendored.", want: "required", why: "same, limiter behind a comma" },
+  { doc: "No CLA is required for docs plus tests, other than for dependencies.", want: "required", why: "'plus' coordinates scopes too" },
+  { doc: "No CLA is required for documentation, or code, except for third-party contributions.", want: "required", why: "comma before 'or'" },
+  { doc: "No CLA is required for docs, or tests, or code, unless vendored.", want: "required", why: "three-item scope list" },
+  { doc: "No DCO is needed for docs, and tests, other than vendored trees.", want: "required", why: "'and'-joined scope list" },
+
+  // --- And a limiter the waiver has NOTHING to do with holds the packet too. ---
+  //
+  // These nine rows read as waivers to a human: the `except` is about spam, or review scope, or
+  // forks. They are deliberately held anyway, and the reasoning is at `SCOPE_LIMITER`'s use in
+  // `signaturePolarity`: deciding which of two statements an `except` belongs to is a parsing
+  // problem, twelve of this branch's defects were that decision made four different ways, and every
+  // version was correct until someone wrote down one more sentence.
+  //
+  // So the question is no longer asked. A waiver stands only in a sentence with nothing to argue
+  // about. This reverses two review findings that called the over-block a defect, which is a real
+  // cost and is why it is measured rather than asserted: across 17 real CONTRIBUTING-style documents,
+  // 12 name a signature instrument and all 12 already resolve to REQUIRED. No real document waives
+  // an instrument it mentions. Two of 88 instrument-naming sentences carried a limiter, both inside
+  // documents already held. The shape these rows describe did not occur once.
+  { doc: "No CLA is required, and all patches are welcome except spam.", want: "required", why: "the 'except' is about spam - held rather than parsed" },
+  { doc: "No DCO is needed, and we review everything except vendored trees.", want: "required", why: "'except' is about review scope" },
+  { doc: "No CLA is required for docs, and we review everything except vendored trees.", want: "required", why: "unrelated exception, same sentence" },
+  { doc: "No CLA is required for docs, but the maintainers apply judgement except for forks.", want: "required", why: "contrastive conjunction, unrelated exception" },
+  { doc: "No CLA is required for docs, and tests apply, except for code.", want: "required", why: "exception attaches to 'tests apply', not to the CLA" },
+  { doc: "No CLA is required for docs, and all other repositories in this organisation, except forks.", want: "required", why: "exception about repositories" },
+  { doc: "No CLA is required for docs and all patches are welcome except spam.", want: "required", why: "no comma; still an unrelated exception" },
+  { doc: "No DCO is needed for docs and we review everything except vendored trees.", want: "required", why: "same, other family" },
+  { doc: "No CLA is required for docs, and no CLA is required, and all patches are welcome except spam.", want: "required", why: "repeated waiver plus an unrelated exception" },
+  // The limit of the rule, and the reason it is per SENTENCE: a limiter in a DIFFERENT sentence is
+  // not in the waiver's sentence and does not hold it. Without this the rule would swallow whole
+  // documents, since `except` appears in ordinary prose everywhere.
   { doc: "No CLA. Reviews are quick, except during release weeks.", want: "waived", why: "limiter in a later sentence about something else" },
   // ...but a sentence that STARTS with a limiter is not a new statement, it is the previous one's
   // scope. Splitting them left a blanket waiver and a token-less fragment nothing looked at, and the
@@ -632,7 +644,6 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // a repo would use to get ALLOW while demanding a signature, so it is checked per occurrence now.
   { doc: "No DCO is needed for docs and no DCO is needed for tests, other than vendored trees.", want: "required", why: "limiter scopes the second waiver in ONE clause" },
   { doc: "No CLA is required for docs and no CLA is required for tests, except for dependencies.", want: "required", why: "same, CLA family" },
-  { doc: "No CLA is required for docs, and no CLA is required, and all patches are welcome except spam.", want: "waived", why: "repeat, and the 'except' is still about spam" },
 
   // Anaphora (P1 from review): the requirement's subject is elided, so it lands in a token-less
   // clause the per-clause pass skipped, recording only the waiver.
