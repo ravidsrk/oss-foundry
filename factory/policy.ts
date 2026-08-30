@@ -75,11 +75,17 @@ const ANY_INSTRUMENT = `(?:${SIGNATURE_FAMILIES.map(({ token }) => token).join("
  * written with an adjective instead of a noun, which is why they share this check rather than
  * getting a rule of their own.
  *
- * An adverb may stand between the copula and the hatch word — "No DCO is ever waived.", "No CLA is
+ * Words may stand between the copula and the hatch word — "No DCO is ever waived.", "No CLA is
  * simply optional." — which a P1 from review found falling through to the broad `no <instrument>`
  * matcher. The slot is any word rather than a roster, because it is only reachable when a hatch word
  * follows it: "No CLA is needed." puts `needed` where the hatch word would be, matches nothing here,
  * and stays a waiver. An open slot in front of a required anchor cannot over-match.
+ *
+ * UNBOUNDED, and deliberately. It was capped at four words and review immediately produced a
+ * five-word denial; any finite cap invites the next one, and the cap was arbitrary. It is safe to
+ * remove because `\w+\s+` crosses neither punctuation nor a clause boundary, so the slot cannot
+ * leave the statement it started in, and it still has to reach a hatch word to match at all. Fuzzed
+ * for backtracking rather than assumed safe — see the hang test in the suite.
  *
  * KNOWN LIMIT, found while fixing the above and not reported: an aside with commas — "No CLA is,
  * under our policy, optional." — still reads as a waiver, because the comma defeats the copula and
@@ -88,7 +94,7 @@ const ANY_INSTRUMENT = `(?:${SIGNATURE_FAMILIES.map(({ token }) => token).join("
  * needs punctuation tolerance inside the copula, which is one more widening in a pattern that has
  * produced a new gap for every widening so far. Recorded rather than fixed, and rather than hidden.
  */
-const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:\w+\s+){0,4}?(?:bypass|except|exempt|waive|opt[-\s]?out|workaround|ways?\s+around|optional|voluntary|discretionary|up\s+to\s+you|at\s+your\s+discretion)`;
+const ESCAPE_HATCH = String.raw`(?:is\s+|are\s+)?(?:\w+\s+)*?(?:bypass|except|exempt|waive|opt[-\s]?out|workaround|ways?\s+around|optional|voluntary|discretionary|up\s+to\s+you|at\s+your\s+discretion)`;
 
 /** Words that turn a waiver into a conditional requirement: it IS required, somewhere. */
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;

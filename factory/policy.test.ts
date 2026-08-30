@@ -529,6 +529,7 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No DCO is ever waived.", want: "required", why: "#52: adverb before the hatch word" },
   { doc: "No CLA is simply optional.", want: "required", why: "same, adjectival hatch" },
   { doc: "No DCO is under any circumstances waived.", want: "required", why: "three words in the slot" },
+  { doc: "No DCO is under any and all circumstances waived.", want: "required", why: "five words: the slot is unbounded, because any cap invites the next one" },
   { doc: "No CLA is needed.", want: "waived", why: "the slot cannot over-match: `needed` sits where a hatch word would and is not one" },
   // REBUTTED, and pinned so it cannot be reported a third time: review reported that two spaces
   // between a waiver and a same-family requirement let the absorption window eat the requirement.
@@ -855,6 +856,10 @@ test("no adversarial document can hang the signature scanner", () => {
     ["waiver repeated across sentences", "No CLA is required. ".repeat(2000)],
     ["markdown bullet repetition", "- No CLA is required\n".repeat(2000)],
     ["limiter repetition", `No CLA is required ${"except ".repeat(2000)}`],
+    // The escape hatch's modifier slot is unbounded, so it gets its own shapes: a long run that does
+    // reach a hatch word, and a longer one that never does and must fail without backtracking.
+    ["long run reaching a hatch word", `No DCO is ${"very ".repeat(500)}waived.`],
+    ["long run reaching nothing", `No DCO is ${"very ".repeat(2000)}required.`],
   ];
   for (const [name, doc] of documents) {
     const started = performance.now();
