@@ -168,11 +168,14 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
      * fail-open class as everything else on this branch: a requirement hiding behind a waiver's
      * coordination.
      *
-     * The conjunction must be followed DIRECTLY by the predicate. "and tests are required" has its
-     * own subject and must not flip the instrument, and "and no CLA is required for code" is a second
-     * waiver rather than a requirement — both are excluded by that adjacency, not by a word list.
+     * Between the conjunction and the predicate only an elided subject's own copula may stand — "and
+     * is required for code", "and it is required for code". Nothing else: "and tests are required"
+     * has its OWN subject and must not flip the instrument, and "and no CLA is required for code" is
+     * a second waiver rather than a requirement. Both are excluded because a noun sits where the
+     * copula or predicate has to be, which is a rule about position rather than a word list.
      */
-    if (new RegExp(String.raw`\b(?:and|or|but|however)\s+(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(clause)) {
+    const COORDINATED = String.raw`\b(?:and|or|but|however)\s+(?:(?:it|they)\s+)?(?:is|are)?\s*(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`;
+    if (new RegExp(COORDINATED, "i").test(clause)) {
       return "required";
     }
     /**
@@ -296,10 +299,11 @@ export function scanPolicyText(text: string): {
      * signature for code: a P1 from review, and this issue's fail-open class again. `SCOPE_FOLLOWS`
      * is what keeps a bare participle from matching a noun modifier.
      */
+    const CONJUNCTION = String.raw`(?:(?:and|or|but|however)\s+)?`;
     const anaphoric = parts.some(
       ({ text: c }) =>
-        (new RegExp(String.raw`^(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||
-          new RegExp(String.raw`^(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(c)) &&
+        (new RegExp(String.raw`^${CONJUNCTION}(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||
+          new RegExp(String.raw`^${CONJUNCTION}(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(c)) &&
         !SIGNATURE_FAMILIES.some(({ token }) => new RegExp(token, "i").test(c)),
     );
     for (const { text: clause, at: clauseAt } of parts) {

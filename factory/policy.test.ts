@@ -529,6 +529,19 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "A CLA is not required for docs or required for tests.", want: "required", why: "'or' coordinates it too" },
   { doc: "No CLA is required for docs and tests.", want: "waived", why: "'and tests.' is a noun, not a predicate" },
   { doc: "No CLA is required and reviews are quick.", want: "waived", why: "coordination with its own subject" },
+  // A comma splits the clause and leaves the requirement behind "and", which no clause-initial
+  // matcher accepted; and with no comma the copula sits between conjunction and predicate, which the
+  // adjacency rule rejected. Both were fail-open, both P1s, both the same class. Only an elided
+  // subject's own copula may stand in that gap.
+  { doc: "A CLA is not required for documentation, and is required for code contributions.", want: "required", why: "comma, then 'and is required'" },
+  { doc: "No CLA is required for docs and is required for code.", want: "required", why: "no comma, copula after the conjunction" },
+  { doc: "No CLA is required for docs and it is required for code.", want: "required", why: "explicit pronoun subject" },
+  { doc: "No CLA is required, or is required for vendored trees.", want: "required", why: "'or' coordinates it too" },
+  // The fail-CLOSED half of the same shape: with NO punctuation the participle modifies the noun -
+  // "the docs required for code" - so the sentence asserts nothing about the instrument and a rule
+  // that flipped it would hold repositories that waive outright.
+  { doc: "No CLA is required for docs required for code.", want: "waived", why: "no separator: participle modifies 'docs'" },
+  { doc: "No CLA is required for the docs required by the style guide.", want: "waived", why: "same, unmistakably a noun modifier" },
 
   // --- Plain requirements, in the phrasings a real CONTRIBUTING.md uses. ---
   { doc: "Pull requests without a signed Contributor License Agreement will be closed.", want: "required", why: "#50: the phrasing most likely to appear for real" },
