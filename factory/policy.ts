@@ -70,8 +70,15 @@ const ESCAPE_HATCH = String.raw`(?:bypass|exception|exemption|waiver|opt[-\s]?ou
 /** Words that turn a waiver into a conditional requirement: it IS required, somewhere. */
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;
 
-/** The words a requirement is asserted WITH, when its subject has been elided. */
-const PREDICATE = String.raw`(?:required|needed|necessary|mandatory|obligatory|compulsory)`;
+/**
+ * The words a requirement is asserted WITH, when its subject has been elided.
+ *
+ * ONE roster, because there were two and they drifted: the waiver patterns knew `expected` and this
+ * did not, so "No CLA is expected for docs and expected for code." waived the whole sentence and
+ * reached ALLOW — a P1 from review. A waiver and a requirement are the same vocabulary under
+ * opposite polarity, so a word this factory can waive is a word it must be able to require.
+ */
+const PREDICATE = String.raw`(?:required|needed|necessary|expected|mandatory|obligatory|compulsory)`;
 
 /**
  * What must follow a bare `PREDICATE` for it to be a requirement rather than a noun modifier.
@@ -109,8 +116,8 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
   const T = token;
   if (new RegExp(String.raw`\bno\s+${T}\s+${ESCAPE_HATCH}`, "i").test(clause)) return "required";
   const waivers = [
-    String.raw`\bno\s+${T}\s+(?:is\s+|are\s+)?(?:required|needed|necessary|expected)\b`,
-    String.raw`${T}\s*:?\s*(?:is\s+|are\s+)?not\s+(?:required|needed|necessary|expected)\b`,
+    String.raw`\bno\s+${T}\s+(?:is\s+|are\s+)?${PREDICATE}\b`,
+    String.raw`${T}\s*:?\s*(?:is\s+|are\s+)?not\s+${PREDICATE}\b`,
     // Bounded filler, stopping at any clause break so it cannot borrow a neighbour's waiver. It
     // exists because "do not need TO SIGN a contributor license agreement" puts an infinitive
     // between verb and token — a shape the corpus caught and the first draft of this list missed.
@@ -223,12 +230,27 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
  * Requiring the capital keeps `e.g.` and `i.e.` from ending a sentence mid-clause — the hazard the
  * `W` window above spells out abbreviation by abbreviation. A newline ends one too: these are
  * markdown, and a list item is a sentence whether or not it carries a full stop.
+ *
+ * A sentence STARTING with a scope limiter is not a new statement, it is the previous one's scope:
+ * "No CLA is required. Except for code." Splitting them left a blanket waiver and a token-less
+ * fragment nothing looked at, and the repo reached ALLOW while requiring a CLA for code — a P1 from
+ * review. Joining it back is what lets every existing scope rule see it, rather than adding a second
+ * way to decide scope.
+ *
+ * Sentence-INITIAL is the whole test, and it is what separates this from "No CLA. Reviews are quick,
+ * except during release weeks.", where the limiter sits mid-sentence with its own subject and must
+ * not reach the waiver. Where a fragment is genuinely ambiguous, joining over-blocks rather than
+ * over-allows, which is the asymmetry `signaturePolarity` closes with.
  */
 function sentencesOf(text: string): string[] {
-  return text
-    .split(/(?<=[.!?])\s+(?=["'(\[]?[A-Z])|\n+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const out: string[] = [];
+  for (const sentence of text.split(/(?<=[.!?])\s+(?=["'(\[]?[A-Z])|\n+/).map((s) => s.trim()).filter(Boolean)) {
+    const anaphoricScope = new RegExp(String.raw`^["'(\[]*${SCOPE_LIMITER.source.replace(/^\\b|\\b$/g, "")}\b`, "i").test(sentence);
+    const previous = out.at(-1);
+    if (anaphoricScope && previous !== undefined) out[out.length - 1] = `${previous} ${sentence}`;
+    else out.push(sentence);
+  }
+  return out;
 }
 
 /**

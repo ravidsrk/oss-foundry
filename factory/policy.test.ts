@@ -467,6 +467,14 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   { doc: "No CLA is required, and all patches are welcome except spam.", want: "waived", why: "the 'except' is about spam" },
   { doc: "No DCO is needed, and we review everything except vendored trees.", want: "waived", why: "the 'except' is about review scope" },
   { doc: "No CLA. Reviews are quick, except during release weeks.", want: "waived", why: "limiter in a later sentence about something else" },
+  // ...but a sentence that STARTS with a limiter is not a new statement, it is the previous one's
+  // scope. Splitting them left a blanket waiver and a token-less fragment nothing looked at, and the
+  // repo reached ALLOW while requiring a CLA for code. A P1 from review. Sentence-initial is the
+  // whole test, which is what separates these from the row above.
+  { doc: "No CLA is required. Except for code.", want: "required", why: "sentence-initial limiter scopes the waiver before it" },
+  { doc: "No DCO is needed. Unless you are adding a new module.", want: "required", why: "same, with a subject inside the fragment" },
+  { doc: "No CLA is required. Other than for vendored trees.", want: "required", why: "multi-word limiter, sentence-initial" },
+  { doc: "No CLA is required. Reviews are quick.", want: "waived", why: "next sentence is not a limiter at all" },
   // The SAME waiver stated twice, scoped only on the later copy. Position came from asking the
   // sentence where the match was, which answers with the first copy, so the later waiver's forward
   // span was cut at the intervening conjunction and its limiter never seen — ALLOW. Third P1.
@@ -489,6 +497,11 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // document that waives BOTH scopes. A P1 from review; every waived span comes out now.
   { doc: "No CLA is required for documentation and no CLA is required for code.", want: "waived", why: "same waiver twice in ONE clause" },
   { doc: "No DCO is needed for docs and no DCO is needed for code.", want: "waived", why: "same, DCO family" },
+  // The waiver patterns and the requirement roster were two lists and they drifted: the waivers knew
+  // `expected` and the predicate did not, so this waived the whole sentence and reached ALLOW.
+  // A P1 from review, fixed by giving both one roster rather than by adding the missing word.
+  { doc: "No CLA is expected for docs and expected for code.", want: "required", why: "'expected' must work in both polarities" },
+  { doc: "No CLA is expected.", want: "waived", why: "...and still waive when nothing requires it" },
   // ...and the limiter can scope the SECOND waiver inside that one clause. Deciding from the first
   // occurrence alone cut the forward span at the intervening "and" and reached a blanket waiver.
   // Found by adversarially probing the cross-clause fix above rather than reported - the same shape
