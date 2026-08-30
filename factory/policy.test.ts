@@ -517,6 +517,18 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // instrument, so these must stay waived or the rule over-blocks ordinary prose.
   { doc: "No CLA is required, required reading is the style guide.", want: "waived", why: "'required reading' modifies a noun" },
   { doc: "No CLA is required, necessary tooling is listed below.", want: "waived", why: "'necessary tooling' modifies a noun" },
+  // "and" is not a clause delimiter, so a coordinated requirement lives INSIDE the waiver's clause,
+  // where the limiter check finds no limiter and the clause-initial anaphora rule cannot see it.
+  // The waiver read as blanket and the repo was ALLOWED while demanding a signature for code.
+  // A P1 from review. The conjunction must be followed DIRECTLY by the predicate, which is what
+  // separates it from "and tests are required" (own subject) and "and no CLA is required" (a second
+  // waiver) - adjacency, not a word list.
+  { doc: "A DCO is not required for documentation and required for code.", want: "required", why: "coordinated requirement, same elided subject" },
+  { doc: "No CLA is required for docs and required for code.", want: "required", why: "same, CLA family" },
+  { doc: "No CLA is required for docs and also required for dependencies.", want: "required", why: "'also' between conjunction and predicate" },
+  { doc: "A CLA is not required for docs or required for tests.", want: "required", why: "'or' coordinates it too" },
+  { doc: "No CLA is required for docs and tests.", want: "waived", why: "'and tests.' is a noun, not a predicate" },
+  { doc: "No CLA is required and reviews are quick.", want: "waived", why: "coordination with its own subject" },
 
   // --- Plain requirements, in the phrasings a real CONTRIBUTING.md uses. ---
   { doc: "Pull requests without a signed Contributor License Agreement will be closed.", want: "required", why: "#50: the phrasing most likely to appear for real" },

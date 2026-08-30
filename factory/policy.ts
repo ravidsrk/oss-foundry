@@ -70,6 +70,18 @@ const ESCAPE_HATCH = String.raw`(?:bypass|exception|exemption|waiver|opt[-\s]?ou
 /** Words that turn a waiver into a conditional requirement: it IS required, somewhere. */
 const SCOPE_LIMITER = /\b(?:except|unless|other\s+than|apart\s+from|save\s+for)\b/i;
 
+/** The words a requirement is asserted WITH, when its subject has been elided. */
+const PREDICATE = String.raw`(?:required|needed|necessary|mandatory|obligatory|compulsory)`;
+
+/**
+ * What must follow a bare `PREDICATE` for it to be a requirement rather than a noun modifier.
+ *
+ * Without a copula there is no verb to anchor on, so the SCOPE anchors instead: "required for code"
+ * asserts something about the instrument, "required reading is the style guide" does not. One adverb
+ * may intervene, so "needed only for release" still counts.
+ */
+const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:\w+\s+)?(?:for|on|in|when|with|of|from)\b))`;
+
 /**
  * There is deliberately NO "asserts a requirement" roster. One was written, and the injection pass
  * showed the harness could not see it deleted: an occurrence matching no waiver already returns
@@ -146,6 +158,22 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
       const forward = conjunction === -1 ? after : after.slice(0, conjunction);
       const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
       if (SCOPE_LIMITER.test(forward) || leading) return "required";
+    }
+    /**
+     * A COORDINATED requirement on the same elided subject: "no CLA is required for docs and
+     * required for code." `and` is not a clause delimiter, so this requirement lives inside the
+     * waiver's own clause, where the limiter check finds no limiter and the anaphora pass — which
+     * needs a clause-INITIAL predicate — cannot see it either. The waiver read as blanket and the
+     * repo was ALLOWED while demanding a signature for code. A P1 from review, and the same
+     * fail-open class as everything else on this branch: a requirement hiding behind a waiver's
+     * coordination.
+     *
+     * The conjunction must be followed DIRECTLY by the predicate. "and tests are required" has its
+     * own subject and must not flip the instrument, and "and no CLA is required for code" is a second
+     * waiver rather than a requirement — both are excluded by that adjacency, not by a word list.
+     */
+    if (new RegExp(String.raw`\b(?:and|or|but|however)\s+(?:also\s+)?(?:still\s+)?${PREDICATE}\b${SCOPE_FOLLOWS}`, "i").test(clause)) {
+      return "required";
     }
     /**
      * A WAIVER GOVERNS ONLY THE OCCURRENCE IT NAMES — a P1 from review. Polarity was decided once
@@ -264,16 +292,10 @@ export function scanPolicyText(text: string): {
      * keywords alone would over-block it.
      *
      * English drops the copula too — "..., but required for code." — and a participle-initial clause
-     * was invisible, so the waiver read as blanket and the repo was allowed despite requiring a
-     * signature for code (a P1 from review, and this issue's fail-open class again). Without the
-     * copula there is no verb to anchor on, so the SCOPE does the anchoring: a bare participle counts
-     * only when what follows is a scope or the clause ends. That is what separates "required for
-     * code" from "required reading is the style guide", where the participle modifies a noun and
-     * asserts nothing about the instrument. One adverb is allowed in between, so "needed only for
-     * release" still counts.
+     * was invisible, so the waiver read as blanket and the repo was ALLOWED despite requiring a
+     * signature for code: a P1 from review, and this issue's fail-open class again. `SCOPE_FOLLOWS`
+     * is what keeps a bare participle from matching a noun modifier.
      */
-    const PREDICATE = String.raw`(?:required|needed|necessary|mandatory|obligatory|compulsory)`;
-    const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:\w+\s+)?(?:for|on|in|when|with|of|from)\b))`;
     const anaphoric = parts.some(
       ({ text: c }) =>
         (new RegExp(String.raw`^(?:is|are|it\s+is|they\s+are)\s+(?:still\s+)?${PREDICATE}\b`, "i").test(c) ||
