@@ -42,6 +42,26 @@ test("an anaphoric requirement lands on the instrument last named, not on every 
   // Both families named BEFORE the anaphor, so "most recently named" and "first named" differ and
   // only the nearest one is right. Without this the rule passes while attributing to whichever
   // instrument happens to appear first.
+  // Both families in ONE clause, so "nearest" cannot be read off the clause order - it is the token
+  // position inside the clause, and the roster order is irrelevant. A P1 from review: the evidence
+  // named whichever instrument the roster lists first.
+  const together = scanPolicyText("No CLA or DCO is required, but is required for code.");
+  assert.deepEqual(
+    together.signatureRequired.map((q) => q.split(":")[0]),
+    ["DCO"],
+    "the DCO's token sits nearest the elided subject",
+  );
+
+  // A family named TWICE in the clause: "nearest" is its last mention, not its first, and reading the
+  // first makes the other instrument look closer. Stilted, and deliberately so - the scanner reads a
+  // stranger's document and the rule has to be the rule.
+  const twice = scanPolicyText("A CLA is not required and no DCO is needed and no CLA is expected, but is required for code.");
+  assert.deepEqual(
+    twice.signatureRequired.map((q) => q.split(":")[0]),
+    ["CLA"],
+    "the CLA's LAST mention is nearest the elided subject",
+  );
+
   const nearest = scanPolicyText("No DCO is needed, no CLA is required for docs, but is required for code.");
   assert.deepEqual(
     nearest.signatureRequired.map((q) => q.split(":")[0]),
@@ -515,6 +535,14 @@ const SIGNATURE_CORPUS: { doc: string; want: Polarity; why: string }[] = [
   // rows fails without one of them. Short-with-a-verb is a statement; long-without-one is too.
   { doc: "No CLA is required for docs, and tests apply, except for code.", want: "waived", why: "3 words but a verb: a statement, so the waiver's span ends" },
   { doc: "No CLA is required for docs, and all other repositories in this organisation, except forks.", want: "waived", why: "verbless but long: also a statement" },
+  // Punctuation is NOT part of the test. Requiring a comma before the conjunction let an unrelated
+  // exception scope the waiver whenever the author omitted one - a fail-closed P1 from review.
+  { doc: "No CLA is required for docs and all patches are welcome except spam.", want: "waived", why: "no comma, still two statements" },
+  { doc: "No DCO is needed for docs and we review everything except vendored trees.", want: "waived", why: "same, other family" },
+  // ...and a statement about THIS instrument does not end the span either, because a limiter past a
+  // second waiver of the same thing still means it is required somewhere. That case is already above
+  // ("limiter scopes the second waiver in ONE clause"); it is the line between these two groups, and
+  // all of them fail if it is drawn anywhere else.
   { doc: "A CLA is not required; except for new dependencies.", want: "required", why: "limiter behind a semicolon" },
   { doc: "Except for new dependencies, a CLA is not required.", want: "required", why: "leading limiter, waiver is the main clause" },
   // ...and it must NOT reach a waiver it has nothing to do with. Reading it from the whole sentence

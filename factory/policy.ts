@@ -128,13 +128,29 @@ const SCOPE_FOLLOWS = String.raw`(?=\s*(?:$|[.;,]|(?:${QUALIFIER}\s+)?(?:for|on|
  */
 const FINITE_VERB = /\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|will|would|can|could|may|might|must|should|shall|need|needs|require|requires|review|reviews|accept|accepts|welcome|apply|applies|ask|asks|expect|expects)\b/i;
 
-function truncateAtStatement(after: string): string {
-  const boundary = new RegExp(String.raw`[,;]\s*${CONJUNCTION_WORDS}\b`, "gi");
+function truncateAtStatement(after: string, token: string): string {
+  const boundary = new RegExp(String.raw`\b${CONJUNCTION_WORDS}\b`, "gi");
   for (let hit = boundary.exec(after); hit; hit = boundary.exec(after)) {
-    const segment = after.slice(hit.index + hit[0].length).split(/[,;.]/)[0] ?? "";
+    // What the conjunction introduces, up to the next punctuation OR the next limiter — whichever
+    // comes first. Stopping at the limiter is what keeps "or code except for third-party
+    // contributions" from reading as a six-word statement: the item is "code".
+    const rest = after.slice(hit.index + hit[0].length);
+    const end = rest.search(/[,;.]/);
+    const lim = rest.search(SCOPE_LIMITER);
+    const cut = [end, lim].filter((n) => n >= 0);
+    const segment = cut.length > 0 ? rest.slice(0, Math.min(...cut)) : rest;
     const words = segment.trim().split(/\s+/).filter(Boolean);
-    // A scope item: short, and asserting nothing. Keep looking for a real statement boundary.
+    // A scope item is short and asserts nothing. Anything else is a new statement, and the waiver's
+    // own span ends there. Punctuation is NOT part of this test: "No CLA is required for docs and all
+    // patches are welcome except spam." has no comma and is still two statements, and requiring one
+    // let the unrelated `except spam` scope the waiver — a fail-closed P1 from review.
     if (words.length <= 3 && !FINITE_VERB.test(segment)) continue;
+    // A statement about THIS instrument does not end the waiver's reach either. "No DCO is needed
+    // for docs and no DCO is needed for tests, other than vendored trees." coordinates two waivers
+    // of one instrument, and the limiter past the second still means the DCO is required somewhere.
+    // Only a statement about something ELSE closes the span — that is the difference between this
+    // and "and all patches are welcome except spam", where the exception is about spam.
+    if (new RegExp(token, "i").test(segment)) continue;
     return after.slice(0, hit.index);
   }
   return after;
@@ -220,6 +236,12 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
       // give the same verdict; that was measured across every enumeration here, in both directions,
       // rather than reasoned about and hoped for.
       const span = spans[0]!;
+      // `clauseAt + span.at` rather than asking the sentence where this text is, which answers with
+      // the first copy of it. That was a P1 and had a failing row; the row no longer fails, because
+      // `truncateAtStatement` now continues through a statement about this same instrument and so
+      // reaches the limiter from either position. Measured, not assumed — the mutant survives the
+      // whole corpus today. Kept because a clause's position is not something to compute wrongly and
+      // rely on a neighbouring rule to cover, and that neighbouring rule has been redrawn four times.
       const at = clauseAt + span.at;
       const after = sentence.slice(at + span.length);
       // A conjunction ends this statement only where it BEGINS a new one. A comma is necessary for
@@ -231,7 +253,7 @@ function signaturePolarity(clause: string, clauseAt: number, sentence: string, t
       // something. A continued scope is a short noun phrase closed by the next comma. That is the
       // test: skip a candidate whose following segment is a bare scope item, keep looking, and
       // truncate at the first one that reads as a statement.
-      const forward = truncateAtStatement(after);
+      const forward = truncateAtStatement(after, T);
       const leading = at > 0 && SCOPE_LIMITER.test(sentence.slice(0, at).replace(/^[\s"'(\[]*/, "").split(/[,;]/)[0] ?? "");
       if (SCOPE_LIMITER.test(forward) || leading) return "required";
     }
@@ -450,8 +472,21 @@ export function scanPolicyText(text: string): {
     const anaphoricFamilies = new Set<string>();
     let named: string | undefined;
     for (const { text: c } of parts) {
-      const here = SIGNATURE_FAMILIES.find(({ token }) => new RegExp(token, "i").test(c));
-      if (here) named = here.family;
+      // The family whose token sits LAST in the clause, not the first in the roster: one clause can
+      // name both ("No CLA or DCO is required"), and the elided subject refers to the nearest — a
+      // P1 from review, because the freeze evidence otherwise blames whichever the roster lists
+      // first, which has nothing to do with what the sentence says.
+      let here: string | undefined;
+      let furthest = -1;
+      for (const { family, token } of SIGNATURE_FAMILIES) {
+        let last = -1;
+        for (const m of c.matchAll(new RegExp(token, "gi"))) last = m.index;
+        if (last > furthest) {
+          furthest = last;
+          here = family;
+        }
+      }
+      if (here) named = here;
       else if (isAnaphoric(c) && named !== undefined) anaphoricFamilies.add(named);
     }
     for (const { text: clause, at: clauseAt } of parts) {
