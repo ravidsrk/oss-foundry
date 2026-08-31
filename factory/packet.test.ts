@@ -160,8 +160,8 @@ test("the freeze prints the words the scanner read, not a boolean", () => {
  * #37 legs 2–3 exist because "the human freeze is blind — fetched docs are discarded". #70 fixed
  * that by printing the parsed text, and then capped the print at 4,000 characters — so for the one
  * case the whole mechanism is for, the human was still blind. The scanner reads the WHOLE document;
- * the freeze showed a prefix. And #37's scanner leg is parked, so "the scanner misses a realistic
- * ban" is a live condition on this tree, not a hypothesis.
+ * the freeze showed a prefix. A remaining scanner miss (a phrasing nobody has written a pattern
+ * for) is still a live condition, even after the #37 probe table classifies.
  *
  * The specific sentence that made it dangerous is the closing one. After 4,000 characters of quoted
  * text the surface said `no ban statement matched in 5234 chars from CONTRIBUTING` — a claim of
