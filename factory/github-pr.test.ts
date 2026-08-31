@@ -1023,7 +1023,15 @@ test("#113: a hung GitHub fetch fails closed within the deadline", async () => {
   process.env.FOUNDRY_GITHUB_TIMEOUT_MS = "40";
   const started = Date.now();
   try {
-    const result = await compareCommits("ravidsrk/orca-fleet", BASE, HEAD, hung);
+    // `AbortSignal.timeout` alone does not keep node:test's event loop alive, so a 40ms
+    // deadline would report "still pending" at ~25ms. The watchdog timer holds the loop
+    // until the abort fires (or 2s, which is the failure).
+    const result = await Promise.race([
+      compareCommits("ravidsrk/orca-fleet", BASE, HEAD, hung),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung fetch was not aborted")), 2000),
+      ),
+    ]);
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /abort|timeout|This operation was aborted/i);
     assert.ok(Date.now() - started < 2000, `hung fetch took ${Date.now() - started}ms`);

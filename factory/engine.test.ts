@@ -2574,7 +2574,7 @@ test("status names the observation its quiet counter was extrapolated from", () 
   const status = runCliWithState(["status"], seed);
   assert.equal(status.status, 0, status.out);
 
-  const line = status.stdout.split("\n").find((l) => l.includes(inflight.id))!;
+  const line = status.stdout.split("\n").find((l) => l.includes(inflight.id) && /quiet=/.test(l))!;
   assert.ok(line, status.stdout);
   assert.match(line, /quiet=\d+d\/14/);
   assert.match(line, /PR last active \d{4}-\d{2}-\d{2}/);
