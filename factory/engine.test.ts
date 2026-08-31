@@ -23,6 +23,7 @@ import {
   bindingFromCompare,
   branchMentionsIssue,
   classifyCompetition,
+  competingWorkAdvisory,
   commitTrailerViolation,
   evidenceIsReady,
   findCompetingPull,
@@ -64,6 +65,7 @@ import {
   revertWindow,
 } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
+import { asOpenSubmitted, wave1Packet, withOpenSubmittedWave1 } from "./seed-fixtures.ts";
 import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
 import { INFLIGHT_STATUSES, inflightCount, type FactoryState } from "./types.ts";
@@ -154,7 +156,7 @@ test("unknown policy without fetched docs is deny, not a canned welcome", () => 
 });
 
 test("submitted packet is in-flight and blocks a new tick", () => {
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   assert.equal(hasInflight(seed.packets), true);
   const submitted = seed.packets.find((p) => p.status === "submitted");
   assert.ok(submitted);
@@ -248,7 +250,7 @@ test("reject refuses a merged packet instead of desyncing the promotion gate", (
 });
 
 test("reject stays legal on a submitted packet (the documented halt-everything path) but names the still-open PR", () => {
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const submitted = seed.packets.find((p) => p.status === "submitted")!;
   assert.ok(submitted.prUrl);
   const result = applyReject(seed, submitted.id, "operator halt");
@@ -1000,7 +1002,7 @@ test("halt sets scorecard banned, parks inflight, and blocks a new queue", () =>
  * (issue #44 item 10).
  */
 test("halt typed in GitHub's casing halts the roster's repo, not a repo that does not exist", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const canonical = "ColeMurray/background-agents";
   const inflightBefore = state.packets.filter(
     (p) => p.repoId === canonical && INFLIGHT_STATUSES.includes(p.status),
@@ -1055,7 +1057,7 @@ test("halt typed in GitHub's casing halts the roster's repo, not a repo that doe
 test("halt moves an off-canonical row and packet — the shape a pre-#44 ledger has", () => {
   const canonical = "ColeMurray/background-agents";
   const OFF = "COLEMURRAY/BACKGROUND-AGENTS";
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const inflightBefore = seed.packets.filter(
     (p) => p.repoId === canonical && INFLIGHT_STATUSES.includes(p.status),
   );
@@ -1372,7 +1374,7 @@ function prMetaAt(updatedAt: string, over: Record<string, unknown> = {}) {
 }
 
 test("answered threads plus 14 quiet days release the in-flight slot", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   assert.ok(submitted);
   const at = "2026-09-20T00:00:00.000Z";
@@ -1388,7 +1390,7 @@ test("answered threads plus 14 quiet days release the in-flight slot", () => {
 });
 
 test("13 quiet days do not release the slot; unanswered threads never do", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const at = "2026-09-14T00:00:00.000Z";
   const early = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
@@ -1404,7 +1406,7 @@ test("13 quiet days do not release the slot; unanswered threads never do", () =>
 });
 
 test("maintainer activity on a followed-up packet re-blocks the factory", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const released = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
     threadsAnswered: true,
@@ -1422,7 +1424,7 @@ test("maintainer activity on a followed-up packet re-blocks the factory", () => 
 test("wake does not reclaim submitted when another packet already holds the in-flight slot", () => {
   // Reproduces issue #34 vector (b): A quiet-releases, B gets ticked into the freed slot, then
   // maintainer activity on A must not double the in-flight count.
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const a = state.packets.find((p) => p.status === "submitted")!;
   const released = applyPrSync(state, a.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
     threadsAnswered: true,
@@ -1475,7 +1477,7 @@ test("wake does not reclaim submitted when another packet already holds the in-f
 });
 
 test("merged and closed syncs write the scorecard and end follow-up", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const merged = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }), {
     threadsAnswered: true,
@@ -1497,7 +1499,7 @@ test("merged and closed syncs write the scorecard and end follow-up", () => {
 });
 
 test("45 quiet days record a stale-intent note but never auto-close", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const result = applyPrSync(state, submitted!.id, prMetaAt("2026-08-28T00:00:00.000Z"), {
     threadsAnswered: true,
@@ -1513,7 +1515,7 @@ test("45 quiet days record a stale-intent note but never auto-close", () => {
 });
 
 test("re-syncing a closed PR writes closedUnmerged exactly once; merged bumps mergedTotal", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
   const once = applyPrSync(state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" });
@@ -1535,7 +1537,7 @@ test("re-syncing a closed PR writes closedUnmerged exactly once; merged bumps me
 });
 
 test("quiet-day thresholds hold at their exact boundaries", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const at14 = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
     threadsAnswered: true,
@@ -1628,7 +1630,7 @@ test("approve records the attesting identity, defaulting to operator", () => {
 });
 
 test("ledger divergences: mechanical drift names the sync command, doctrine drift stands alone", () => {
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const submitted = seed.packets.find((p) => p.status === "submitted")!;
   const mergedUpstream = packetDivergences(submitted, {
     state: "closed",
@@ -1678,7 +1680,7 @@ test("ledger divergences: mechanical drift names the sync command, doctrine drif
 });
 
 test("an absorbed close is at rest: reconcile-style re-diff reports no divergence", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   // A close a real sync absorbed, which means the review endpoints answered: `syncGithubPr` reads
   // them for any terminal PR, and `recordTerminalReview` folds the result into the scorecard on the
@@ -1730,7 +1732,7 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
 });
 
 test("a rejected packet with a still-open PR never rots invisibly in the ledger check", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   const rejected = applyReject(state, submitted.id, "operator mis-typed reject").state.packets.find(
     (p) => p.id === submitted.id,
@@ -1762,7 +1764,7 @@ test("a rejected packet with a still-open PR never rots invisibly in the ledger 
 });
 
 test("a parked packet with a still-open PR never rots invisibly in the ledger check", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   assert.ok(submitted.prUrl);
   // applyHalt parks whatever is in flight — including a submitted packet still holding a live
@@ -1804,7 +1806,7 @@ test("the reject warning reaches the operator's terminal, not only the ledger", 
   // `--state` is what isolates this, not `cwd`. The ledger path is anchored to the repo root
   // (factory/cli.ts), so a bare spawn would read and rewrite the developer's real state file.
   const statePath = join(dir, ".foundry-state.json");
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   assert.ok(submitted.prUrl);
   writeFileSync(statePath, JSON.stringify(state));
@@ -1847,7 +1849,7 @@ test("the reject warning is scoped to submitted, not to every packet that names 
   // left the suite green. A `followed-up` packet still names a live PR, but it has already released
   // the slot, so rejecting it is not the halt-everything path abandoning an in-flight draft.
   // (`reconcile` still flags the open PR afterward via `packetDivergences` — that is unchanged.)
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const submitted = seed.packets.find((p) => p.status === "submitted")!;
   const released = applyPrSync(seed, submitted.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
     threadsAnswered: true,
@@ -1886,7 +1888,7 @@ test("status does not claim a re-block that the held slot already prevented", ()
     return `${run.stdout}${run.stderr}`;
   };
 
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const a = seed.packets.find((p) => p.status === "submitted")!;
   const released = applyPrSync(seed, a.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
     threadsAnswered: true,
@@ -2462,20 +2464,15 @@ test("draft-ready requires a witnessed manifest, not an attested one", () => {
   assert.equal(state2.packets[0].evidence?.witness?.provider, "host");
 });
 
-test("the named awesome-copilot first issue is scoutable, not invented", () => {
-  const seed = seedState();
-  const quiet = {
-    ...seed,
-    packets: seed.packets.map((p) =>
-      p.status === "submitted" ? { ...p, status: "followed-up" as const } : p,
-    ),
-  };
-  const ticked = applyTick(quiet);
-  assert.ok(ticked.packet);
-  assert.equal(ticked.packet?.repoId, "github/awesome-copilot");
-  assert.equal(ticked.packet?.issueNumber, 2684);
-  assert.equal(ticked.packet?.policy.code, "ALLOW");
-  assert.equal(ticked.packet?.policy.record?.stance, "welcome");
+test("awesome-copilot is parked as no-suite and is not a named candidate", () => {
+  // issue #112: testCommand `true` cannot implement red-on-revert. The row stays on the
+  // roster with empty firstIssues so the factory will not select it until a suite exists.
+  const repo = repoById("github/awesome-copilot");
+  assert.equal(repo?.negativeControl, "no-suite");
+  assert.deepEqual(repo?.firstIssues, []);
+  const ticked = applyTick(seedState());
+  assert.equal(ticked.packet, null);
+  assert.equal(ticked.reason, "idle");
 });
 
 test("the evidence page binds every claim to a checkable source", () => {
@@ -2571,13 +2568,13 @@ test("the committed ledger GENERATED block regenerates byte-identical from this 
  * the terminal goes back to reading like a live look at the PR (issue #44 item 11).
  */
 test("status names the observation its quiet counter was extrapolated from", () => {
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const inflight = seed.packets.find((p) => INFLIGHT_STATUSES.includes(p.status) && p.prMeta)!;
   assert.ok(inflight, "the seed must hold an in-flight packet carrying prMeta");
   const status = runCliWithState(["status"], seed);
   assert.equal(status.status, 0, status.out);
 
-  const line = status.stdout.split("\n").find((l) => l.includes(inflight.id))!;
+  const line = status.stdout.split("\n").find((l) => l.includes(inflight.id) && /quiet=/.test(l))!;
   assert.ok(line, status.stdout);
   assert.match(line, /quiet=\d+d\/14/);
   assert.match(line, /PR last active \d{4}-\d{2}-\d{2}/);
@@ -2788,22 +2785,35 @@ test("a daytona witness loads, is refused at the gate on today's allowlist, and 
 
 // --- Witness provenance at the gate, subject binding, and persisted logs (issues #35, #36) ---
 
-/** Wave 1 + `sandbox: e2b`: the promotion gate needs the seed's two attested Wave 0 merges. */
+/**
+ * Wave 1 + `sandbox: e2b`. Tick cannot pick a Wave 1 row anymore: awesome-copilot and
+ * e2b-cookbook are `no-suite` with empty `firstIssues` (issue #112), and the seed already
+ * occupies ColeMurray#1476. Queue a suite-bearing Wave 1 repo on the seed so the two
+ * attested Wave 0 merges still satisfy the promotion gate.
+ */
 function reviewingWave1(): { state: FactoryState; id: string } {
-  const seed = seedState();
-  const quiet: FactoryState = {
-    ...seed,
-    packets: seed.packets.map((p) =>
-      p.status === "submitted" ? { ...p, status: "followed-up" as const } : p,
-    ),
-  };
-  const ticked = applyTick(quiet);
-  const id = ticked.packet!.id;
-  let state = ticked.state;
-  state = applyApprove(state, id, "Wave 1 freeze").state;
-  state = applyAdvance(state, id).state;
-  state = applyAdvance(state, id).state;
-  return { state, id };
+  const queued = applyQueueLive(
+    seedState(),
+    live("mcp-use/mcp-use", 991, "docs typo"),
+    {
+      contributing:
+        "Thanks for contributing! Run `pnpm test` before opening a pull request and open an issue first for anything large.",
+    },
+  );
+  if (!queued.packet || queued.reason !== "gated") {
+    throw new Error(`reviewingWave1: expected a gated mcp-use packet, got ${queued.reason}`);
+  }
+  const id = queued.packet.id;
+  let state = queued.state;
+  const approved = applyApprove(state, id, "Wave 1 freeze");
+  if (approved.error) throw new Error(`reviewingWave1 approve: ${approved.error}`);
+  state = approved.state;
+  const implementing = applyAdvance(state, id);
+  if (implementing.error) throw new Error(`reviewingWave1 implement: ${implementing.error}`);
+  state = implementing.state;
+  const reviewing = applyAdvance(state, id);
+  if (reviewing.error) throw new Error(`reviewingWave1 review: ${reviewing.error}`);
+  return { state: reviewing.state, id };
 }
 
 function boundWitness(
@@ -2846,7 +2856,7 @@ function manifestWith(witness: unknown, extra: Record<string, unknown> = {}) {
 test("a host witness on an e2b repo is refused at the gate", () => {
   const { state, id } = reviewingWave1();
   const packet = state.packets[0];
-  assert.equal(packet.repoId, "github/awesome-copilot");
+  assert.equal(packet.repoId, "mcp-use/mcp-use");
   const forged = applyAttachEvidence(
     state,
     id,
@@ -3458,7 +3468,7 @@ test("attach-witness refuses a manifest whose testCommand is not the repo's orac
   const run = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
   assert.equal(run.status, 1, run.seen);
   assert.match(run.seen, /witness ran `echo green`/);
-  assert.match(run.seen, /oracle is `true`/);
+  assert.match(run.seen, /oracle is `pnpm test`/);
   assert.equal(ledgerAt(dir).packets[0].evidence, undefined, "a refusal must not write the ledger");
 });
 
@@ -4141,18 +4151,18 @@ test("attach-witness saves the park when the compared range busts the cap", () =
   // The parked-state save on the ingest path was reachable by no test: deleting the
   // `if (parked) saveFactoryState(...)` line left the suite green, and the operator would then
   // re-run into the same refusal with no record that the packet had been parked at all.
-  // awesome-copilot's cap is 3 files; the stub reports 10.
+  // mcp-use's cap is 4 files; the stub reports 10.
   const { dir, id, manifestPath, stub } = ingestFixture({}, {}, 10);
   assert.equal(ledgerAt(dir).packets[0].status, "reviewing");
 
   const run = runCli(dir, ["attach-witness", id, "--manifest", manifestPath], stub);
   assert.equal(run.status, 1, run.seen);
-  assert.match(run.seen, /would touch 10 files; cap is 3/, run.seen);
+  assert.match(run.seen, /would touch 10 files; cap is 4/, run.seen);
 
   const after = ledgerAt(dir).packets[0];
   assert.equal(after.status, "parked", "the park must survive the refusal, not vanish with the process");
   assert.equal(after.evidence, undefined, "parked is not attached");
-  assert.match(after.parkReason ?? "", /cap is 3/);
+  assert.match(after.parkReason ?? "", /cap is 4/);
 });
 
 test("a witness whose two logs hash the same is not a negative control", () => {
@@ -4496,7 +4506,7 @@ test("classifyRevert names the reverting commit, and only inside the 30-day wind
 });
 
 test("applyPrSync writes noReview on the merge transition and names the packet it read", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   const before = scorecardRow(state.scorecard, submitted.repoId)!.noReview;
   const merged = applyPrSync(
@@ -4520,7 +4530,7 @@ test("applyPrSync writes noReview on the merge transition and names the packet i
 });
 
 test("applyPrSync folds review comments into the mean on the closedUnmerged transition", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   const closed = applyPrSync(
     state,
@@ -4557,7 +4567,7 @@ test("applyPrSync folds review comments into the mean on the closedUnmerged tran
 });
 
 test("a terminal transition with no observed review split records nothing and says so", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   const merged = applyPrSync(
     state,
@@ -4620,7 +4630,7 @@ test("the review-KPI writer and reporter share one predicate, so they cannot dis
   // a hand-written copy of "is this packet in the KPI's population". This asserts the agreement on
   // the case where two plausible hand-written copies come apart: a packet whose PR someone else
   // closed, which this ledger never absorbed and never counted as a terminal outcome.
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   const rejected = applyReject(state, submitted.id, "operator mis-typed reject").state;
   const packet = rejected.packets.find((p) => p.id === submitted.id)!;
@@ -4693,38 +4703,39 @@ test("applyReviewObservation refuses everything that is not a one-time terminal 
   // The recovery writer folds into CUMULATIVE counters and runs on every reconcile, forever. Its
   // refusals are the only thing between `noReview`/`reviewCommentsAvg` and a KPI that grows once
   // every six hours on its own, so each refusal is asserted rather than assumed.
-  const state = seedState();
-  const merged = state.packets.find((p) => p.status === "merged")!;
-  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const seed = seedState();
+  const openState = withOpenSubmittedWave1();
+  const merged = seed.packets.find((p) => p.status === "merged")!;
+  const submitted = openState.packets.find((p) => p.status === "submitted")!;
 
   assert.match(
-    applyReviewObservation(state, "pkt_nope", { reviews: 1, comments: 1 }).error ?? "",
+    applyReviewObservation(seed, "pkt_nope", { reviews: 1, comments: 1 }).error ?? "",
     /unknown packet/,
   );
 
   // An OPEN PR: `noReview` and `reviewCommentsAvg` are defined over terminal outcomes only, so
   // folding one in would put a PR still under review into a mean of finished ones.
-  const open = applyReviewObservation(state, submitted.id, { reviews: 1, comments: 1 });
+  const open = applyReviewObservation(openState, submitted.id, { reviews: 1, comments: 1 });
   assert.match(open.error ?? "", /still open/);
   assert.equal(open.recorded, false);
 
   // A packet with no PR at all has nothing to attach an observation to.
-  const parked = state.packets.find((p) => p.status === "parked")!;
+  const parked = seed.packets.find((p) => p.status === "parked")!;
   assert.match(
-    applyReviewObservation(state, parked.id, { reviews: 1, comments: 1 }).error ?? "",
+    applyReviewObservation(seed, parked.id, { reviews: 1, comments: 1 }).error ?? "",
     /no recorded PR/,
   );
 
   // Already observed: a no-op, and NOT an error — this is the common case on every tick forever.
-  const again = applyReviewObservation(state, merged.id, { reviews: 9, comments: 9 });
+  const again = applyReviewObservation(seed, merged.id, { reviews: 9, comments: 9 });
   assert.equal(again.error, undefined);
   assert.equal(again.recorded, false, "a second fold would inflate a cumulative counter");
-  assert.deepEqual(again.state.scorecard, state.scorecard, "and it must not have touched the row");
+  assert.deepEqual(again.state.scorecard, seed.scorecard, "and it must not have touched the row");
 
   // The one path that does work, and its guard closing behind it.
   const blind = {
-    ...state,
-    packets: state.packets.map((p) =>
+    ...seed,
+    packets: seed.packets.map((p) =>
       p.id === merged.id ? { ...p, prMeta: { ...p.prMeta!, humanReview: undefined } } : p,
     ),
   };
@@ -4776,7 +4787,7 @@ test("applyRevert is the producer reverts never had: it counts, it stops the rep
 });
 
 test("applyRevert refuses a packet that was never merged, and one it has never heard of", () => {
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   const notMerged = applyRevert(state, submitted.id, { source: "operator", why: "maintainer said so" });
   assert.match(notMerged.error ?? "", /submitted/);
@@ -5129,7 +5140,7 @@ test("a bare approval is review activity that moves neither counter, and says so
   // (so it stays out of the `reviewCommentsAvg` denominator). Unasserted, its message could be
   // deleted, or reworded to contain both other messages' key phrases, and the suite stayed green —
   // against `recordTerminalReview`'s own claim that "no two of them can satisfy the same assertion".
-  const state = seedState();
+  const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted")!;
   const approved = applyPrSync(
     state,
@@ -5181,7 +5192,7 @@ test("applyRevert writes the note and the counter together", () => {
   assert.equal(scorecardRow(after.scorecard, repoId)!.reverts, 1, "the counter is the KPI the note protects");
 
   // A refused revert moves neither, so the pairing holds on the failure path too.
-  const refused = applyRevert(state, state.packets.find((p) => p.status === "submitted")!.id, {
+  const refused = applyRevert(state, wave1Packet(state).id, {
     source: "operator",
     why: "never merged",
   });
@@ -5401,4 +5412,147 @@ test("every statement of the wake rule carries the held-slot exception", () => {
       );
     }
   }
+});
+
+test("#111: competingWorkAdvisory fires only on an still-open submitted packet", () => {
+  const open = asOpenSubmitted(wave1Packet());
+  const competing = competingWorkAdvisory(open, {
+    kind: "competing",
+    url: "https://github.com/ColeMurray/background-agents/pull/1668",
+    why: "closing-keyword",
+  });
+  assert.match(competing ?? "", /competing PR/);
+
+  const closed = wave1Packet();
+  assert.equal(closed.prMeta?.state, "closed");
+  assert.equal(
+    competingWorkAdvisory(closed, {
+      kind: "competing",
+      url: "https://github.com/ColeMurray/background-agents/pull/1668",
+      why: "closing-keyword",
+    }),
+    undefined,
+    "an absorbed close is at rest — the close FATAL owns that story",
+  );
+});
+
+test("#112: a no-suite repo can attach a two-run-true witness and reach draft-ready", () => {
+  const packet = {
+    ...buildPacket({
+      repoId: "github/awesome-copilot",
+      issueNumber: 9001,
+      issueTitle: "docs catalog note",
+      issueUrl: "https://github.com/github/awesome-copilot/issues/9001",
+    }),
+    status: "reviewing" as const,
+    station: "review" as const,
+  };
+  const emptySha = createHash("sha256").update("").digest("hex");
+  const evidence = {
+    baseSha: BASE,
+    headSha: HEAD,
+    testCommand: "true",
+    testExit: 0,
+    negativeControl: "no-suite" as const,
+    filesChanged: 1,
+    diffLines: 1,
+    notes: [],
+    witness: {
+      provider: "e2b" as const,
+      testExit: 0,
+      revertExit: 0,
+      testLogSha: emptySha,
+      revertLogSha: emptySha,
+      ranAt: "2026-08-31T00:00:00.000Z",
+      repoId: "github/awesome-copilot",
+      baseSha: BASE,
+      headSha: HEAD,
+      testLogPath: `docs/evidence/logs/${packet.id}/test.log`,
+      revertLogPath: `docs/evidence/logs/${packet.id}/revert.log`,
+    },
+  };
+  const state: FactoryState = { ...blank(), packets: [packet] };
+  const attached = applyAttachEvidence(state, packet.id, evidence, bindingFor(packet));
+  assert.equal(attached.error, undefined, attached.error);
+  assert.equal(evidenceIsReady(attached.state.packets[0]), true);
+  const advanced = applyAdvance(attached.state, packet.id);
+  assert.equal(advanced.error, undefined, advanced.error);
+  assert.equal(advanced.state.packets[0].status, "draft-ready");
+});
+
+test("#112: a red-on-revert repo still refuses identical witness logs", () => {
+  const packet = {
+    ...buildPacket({
+      repoId: "ravidsrk/orca-fleet",
+      issueNumber: 71,
+      issueTitle: "validator",
+      issueUrl: "https://github.com/ravidsrk/orca-fleet/issues/71",
+    }),
+    status: "reviewing" as const,
+    station: "review" as const,
+  };
+  const emptySha = createHash("sha256").update("").digest("hex");
+  const attached = applyAttachEvidence(
+    { ...blank(), packets: [packet] },
+    packet.id,
+    {
+      baseSha: BASE,
+      headSha: HEAD,
+      testCommand: "true",
+      testExit: 0,
+      negativeControl: "red-on-revert",
+      filesChanged: 1,
+      diffLines: 1,
+      notes: [],
+      witness: {
+        provider: "host",
+        testExit: 0,
+        revertExit: 1,
+        testLogSha: emptySha,
+        revertLogSha: emptySha,
+        ranAt: "2026-08-31T00:00:00.000Z",
+        repoId: "ravidsrk/orca-fleet",
+        baseSha: BASE,
+        headSha: HEAD,
+        testLogPath: `docs/evidence/logs/${packet.id}/test.log`,
+        revertLogPath: `docs/evidence/logs/${packet.id}/revert.log`,
+      },
+    },
+    bindingFor(packet),
+  );
+  assert.match(attached.error ?? "", /same sha256|identical/);
+  assert.equal(evidenceIsReady(attached.state.packets[0]), false);
+});
+
+test("#110: applyPrSync close then packetChecks has no re-witness or disclosure advisory", () => {
+  const state = withOpenSubmittedWave1();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const closed = applyPrSync(
+    state,
+    submitted.id,
+    {
+      ...submitted.prMeta!,
+      state: "closed",
+      merged: false,
+      humanReview: { reviews: 0, comments: 0 },
+    },
+    { threadsAnswered: false, at: "2026-08-30T02:25:22.000Z" },
+  );
+  assert.equal(closed.error, undefined);
+  const after = closed.state.packets.find((p) => p.id === submitted.id)!;
+  assert.equal(after.status, "followed-up");
+  assert.equal(after.prMeta?.state, "closed");
+  const { fatal, advisory } = packetChecks(after, {
+    state: "closed",
+    merged: false,
+    draft: after.prMeta!.draft,
+    headSha: after.prMeta!.headSha,
+    body: "no disclosure here at all",
+  });
+  assert.deepEqual(fatal, []);
+  assert.equal(
+    advisory.some((a) => /re-witness|live PR body/.test(a)),
+    false,
+    `absorbed close must retire re-witness and disclosure; got ${JSON.stringify(advisory)}`,
+  );
 });

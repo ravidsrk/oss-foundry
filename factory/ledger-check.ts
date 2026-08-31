@@ -2,6 +2,11 @@ import { DISCLOSURE, DISCLOSURE_TAIL } from "./neighbor.ts";
 import { isTerminalReviewSubject, revertNote, type RevertVerdict } from "./scorecard.ts";
 import type { FactoryState, TaskPacket } from "./types.ts";
 
+/** A packet whose PR has reached a terminal GitHub state is at rest for re-witness and disclosure. */
+function isAbsorbedClose(packet: TaskPacket): boolean {
+  return isTerminalReviewSubject(packet);
+}
+
 export interface LivePrLite {
   state: "open" | "closed";
   merged: boolean;
@@ -242,6 +247,9 @@ export function disclosureDivergence(packet: TaskPacket, body: string | undefine
   // body is history that nobody can renegotiate, and re-printing it every tick would train the
   // operator (and the clock) to ignore the line.
   if (packet.status !== "submitted" && packet.status !== "followed-up") return undefined;
+  // Closed-unmerged is written as `followed-up` (applyPrSync). Status alone would keep flagging a
+  // body nobody can renegotiate (issue #110). Same at-rest key as the review KPI.
+  if (isAbsorbedClose(packet)) return undefined;
   if (typeof body !== "string") {
     return `${packet.id}: live PR body was not supplied to the reconciliation — the verbatim disclosure (SPEC.md §6) could not be checked; a caller that cannot read the body must say so, not skip the check`;
   }
@@ -292,7 +300,8 @@ export function evidenceIsStale(packet: TaskPacket, headSha: string | undefined)
 export function needsRewitness(packet: TaskPacket, headSha: string | undefined): boolean {
   return (
     evidenceIsStale(packet, headSha) &&
-    (packet.status === "submitted" || packet.status === "followed-up")
+    (packet.status === "submitted" || packet.status === "followed-up") &&
+    !isAbsorbedClose(packet)
   );
 }
 

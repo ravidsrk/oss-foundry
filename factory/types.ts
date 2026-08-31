@@ -89,6 +89,12 @@ export interface AllowlistedRepo {
   maxFiles: number;
   maxDiffLines: number;
   sandbox: SandboxKind;
+  /**
+   * How this repo can satisfy the negative control. Default `red-on-revert`.
+   * `no-suite` is for markdown/docs catalogs whose `testCommand` cannot go red on revert
+   * (issue #112). Those rows MUST have empty `firstIssues` — the factory will not select them.
+   */
+  negativeControl: "red-on-revert" | "no-suite";
   /** Optional environment step the witness runs after clone/checkout and again after the between-runs clean (e.g. `npm ci`). */
   setupCommand?: string;
   /** Commit-disclosure convention the target follows: kernel-style Assisted-by, ASF-style Generated-by, or PR-body prose only (default). */
@@ -272,7 +278,7 @@ export interface EvidenceManifest {
   reviewedSha?: string;
   testCommand: string;
   testExit: number;
-  negativeControl: "red-on-revert" | "pending" | "failed";
+  negativeControl: "red-on-revert" | "pending" | "failed" | "no-suite";
   filesChanged: number;
   diffLines: number;
   notes: string[];

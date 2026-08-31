@@ -9,7 +9,8 @@ import {
 } from "./ledger-check.ts";
 import { DISCLOSURE, DISCLOSURE_TAIL } from "./neighbor.ts";
 import { seedState } from "./seed.ts";
-import type { TaskPacket } from "./types.ts";
+import { asOpenSubmitted, WAVE1_PACKET_ID, wave1Packet } from "./seed-fixtures.ts";
+import { INFLIGHT_STATUSES, type TaskPacket } from "./types.ts";
 
 /**
  * A head the PR moved to after the evidence was witnessed. Synthetic — deliberately sharing no
@@ -55,7 +56,7 @@ The factory does not merge. Maintainers own the merge.`;
 const VERBATIM_BODY = `## Summary\n\nFixes the thing.\n\n## Disclosure\n\n${DISCLOSURE}\n`;
 
 function submittedPacket(): TaskPacket {
-  return seedState().packets.find((p) => p.status === "submitted")!;
+  return asOpenSubmitted(wave1Packet());
 }
 
 test("#49: promoting the live facts into the seed reconciles the clock without erasing the re-witness debt", () => {
@@ -444,12 +445,12 @@ test("live state that has moved past the committed seed is reported packet by pa
   const moved = {
     ...seed,
     packets: seed.packets.map((p) =>
-      p.status === "submitted" ? { ...p, status: "followed-up" as const } : p,
+      p.id === WAVE1_PACKET_ID ? { ...p, status: "parked" as const } : p,
     ),
   };
   const drift = seedDivergences(moved, seed);
   assert.equal(drift.length, 1);
-  assert.match(drift[0], /submitted/);
+  assert.match(drift[0], /parked/);
   assert.match(drift[0], /followed-up/);
 
   const extra = { ...seed, packets: [...seed.packets.slice(1)] };
@@ -462,7 +463,7 @@ test("live state that has moved past the committed seed is reported packet by pa
   const advanced = {
     ...seed,
     packets: seed.packets.map((p) =>
-      p.status === "submitted" ? { ...p, prMeta: { ...p.prMeta!, headSha: LIVE_HEAD } } : p,
+      p.id === WAVE1_PACKET_ID ? { ...p, prMeta: { ...p.prMeta!, headSha: LIVE_HEAD } } : p,
     ),
   };
   assert.equal(
@@ -626,4 +627,49 @@ test("a missing review observation is not advised while the outcome itself is a 
     true,
     `the same hole must still surface once the outcome agrees:\n${agreeing.advisory.join("\n")}`,
   );
+});
+
+test("#109: the committed seed has absorbed #1652's close", () => {
+  const packet = wave1Packet();
+  assert.equal(INFLIGHT_STATUSES.includes(packet.status), false);
+  assert.equal(packet.status, "followed-up");
+  assert.equal(packet.prMeta?.state, "closed");
+  assert.equal(packet.prMeta?.merged, false);
+  const row = seedState().scorecard.find((r) => r.repoId === "ColeMurray/background-agents")!;
+  assert.equal(row.closedUnmerged, 1);
+  assert.equal(row.noReview, 1);
+
+  const live = {
+    state: "closed" as const,
+    merged: false,
+    draft: false,
+    headSha: packet.prMeta!.headSha,
+    body: VERBATIM_BODY,
+  };
+  const { fatal, advisory } = packetChecks(packet, live);
+  assert.deepEqual(fatal, [], `absorbed close must not be a FATAL; got ${JSON.stringify(fatal)}`);
+  assert.equal(
+    advisory.some((a) => /re-witness|live PR body/.test(a)),
+    false,
+    `absorbed close must retire re-witness and disclosure; got ${JSON.stringify(advisory)}`,
+  );
+});
+
+test("#110: needsRewitness and disclosureDivergence retire after an absorbed close", () => {
+  const closed = wave1Packet();
+  assert.equal(closed.prMeta?.state, "closed");
+  assert.equal(needsRewitness(closed, LIVE_HEAD_1652), false);
+  assert.equal(
+    packetChecks(closed, {
+      state: "closed",
+      merged: false,
+      draft: false,
+      headSha: LIVE_HEAD_1652,
+      body: "no Foundry disclosure at all",
+    }).advisory.some((a) => /disclosure|re-witness/.test(a)),
+    false,
+  );
+
+  const open = submittedPacket();
+  assert.equal(needsRewitness(open, LIVE_HEAD_1652), true);
 });

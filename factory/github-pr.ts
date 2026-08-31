@@ -32,6 +32,36 @@ export function draftPullPayload(input: {
   };
 }
 
+/** Bound on every GitHub fetch. A stalled api.github.com must not hang the clock (issue #113). */
+export const GITHUB_FETCH_TIMEOUT_MS = 15_000;
+
+/** Inclusive ceiling on `FOUNDRY_GITHUB_TIMEOUT_MS`. Above this the shipped 15s bound is used. */
+export const GITHUB_FETCH_TIMEOUT_MAX_MS = 3_600_000;
+
+/**
+ * Deadline for one GitHub fetch (issue #113).
+ *
+ * `FOUNDRY_GITHUB_TIMEOUT_MS` is an integer millisecond override. A truthy invalid value
+ * (`-1`, `Infinity`, `15.5`, a non-number) used to reach `AbortSignal.timeout` and throw a
+ * RangeError before any request left — the clock and every CLI verb then died on a low-level
+ * message that did not name the env var. Those values now fall back to the shipped 15s bound.
+ */
+export function githubFetchTimeoutMs(
+  raw: string | number | undefined = process.env.FOUNDRY_GITHUB_TIMEOUT_MS,
+): number {
+  const n = typeof raw === "number" ? raw : raw == null || raw === "" ? Number.NaN : Number(raw);
+  if (Number.isInteger(n) && n >= 1 && n <= GITHUB_FETCH_TIMEOUT_MAX_MS) return n;
+  return GITHUB_FETCH_TIMEOUT_MS;
+}
+
+export function githubRequestInit(
+  extra: RequestInit = {},
+  timeoutMs: number = githubFetchTimeoutMs(),
+): RequestInit {
+  if (extra.signal) return extra;
+  return { ...extra, signal: AbortSignal.timeout(githubFetchTimeoutMs(timeoutMs)) };
+}
+
 export function githubApiHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
@@ -160,9 +190,10 @@ export async function fetchIssueState(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
-      headers: githubApiHeaders(),
-    });
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+      githubRequestInit({ headers: githubApiHeaders() }),
+    );
     if (!res.ok) {
       return { ok: false, error: `GitHub ${res.status} reading ${repoId}#${issueNumber}` };
     }
@@ -251,9 +282,10 @@ export async function fetchRepoFile(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return undefined;
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
-      headers: githubApiHeaders({ Accept: "application/vnd.github.raw" }),
-    });
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+      githubRequestInit({ headers: githubApiHeaders({ Accept: "application/vnd.github.raw" }) }),
+    );
     if (!res.ok) return undefined;
     return await res.text();
   } catch {
@@ -276,7 +308,7 @@ export async function compareCommits(
   try {
     const res = await fetchImpl(
       `https://api.github.com/repos/${owner}/${repo}/compare/${baseSha}...${headSha}`,
-      { headers: githubApiHeaders() },
+      githubRequestInit({ headers: githubApiHeaders() }),
     );
     if (!res.ok) {
       return {
@@ -468,7 +500,7 @@ async function listAllPages<T>(
   let url = firstUrl;
   const items: T[] = [];
   for (let page = 0; page < cap; page += 1) {
-    const res = await fetchImpl(url, { headers: githubApiHeaders() });
+    const res = await fetchImpl(url, githubRequestInit({ headers: githubApiHeaders() }));
     if (!res.ok) return { ok: false, error: `GitHub ${res.status} ${what}` };
     const body = await res.json();
     if (!Array.isArray(body)) return { ok: false, error: `GitHub returned a non-list ${what}` };
@@ -623,7 +655,7 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
   try {
     const res = await fetchImpl(
       `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
-      { headers: githubApiHeaders() },
+      githubRequestInit({ headers: githubApiHeaders() }),
     );
     if (!res.ok) return { ok: false as const, error: `GitHub ${res.status}` };
     const pr = (await res.json()) as {
@@ -719,16 +751,19 @@ export async function createDraftPull(
   }
   const payload = draftPullPayload(input);
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
-      method: "POST",
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "oss-foundry",
-        Authorization: `Bearer ${pat}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/pulls`,
+      githubRequestInit({
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": "oss-foundry",
+          Authorization: `Bearer ${pat}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
     const body = (await res.json().catch(() => ({}))) as {
       html_url?: string;
       number?: number;

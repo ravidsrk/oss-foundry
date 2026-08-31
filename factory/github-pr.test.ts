@@ -16,6 +16,10 @@ import {
   nextPageUrl,
   revertCheck,
   syncGithubPr,
+  githubRequestInit,
+  githubFetchTimeoutMs,
+  GITHUB_FETCH_TIMEOUT_MS,
+  GITHUB_FETCH_TIMEOUT_MAX_MS,
   MAX_LIST_PAGES,
 } from "./github-pr.ts";
 import { REVERT_WINDOW_DAYS } from "./scorecard.ts";
@@ -999,4 +1003,73 @@ test("a capped read is distinguishable from a complete one", async () => {
 test("the page cap is ten, and both list caps agree", () => {
   assert.equal(MAX_LIST_PAGES, 10);
   assert.equal(MAX_COMMIT_PAGES, 10, "the commit read and the list reads must bound alike");
+});
+
+test("#113: a hung GitHub fetch fails closed within the deadline", async () => {
+  assert.ok(GITHUB_FETCH_TIMEOUT_MS > 0 && GITHUB_FETCH_TIMEOUT_MS < 3600_000);
+  const hung: typeof fetch = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("hung fetch received no AbortSignal — githubRequestInit must attach a deadline"));
+        return;
+      }
+      const fail = () => reject(signal.reason ?? new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      if (signal.aborted) {
+        fail();
+        return;
+      }
+      signal.addEventListener("abort", fail, { once: true });
+    });
+  const prev = process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+  process.env.FOUNDRY_GITHUB_TIMEOUT_MS = "40";
+  const started = Date.now();
+  try {
+    // `AbortSignal.timeout` alone does not keep node:test's event loop alive, so a 40ms
+    // deadline would report "still pending" at ~25ms. The watchdog timer holds the loop
+    // until the abort fires (or 2s, which is the failure).
+    const result = await Promise.race([
+      compareCommits("ravidsrk/orca-fleet", BASE, HEAD, hung),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung fetch was not aborted")), 2000),
+      ),
+    ]);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /abort|timeout|This operation was aborted/i);
+    assert.ok(Date.now() - started < 2000, `hung fetch took ${Date.now() - started}ms`);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+    else process.env.FOUNDRY_GITHUB_TIMEOUT_MS = prev;
+  }
+  const init = githubRequestInit({}, 40);
+  assert.ok(init.signal, "every GitHub fetch must carry a deadline");
+});
+
+test("#113: a truthy invalid FOUNDRY_GITHUB_TIMEOUT_MS falls back to the shipped bound", () => {
+  // Number("-1") / Number("Infinity") / Number("15.5") are all truthy, so `n || DEFAULT`
+  // used to hand them to AbortSignal.timeout, which throws RangeError before any request.
+  assert.equal(githubFetchTimeoutMs(undefined), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs(""), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs("nope"), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs("0"), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs("-1"), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs("Infinity"), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs("15.5"), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs(GITHUB_FETCH_TIMEOUT_MAX_MS + 1), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs(-1), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs(Number.POSITIVE_INFINITY), GITHUB_FETCH_TIMEOUT_MS);
+  assert.equal(githubFetchTimeoutMs("40"), 40);
+  assert.equal(githubFetchTimeoutMs(40), 40);
+  assert.equal(githubFetchTimeoutMs(GITHUB_FETCH_TIMEOUT_MAX_MS), GITHUB_FETCH_TIMEOUT_MAX_MS);
+
+  const prev = process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+  process.env.FOUNDRY_GITHUB_TIMEOUT_MS = "-1";
+  try {
+    const init = githubRequestInit();
+    assert.ok(init.signal, "an invalid override must still attach the shipped deadline, not throw");
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+    else process.env.FOUNDRY_GITHUB_TIMEOUT_MS = prev;
+  }
+  assert.doesNotThrow(() => githubRequestInit({}, Number.POSITIVE_INFINITY));
 });

@@ -69,14 +69,13 @@ repos:
     language: Markdown content (repo language JavaScript)
     aiPolicy: welcome
     testCommand: "true"
+    negativeControl: no-suite
     maxFiles: 3
     maxDiffLines: 120
     sandbox: e2b
     preferredLabels: [documentation]
-    firstIssues:
-      - number: 2684
-        title: "skills/github-issues: Projects V2 reference gaps - project/field creation, singleSelectOptions overwrite semantics, view-creation limits"
-        url: https://github.com/github/awesome-copilot/issues/2684
+    firstIssues: []
+    policyNotes: "testCommand true cannot implement red-on-revert (issue #112). firstIssues #2684 parked until a suite exists that can go red on revert."
 
   - id: e2b-dev/e2b-cookbook
     wave: 1
@@ -84,6 +83,7 @@ repos:
     aiPolicy: unknown
     policyNotes: "No CONTRIBUTING.md anywhere as of 2026-08-28 - a genuinely silent repo; the gate holds until upstream writes policy or the record turns affirmative. External merges are current (multiple non-owner PRs merged in the last 14 days). Replaces e2b-dev/E2B, whose docs/examples surface was removed upstream (E2B#1769)."
     testCommand: "true"
+    negativeControl: no-suite
     maxFiles: 4
     maxDiffLines: 200
     sandbox: e2b

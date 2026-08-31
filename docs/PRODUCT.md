@@ -8,7 +8,7 @@ Operator takeover document. This is the whole product: why it exists, how it run
 | Control plane | `factory/` TypeScript + `allowlist.yaml`. Operator loop: `node --experimental-strip-types factory/cli.ts` |
 | Data plane | [ravidsrk/orca-fleet](https://github.com/ravidsrk/orca-fleet) `oss-contribute` |
 | License | MIT |
-| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **in flight**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — open and **ready for review, not draft**, as of the 2026-08-29 sync; disclosure **verbatim as recorded at open** — ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` afterwards and the live body predates it, so it no longer matches the current block (§8). Two deviations, both disclosed in §8. |
+| Status | Wave 0 **3** Foundry packets merged (2 attested promotion-gate merges on orca-fleet, plus frontguard#196). Wave 1 packet **closed unmerged**: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — maintainer completed #1476 via #1668 on 2026-08-30; slot released (issue #109). Draft-only and disclosure deviations on that PR are history, recorded in §8. |
 
 ---
 
@@ -177,8 +177,8 @@ Caps (`allowlist.yaml`): `in_flight: 1`, `first_human_freezes: 20`, `halt_merge_
 
 ### Wave 1
 
-- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (250/408 non-owner PRs merged, measured 2026-08-29 — method in `allowlist.yaml`'s `policyNotes`). First issue **#1476** (in flight as #1652)
-- `github/awesome-copilot` — Markdown content (repo language JavaScript). First issue **#2684** (skills/github-issues reference gaps, docs class); documented 🤖🤖🤖 fast track
+- `ColeMurray/background-agents` — OpenInspect. `aiPolicy: unknown` — no written AI policy; behaviorally open (250/408 non-owner PRs merged, measured 2026-08-29 — method in `allowlist.yaml`'s `policyNotes`). First issue **#1476** closed via maintainer #1668; Foundry #1652 closed unmerged 2026-08-30
+- `github/awesome-copilot` — Markdown content (repo language JavaScript). `negativeControl: no-suite` (`testCommand: true`); firstIssues empty until a suite can go red on revert (issue #112). #2684 parked
 - `e2b-dev/e2b-cookbook` — replaces e2b-dev/E2B; genuinely silent (no CONTRIBUTING anywhere), gate holds until policy exists
 - `mcp-use/mcp-use` — policy **unknown** until CONTRIBUTING parsed
 
@@ -234,11 +234,11 @@ Tests: `node --experimental-strip-types factory/run-tests.ts` (Node 22+).
 
 Promotion rule: Wave 1 may tick only after **two Foundry-attested Wave 0 merges**. That is true (#70 and #72). Historical oss-contribute (5 PRs) counts as mission evidence, not as this control plane’s counter.
 
-### Wave 1 — in flight
+### Wave 1 — closed unmerged
 
 | Packet | Issue | PRs | Status |
 |---|---|---|---|
-| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **open, ready for review — not draft**, as of the 2026-08-29 sync (converted to draft 2026-08-28T16:16:39Z, then marked ready by `ravidsrk` at 18:09:24Z), `mergeable_state=blocked`, +88/−1 across 3 files, head `6b6ff04` — the evidence covers `48c2242` only | **`submitted`** — in-flight until the quiet-day rule releases it. Do not tick another packet |
+| Right sidebar toggle icon | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | Fork [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) **closed** (draft, unmerged). Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) **closed unmerged** 2026-08-30T02:25:22Z after ColeMurray completed #1476 via #1668. Historical: opened ready-for-review (not draft), head `6b6ff04`, evidence covers `48c2242` only | **`followed-up`** — slot released. Do not re-open #1652 |
 
 Policy parsed for #1476 (operator, before open):
 
@@ -257,7 +257,7 @@ The other half of #38 was that nothing stopped this recurring. `open-draft` refu
 
 This is a **deviation, not a healing** — the same posture as the frontguard#196 operator merge above. It happened, a named human did it at a named time, it is recorded, and it does not license a second one. Issue #5 machine-enforces the moment of *contact*; nothing in this repository can stop a human clicking Ready afterwards, and this paragraph is the record that one did. The slot still releases via the quiet-day rule.
 
-The evidence is unchanged and still describes `48c2242`. Nobody re-ran the test command at `6b6ff04`, so the reviewed SHA was not re-stamped to make the clock look current; `verify-ledger` prints that gap as an outstanding advisory on every tick until the packet is re-witnessed.
+The evidence is unchanged and still describes `48c2242`. Nobody re-ran the test command at `6b6ff04`. After the 2026-08-30 close the packet is at rest — re-witness and disclosure advisories retire on an absorbed close (issue #110). Do not read that proof as covering the closed head.
 
 ### Scorecard (Foundry packets in this control plane)
 
@@ -265,7 +265,7 @@ The evidence is unchanged and still describes `48c2242`. Nobody re-ran the test 
 |---|---|---|---|---|
 | ravidsrk/orca-fleet | 2 | 2 | warm | no |
 | ravidsrk/frontguard | 1 | 1 | warm | no |
-| ColeMurray/background-agents | 1 | 0 | neutral | no |
+| ColeMurray/background-agents | 1 | 0 | neutral | no (`closedUnmerged=1`, `noReview=1`) |
 | bans | 0 | | | |
 | reverts | 0 | | | |
 
@@ -326,11 +326,9 @@ Daily:
 
 Now:
 
-- [ ] Follow ColeMurray#1652 until quiet / merged / closed. **Do not merge.**
-- [ ] Leave #1652 as the operator set it — **ready for review** since 2026-08-28T18:09:24Z. Re-drafting upstream was option (b) of issue #49 and was **not** chosen; do not flip it back without a new decision, and record it in §8 if you do
-- [ ] Re-witness #1652 at `6b6ff04` before anyone reads its evidence as covering the live head. Until then `verify-ledger` carries the gap as an advisory
-- [ ] Do not tick. #1652 is `submitted` (in-flight)
-- [ ] Do not open awesome-copilot or any other Wave 1 packet
+- [ ] #1652 is **closed unmerged**. Do not re-open it. Do not tick a replacement on completed #1476
+- [ ] The in-flight slot is free. Next Wave 1 candidate needs a real `testCommand` and a named `firstIssues` row
+- [ ] Do not open awesome-copilot or e2b-cookbook until they have a suite that can go red on revert (issue #112)
 
 Never:
 

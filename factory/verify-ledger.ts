@@ -1,3 +1,4 @@
+import { competitionAdvisories, readCompetition } from "./competition-read.ts";
 import { packetChecks } from "./ledger-check.ts";
 import { revertCheck, syncGithubPr } from "./github-pr.ts";
 import { seedState } from "./seed.ts";
@@ -63,6 +64,15 @@ for (const packet of withPr) {
   });
   fatal.push(...checks.fatal);
   advisory.push(...checks.advisory);
+  // Competing work is re-checked on the clock, not only at tick/approve/open-draft (issue #111).
+  // A closed-unmerged packet is at rest — the close FATAL/absorption owns that story.
+  const stillOpen =
+    (packet.status === "submitted" || packet.status === "followed-up") &&
+    packet.prMeta?.state !== "closed" &&
+    !packet.prMeta?.merged;
+  if (stillOpen) {
+    advisory.push(...competitionAdvisories(packet, await readCompetition(packet)));
+  }
 }
 for (const a of advisory) console.error(`ADVISORY ${a}`);
 if (fatal.length > 0) {

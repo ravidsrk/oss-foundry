@@ -48,7 +48,7 @@ SHA-bound. Copied from orca-fleet `runtime/evidence-manifest.md`:
 
 - `baseSha`, `headSha`, `reviewedSha` (must equal head at draft)
 - `testCommand`, `testExit`
-- `negativeControl`: `red-on-revert` | `pending` | `failed`
+- `negativeControl`: `red-on-revert` | `pending` | `failed` | `no-suite`
 - `filesChanged`, `diffLines` vs repo caps
 - `notes`
 
@@ -60,7 +60,7 @@ SHA-bound. Copied from orca-fleet `runtime/evidence-manifest.md`:
   - `loadFactoryState`'s `isWitness` and `parseWitnessManifest` both validate it as an optional non-empty string, because `renderEvidencePage` interpolates it into a sentence the maintainer reads.
   - **Persisted logs.** `testLogPath` / `revertLogPath` are repo-root-relative paths to the two run logs the hashes cover, written under `docs/evidence/logs/<packetId>/`. That is enforced, not assumed: `witnessLogPathViolation` requires both to equal `witnessLogPaths(packetId)` exactly, checked in `parseWitnessManifest` before `attach-witness` reads anything off disk (a manifest is operator-supplied file content, so `../../../../etc/passwd` is refused before the read, not after) and again at the gate, where it completes subject binding — a witness whose repo and range bind correctly may still not name another packet's log directory. The evidence page prints the `shasum -a 256` line that recomputes them **and names the repository they are committed in**, since the maintainer the page is written for has their own checkout, not Foundry's. `attach-witness` re-reads both logs and refuses a manifest whose hashes do not match what is on disk.
 
-A packet without `negativeControl=red-on-revert`, real (non-placeholder) `baseSha` / `headSha`, and a `witness` whose `testExit` is 0, `revertExit` is non-zero, provenance is legal for the repo, and subject matches the packet cannot enter `draft-ready`. The engine does not invent SHAs, and it does not take the operator's word for an exit code.
+A packet without `negativeControl=red-on-revert` (or `no-suite` on a repo that declares that exemption), real (non-placeholder) `baseSha` / `headSha`, and a `witness` whose `testExit` is 0, `revertExit` is non-zero (unless `no-suite`), provenance is legal for the repo, and subject matches the packet cannot enter `draft-ready`. The engine does not invent SHAs, and it does not take the operator's word for an exit code. Repos whose `testCommand` is a noop (`true`, `:`) MUST set `negativeControl: no-suite` and leave `firstIssues` empty (issue #112).
 
 ### Residual trust boundary (recorded, by design)
 
