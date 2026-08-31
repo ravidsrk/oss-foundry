@@ -58,7 +58,7 @@ const POLICY_CODES = new Set([
   "HOLD_SCOPE",
 ]);
 const LIGHTING = new Set(["lit"]);
-const NEGATIVE = new Set(["red-on-revert", "pending", "failed"]);
+const NEGATIVE = new Set(["red-on-revert", "pending", "failed", "no-suite"]);
 const SANDBOX_KINDS = new Set(["host", "e2b", "daytona"]);
 const SANDBOX_STATUSES = new Set([
   "dry-run",

@@ -6,6 +6,7 @@ import { tmp } from "./tmp-dir.ts";
 import { buildPacket } from "./packet.ts";
 import { applyReviewToScorecard, emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
+import { withOpenSubmittedWave1 } from "./seed-fixtures.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 import { evaluatePolicy } from "./policy.ts";
 
@@ -218,7 +219,7 @@ test("stored packet with dark-eligible lighting is refused", () => {
 test("a hand-edited state file with more in-flight packets than the cap is refused, not trusted", () => {
   // issue #34: the loader validated shapes only, so a drifted file with two concurrent in-flight
   // packets loaded happily even though the one-packet-in-flight invariant forbids it.
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   assert.equal(seed.packets.filter((p) => p.status === "submitted").length, 1);
   const secondInflightId = seed.packets.find((p) => p.status === "merged")!.id;
   const packets = seed.packets.map((p) =>
@@ -234,7 +235,7 @@ test("a hand-edited state file with more in-flight packets than the cap is refus
 });
 
 test("a state file at exactly the in-flight cap still loads", () => {
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   assert.equal(seed.packets.filter((p) => p.status === "submitted").length, 1);
   const path = join(tmp("foundry-"), "atcap.json");
   writeFileSync(path, JSON.stringify(seed));

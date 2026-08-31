@@ -16,6 +16,8 @@ import {
   nextPageUrl,
   revertCheck,
   syncGithubPr,
+  githubRequestInit,
+  GITHUB_FETCH_TIMEOUT_MS,
   MAX_LIST_PAGES,
 } from "./github-pr.ts";
 import { REVERT_WINDOW_DAYS } from "./scorecard.ts";
@@ -999,4 +1001,36 @@ test("a capped read is distinguishable from a complete one", async () => {
 test("the page cap is ten, and both list caps agree", () => {
   assert.equal(MAX_LIST_PAGES, 10);
   assert.equal(MAX_COMMIT_PAGES, 10, "the commit read and the list reads must bound alike");
+});
+
+test("#113: a hung GitHub fetch fails closed within the deadline", async () => {
+  assert.ok(GITHUB_FETCH_TIMEOUT_MS > 0 && GITHUB_FETCH_TIMEOUT_MS < 3600_000);
+  const hung: typeof fetch = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("hung fetch received no AbortSignal — githubRequestInit must attach a deadline"));
+        return;
+      }
+      const fail = () => reject(signal.reason ?? new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      if (signal.aborted) {
+        fail();
+        return;
+      }
+      signal.addEventListener("abort", fail, { once: true });
+    });
+  const prev = process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+  process.env.FOUNDRY_GITHUB_TIMEOUT_MS = "40";
+  const started = Date.now();
+  try {
+    const result = await compareCommits("ravidsrk/orca-fleet", BASE, HEAD, hung);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /abort|timeout|This operation was aborted/i);
+    assert.ok(Date.now() - started < 2000, `hung fetch took ${Date.now() - started}ms`);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+    else process.env.FOUNDRY_GITHUB_TIMEOUT_MS = prev;
+  }
+  const init = githubRequestInit({}, 40);
+  assert.ok(init.signal, "every GitHub fetch must carry a deadline");
 });

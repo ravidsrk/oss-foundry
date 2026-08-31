@@ -225,7 +225,7 @@ export function seedState(): FactoryState {
     contributing: "No CLA. No DCO. Conventional commits.",
   });
   sidebar = {
-    ...touch(sidebar, "submitted", "follow-up"),
+    ...touch(sidebar, "followed-up", "follow-up"),
     humanAttest: {
       by: "operator",
       at: "2026-08-27T12:00:00.000Z",
@@ -236,19 +236,20 @@ export function seedState(): FactoryState {
     prMeta: {
       url: "https://github.com/ColeMurray/background-agents/pull/1652",
       title: "feat: differentiate the right sidebar toggle icon by state",
-      // Live as of the 2026-08-29 sync (issue #49). NOT doctrine-correct: draft-only is the
-      // hardest rule this factory has, and #1652 is not a draft. The ledger records what GitHub
-      // says; `docs/12-ledger.md` and PRODUCT.md §8 carry the deviation and who caused it.
+      // Live as of the 2026-08-31 absorption (issue #109). Closed unmerged 2026-08-30T02:25:22Z
+      // after ColeMurray completed #1476 via #1668. Draft-only was already a recorded deviation
+      // (issue #49); the close is a new event, not a healing of that one.
       draft: false,
-      state: "open",
+      state: "closed",
       merged: false,
-      mergeable: "blocked",
+      mergeable: "dirty",
       commits: 7,
       reviewComments: 0,
-      issueComments: 1,
+      issueComments: 2,
       headSha: "6b6ff04079a47109263b81726a1c29459b334de5",
-      updatedAt: "2026-08-28T18:09:34Z",
-      syncedAt: "2026-08-29T05:08:48.000Z",
+      updatedAt: "2026-08-30T03:51:48Z",
+      syncedAt: "2026-08-31T13:00:00.000Z",
+      humanReview: { reviews: 0, comments: 0 },
     },
     followUps: [
       {
@@ -279,6 +280,13 @@ export function seedState(): FactoryState {
         body: "Marked ready for review by ravidsrk at 18:09:24Z, and 6b6ff04 (merge of upstream main) pushed eight seconds later. Doctrine is draft-only — ready-for-review is a human act, and a human did it; this happened and stands. Recorded, not healed: #1652 is live as ready for review, the deviation is disclosed in PRODUCT.md §8 and docs/12-ledger.md, and it does not license a second one. Evidence still covers 48c2242 only — a re-witness at 6b6ff04 is owed and the clock says so every tick.",
         url: "https://github.com/ColeMurray/background-agents/pull/1652",
       },
+      {
+        id: "fu_pr1652_closed_unmerged",
+        at: "2026-08-30T02:25:22.000Z",
+        kind: "note",
+        body: "Closed unmerged 2026-08-30T02:25:22Z. Maintainer ColeMurray completed #1476 via #1668 (cross-referenced 02:20:45Z, commit ad23bffe at 02:24:53Z). Slot released; scorecard closedUnmerged written. Do not re-open #1652; do not tick a replacement on #1476.",
+        url: "https://github.com/ColeMurray/background-agents/pull/1652",
+      },
     ],
     evidence: {
       baseSha: "217511d855e58f95cdfff82b05ebd92114fc59e2",
@@ -291,8 +299,8 @@ export function seedState(): FactoryState {
       diffLines: 89,
       notes: [
         "Opened ready, not draft (historical miss). Converted to draft 2026-08-28T16:16:39Z, then marked ready for review again by the operator at 18:09:24Z — the state it is in.",
-        "Disclosure verbatim on the live body as verified 2026-08-28 — as the block read THEN. ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` afterwards, and an open PR's body does not follow a constant, so the live body no longer matches the current block. Grandfathered and flagged, not re-stated as matching: `verify-ledger` reports it as an advisory every tick until an operator with an explicit go edits the upstream body (issue #38).",
-        "Covers 48c2242 only. 6b6ff04 landed after the review and was never witnessed; do not read this proof as covering the live head.",
+        "Disclosure verbatim on the live body as verified 2026-08-28 — as the block read THEN. ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier to `DISCLOSURE` afterwards. The PR is now closed unmerged (issue #109); disclosure and re-witness advisories retire on an absorbed close (issue #110). The historical miss stands in PRODUCT.md §8.",
+        "Covers 48c2242 only. 6b6ff04 landed after the review and was never witnessed. The packet is at rest; nobody can re-witness a closed stranger-repo PR.",
         "Fork PR #1 closed unmerged.",
       ],
     },
@@ -354,9 +362,11 @@ export function seedState(): FactoryState {
         ...row,
         opened: 1,
         merged: 0,
+        closedUnmerged: 1,
         reviewCommentsAvg: 0,
+        noReview: 1,
         maintainerTone: "neutral" as const,
-        lastTouch: "2026-08-28",
+        lastTouch: "2026-08-30",
       };
     }
     return row;
@@ -366,6 +376,14 @@ export function seedState(): FactoryState {
     version: 6,
     packets: [sidebar, unreadable, architecture, changelog, matplotlib, openhands],
     events: [
+      {
+        id: "evt_pr1652_closed_unmerged",
+        at: "2026-08-30T02:25:22.000Z",
+        kind: "follow-up",
+        packetId: sidebar.id,
+        message:
+          "ColeMurray/background-agents#1652 closed unmerged after ColeMurray completed #1476 via #1668. Slot released. Ledger absorbed 2026-08-31 (issue #109).",
+      },
       {
         id: "evt_pr1652_ready_for_review",
         at: "2026-08-28T18:09:24Z",

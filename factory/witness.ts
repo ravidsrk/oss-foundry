@@ -42,7 +42,7 @@ export type WitnessRunner = (
  * exit code we then publish as evidence. It is also the one part of the protocol a fake runner
  * cannot cover, so it needs to be importable without dragging the CLI in (`witness-host.test.ts`).
  *
- * **The shell is `bash -c`: non-login, non-interactive, inheriting this process's environment.**
+ * **The shell is `bash -c`: non-login, non-interactive, with secrets stripped from the child env.**
  * That is the whole of the contract, and each half of it was chosen against a failure:
  *
  * - **Non-login.** `bash -lc` sources `/etc/profile`, and on macOS that runs `path_helper`, which
@@ -53,16 +53,43 @@ export type WitnessRunner = (
  * - **Non-interactive, and no `$SHELL`.** The operator's login shell is not a stable contract: it
  *   may be zsh, fish, or nushell, whose `-c` semantics differ, and whose rc files are theirs to
  *   change. `bash -c` is the same shell everywhere the factory runs, including CI.
- * - **Inherited environment.** `execFile` passes `process.env` through untouched, so the witness
- *   runs under exactly the PATH the operator invoked the CLI with. `witness-check` resolves
- *   through this same function, so the pre-flight cannot disagree with the run *about the shell*.
- *   It still can about the directory — the pre-flight resolves where the operator stands and the
- *   witness inside the clone — which is why `witness.toolchain` records what the run used rather
- *   than what the pre-flight predicted (`resolveToolchain`'s `cwd`, docs/08-operations.md).
+ * - **Isolated environment.** `execFile` used to inherit `process.env` wholesale, so a Wave 0
+ *   `setupCommand` (`npm ci` on frontguard) ran lifecycle scripts with `FOUNDRY_PAT` in the
+ *   child's environment (issue #114). The child now gets `witnessChildEnv()`: PATH and toolchain
+ *   vars pass through; machine-account and platform secrets do not. `witness-check` reports the
+ *   isolation, not inheritance.
  *
  * A repo needing anything more than this declares it as `setupCommand` in `allowlist.yaml`, where
  * it is visible, rather than relying on a profile nobody reads.
  */
+
+/** Names a host-witness child must never see. The operator shell still holds them for `open-draft`. */
+export const WITNESS_SECRET_KEYS = [
+  "FOUNDRY_PAT",
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "E2B_API_KEY",
+] as const;
+
+/**
+ * The env a clone's `setupCommand` / `testCommand` runs under (issue #114).
+ *
+ * Copies the parent environment and strips the secrets the factory holds for GitHub writes and
+ * the E2B worker. Presence of `E2B_API_KEY` is still read by `witnessEvidence` from the *caller*
+ * env — that check never reaches this child.
+ */
+export function witnessChildEnv(
+  from: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(from)) {
+    if (value === undefined) continue;
+    if ((WITNESS_SECRET_KEYS as readonly string[]).includes(key)) continue;
+    env[key] = value;
+  }
+  return env;
+}
+
 export const hostRunner: WitnessRunner = (step, args, opts) => {
   /**
    * Handled before the `execFile` shapes below because it is the one step with no command: the OS
@@ -95,7 +122,11 @@ export const hostRunner: WitnessRunner = (step, args, opts) => {
       : step === "cleanup"
         ? ["rm", ["-rf", ...args]]
         : ["bash", ["-c", args[0] ?? "false"]]; // run-setup, probe and both run-tests phases execute the repo's own commands
-  execFile(cmd, cmdArgs, { cwd: opts?.cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+  execFile(
+    cmd,
+    cmdArgs,
+    { cwd: opts?.cwd, env: witnessChildEnv(), maxBuffer: 16 * 1024 * 1024 },
+    (err, stdout, stderr) => {
     // `ExecException.code` is already typed `number | undefined`, so the shape needs narrowing, not
     // an assertion: a signal-killed child reports `signal` with no numeric code and must read as 1.
     const exit = !err ? 0 : typeof err.code === "number" ? err.code : 1;

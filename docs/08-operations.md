@@ -35,8 +35,8 @@ for anything a human must resolve. Neither command rewrites doctrine on its own.
 `evidence` clones the repo and runs its `testCommand` twice. Two things about *how* it runs it are
 load-bearing enough that an operator should not have to read `factory/witness.ts` to learn them.
 
-**The shell is `bash -c` — non-login, non-interactive, inheriting the environment the CLI was
-started with.** Not the operator's `$SHELL`, and deliberately not a login shell:
+**The shell is `bash -c` — non-login, non-interactive, with secrets stripped from the child
+environment.** Not the operator's `$SHELL`, and deliberately not a login shell:
 
 - A login shell (`bash -lc`) sources `/etc/profile`, and on macOS that runs `path_helper`, which
   rebuilds `PATH` from `/etc/paths` with `/usr/bin` ahead of everything the operator installed —
@@ -45,6 +45,10 @@ started with.** Not the operator's `$SHELL`, and deliberately not a login shell:
   3.10-only syntax at head, and the refusal was indistinguishable from a bad patch (issue #41).
 - `$SHELL -c` is not a contract: zsh, fish and nushell differ on `-c`, and their rc files are the
   operator's to change. `bash -c` is the same shell on every machine the factory runs on.
+- Isolated environment. The child gets `PATH` and toolchain vars; it does not get `FOUNDRY_PAT`,
+  `GITHUB_TOKEN`, `GH_TOKEN`, or `E2B_API_KEY` (issue #114). Those stay in the CLI process for
+  `open-draft`. A Wave 0 `setupCommand` (`npm ci` on frontguard) must not run lifecycle scripts
+  with the machine-account PAT in its environment.
 
 So: whatever `python3` your terminal resolves is what the witness resolves. A repo that needs more
 than that declares it as `setupCommand` in `allowlist.yaml`, where it is visible, rather than
@@ -98,12 +102,12 @@ is still a procedure: reject the in-flight packets and stop pressing tick. The G
 
 Every 6 hours, **or** operator `tick`. Never both overlapping. One packet in flight, including `submitted`.
 
-## Current (2026-08-29)
+## Current (2026-08-31)
 
 1. Wave 0 attested 2/2: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72).
 2. [frontguard#196](https://github.com/ravidsrk/frontguard/pull/196) merged by `ravidsrk`. Do not repeat operator-merge on a Foundry packet.
-3. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — **ready for review, not draft**, as of the 2026-08-29 sync; marked ready by `ravidsrk` at 2026-08-28T18:09:24Z. Do not repeat ready-for-review on a Foundry packet. Follow up. Do not merge. Do not tick.
-4. #1652's evidence was witnessed at `48c2242`; the branch is at `6b6ff04`. A re-witness is owed — the clock says so every tick and will not stop until someone re-runs it.
+3. Wave 1 [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) **closed unmerged** 2026-08-30T02:25:22Z after ColeMurray completed #1476 via #1668. Slot released. Do not re-open #1652.
+4. #1652's evidence still covers `48c2242` only. The packet is at rest; re-witness and disclosure advisories retired on the absorbed close (issues #109 / #110).
 
 ## What stops the clock
 
@@ -118,15 +122,10 @@ things and gates on only one.
   clock measures a live system it has no authority over. Resolve a divergence by deciding what is
   true and syncing the seed, or by changing the live state. Never by relaxing the check.
 - An **advisory** is a debt on a seed that already reconciles. It prints on the same terminal and
-  exits 0. Today there are exactly two, both on #1652:
-  1. Its evidence covers `48c2242` and the branch has moved to `6b6ff04`. No commit to this
-     repository can clear it — only a sandbox re-run against the upstream branch can.
-  2. Its body carries the disclosure block as recorded at open, which ADR 0004's
-     `(ravidsrk/oss-foundry)` qualifier moved past. No commit here can clear that one either: the
-     only cure is editing a pull request on a repository this project does not own, which is an
-     outward-facing write needing an explicit operator go. Already-open PRs are grandfathered and
-     flagged, never re-stated as matching — the policy is beside the constant in
-     `factory/neighbor.ts` (issue #38).
+  exits 0. As of the 2026-08-31 absorption those two #1652 lines (re-witness at `48c2242` vs
+  `6b6ff04`, and the pre-ADR-0004 disclosure body) are retired: a closed-unmerged packet is at
+  rest (issue #110). The same two debts still fire on a *still-open* `submitted` / `followed-up`
+  packet — the predicates did not go away.
 
   Both share the shape that decides the bucket. Gating CI on either would leave `main` red for days
   with nothing mergeable that fixes it, which is the precise pressure that gets an evidence SHA

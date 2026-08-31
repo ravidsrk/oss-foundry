@@ -82,6 +82,16 @@ export function assertAllowlist(parsed: ParsedAllowlist): void {
     if (repo.wave >= 1 && repo.sandbox === "host") {
       throw new Error(`allowlist.yaml: Wave 1+ repo ${repo.id} must not use host sandbox`);
     }
+    if (isNoopTestCommand(repo.testCommand) && repo.negativeControl !== "no-suite") {
+      throw new Error(
+        `allowlist.yaml: ${repo.id} testCommand \`${repo.testCommand}\` cannot implement red-on-revert — set negativeControl: no-suite and leave firstIssues empty (issue #112)`,
+      );
+    }
+    if (repo.negativeControl === "no-suite" && repo.firstIssues.length > 0) {
+      throw new Error(
+        `allowlist.yaml: ${repo.id} is negativeControl: no-suite so it cannot name firstIssues — a packet there cannot be witnessed (issue #112)`,
+      );
+    }
   }
 }
 
@@ -122,6 +132,10 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
   const setupCommand = r.setupCommand === undefined ? undefined : String(r.setupCommand);
   const testCommand = String(r.testCommand ?? "");
   if (!testCommand) throw new Error(`allowlist.yaml: ${id} needs testCommand`);
+  const negativeControl = r.negativeControl === undefined ? "red-on-revert" : String(r.negativeControl);
+  if (negativeControl !== "red-on-revert" && negativeControl !== "no-suite") {
+    throw new Error(`allowlist.yaml: ${id} bad negativeControl`);
+  }
   const preferredLabels = asArray(r.preferredLabels).map((x) => String(x));
   const firstIssues = asArray(r.firstIssues).map((row) => {
     const i = row as Record<string, unknown>;
@@ -143,6 +157,7 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
     policyNotes: String(r.policyNotes ?? ""),
     setupCommand,
     testCommand,
+    negativeControl: negativeControl as AllowlistedRepo["negativeControl"],
     maxFiles,
     maxDiffLines,
     sandbox,
@@ -150,6 +165,12 @@ function hydrateRepo(r: Record<string, unknown>): AllowlistedRepo {
     preferredLabels,
     firstIssues,
   };
+}
+
+/** Commands that are green at head and green after revert — they cannot implement SPEC.md §5. */
+export function isNoopTestCommand(command: string): boolean {
+  const trimmed = command.trim();
+  return trimmed === "true" || trimmed === ":";
 }
 
 function asArray(value: unknown): unknown[] {

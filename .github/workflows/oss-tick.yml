@@ -12,6 +12,8 @@ on:
 jobs:
   tick:
     runs-on: ubuntu-latest
+    # Bound well under the 6-hour schedule so a hung api.github.com cannot overlap the next tick (issue #113).
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write

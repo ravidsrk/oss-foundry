@@ -13,9 +13,9 @@ Foundry is the control plane in front of [orca-fleet `oss-contribute`](https://g
 | Allowlist | [`allowlist.yaml`](allowlist.yaml) — the only source |
 | Clock | [`.github/workflows/oss-tick.yml`](.github/workflows/oss-tick.yml) — dry by default, **never opens contribution PRs** |
 
-## Status (2026-08-29)
+## Status (2026-08-31)
 
-Wave 0 attested merges: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72). frontguard [PR #196](https://github.com/ravidsrk/frontguard/pull/196) also merged. Wave 1 in flight: [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) — **ready for review, not draft**, as of the 2026-08-29 sync. Draft-only is the hard rule; `ravidsrk` marked it ready on 2026-08-28 and that stands. Recorded as a deviation, not a pattern — [`docs/12-ledger.md`](docs/12-ledger.md). Its disclosure block is **verbatim as recorded at open**: ADR 0004 added the `(ravidsrk/oss-foundry)` qualifier afterwards, and an open PR's body does not follow a constant, so the live body no longer matches the current block. Grandfathered and flagged, not re-stated as matching — the clock reports it every tick ([issue #38](https://github.com/ravidsrk/oss-foundry/issues/38)). Follow up until quiet/merged/closed. **Do not merge. Do not tick.**
+Wave 0 attested merges: [orca-fleet#70](https://github.com/ravidsrk/orca-fleet/pull/70), [orca-fleet#72](https://github.com/ravidsrk/orca-fleet/pull/72). frontguard [PR #196](https://github.com/ravidsrk/frontguard/pull/196) also merged. Wave 1 [ColeMurray/background-agents#1652](https://github.com/ColeMurray/background-agents/pull/1652) **closed unmerged** 2026-08-30 after the maintainer completed #1476 via #1668. Slot released. Draft-only and disclosure deviations on that PR are history — [`docs/12-ledger.md`](docs/12-ledger.md), [`docs/PRODUCT.md`](docs/PRODUCT.md) §8. **Do not re-open #1652.**
 
 ## v1
 

@@ -6,12 +6,13 @@ import { evidenceIsStale, needsRewitness, packetDivergences } from "./ledger-che
 import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket, POLICY_DOC_EXCERPT_LIMIT, renderEvidencePage, renderFreezeEvidence } from "./packet.ts";
 import { seedState } from "./seed.ts";
+import { asOpenSubmitted, wave1Packet } from "./seed-fixtures.ts";
 
 /** Synthetic, and deliberately sharing no abbreviated prefix with any SHA in the seed. */
 const LIVE_HEAD = "facade00c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6";
 
 test("the evidence page says when the PR moved past the witnessed commit", () => {
-  const packet = seedState().packets.find((p) => p.status === "submitted")!;
+  const packet = asOpenSubmitted(wave1Packet());
   const witnessed = packet.evidence!.reviewedSha!;
 
   // Control: witnessed head === recorded head, nothing to warn about. Constructed rather than

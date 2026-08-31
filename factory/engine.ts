@@ -461,7 +461,9 @@ export function witnessProvenanceViolation(
   // byte-for-byte the same output green and red, which for an empty log (`e3b0c442…` twice, what a
   // `testCommand: "true"` repo produces) is the hash of nothing offered twice as proof. The exit
   // codes may differ while the logs do not, so this is not implied by the `revertExit` check.
-  if (w.testLogSha === w.revertLogSha) {
+  // Repos that declare `negativeControl: no-suite` (issue #112) are the documented exemption:
+  // there is no suite that can go red, so identical logs are the honest result, not a lie.
+  if (w.testLogSha === w.revertLogSha && repo.negativeControl !== "no-suite") {
     return `witness test and revert logs hash to the same sha256 ${w.testLogSha.slice(0, 12)}… — two runs that produced identical output are not a negative control, and the recompute offer on the evidence page resolves to one file's worth of nothing`;
   }
   // Subject binding is not complete while the log paths are free: a witness whose repo and range
@@ -473,14 +475,21 @@ export function witnessProvenanceViolation(
 export function evidenceIsReady(packet: TaskPacket | undefined): boolean {
   const evidence = packet?.evidence;
   if (!packet || !evidence) return false;
-  if (evidence.negativeControl !== "red-on-revert") return false;
+  const repo = repoById(packet.repoId);
+  const noSuite = repo?.negativeControl === "no-suite";
+  if (noSuite) {
+    if (evidence.negativeControl !== "no-suite") return false;
+  } else if (evidence.negativeControl !== "red-on-revert") {
+    return false;
+  }
   if (evidence.testExit !== 0) return false;
   if (!isBoundSha(evidence.baseSha) || !isBoundSha(evidence.headSha)) return false;
   if (evidence.baseSha.toLowerCase() === evidence.headSha.toLowerCase()) return false;
   if (evidence.shaVerified !== true) return false;
   // Witnessed, not attested: the sandbox must have executed both runs itself (issue #6).
   if (!evidence.witness) return false;
-  if (evidence.witness.testExit !== 0 || evidence.witness.revertExit === 0) return false;
+  if (evidence.witness.testExit !== 0) return false;
+  if (!noSuite && evidence.witness.revertExit === 0) return false;
   // Provenanced, not merely shaped: the right sandbox, this packet, this range (issue #36).
   if (witnessProvenanceViolation(packet, evidence)) return false;
   return true;
@@ -628,6 +637,20 @@ export function classifyCompetition(
   const branch = input.pulls.find((pull) => branchMentionsIssue(pull.headRef, issueNumber));
   if (branch) return { kind: "adjacent", url: branch.url, why: "branch-name" };
   return { kind: "clear" };
+}
+
+/**
+ * Advisory for a submitted/followed-up packet whose own PR is still open when a competitor appears
+ * (issue #111). Closed-unmerged packets are at rest — the close FATAL/absorption owns that story.
+ */
+export function competingWorkAdvisory(
+  packet: TaskPacket,
+  verdict: CompetitionVerdict,
+): string | undefined {
+  if (packet.status !== "submitted" && packet.status !== "followed-up") return undefined;
+  if (packet.prMeta?.state === "closed" || packet.prMeta?.merged) return undefined;
+  if (verdict.kind !== "competing") return undefined;
+  return `${packet.id}: competing PR ${verdict.url} (${verdict.why}) — stand down; do not open another draft`;
 }
 
 /**

@@ -14,6 +14,7 @@ import { DISCLOSURE } from "./neighbor.ts";
 import { buildPacket } from "./packet.ts";
 import { emptyScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
+import { WAVE1_PACKET_ID, wave1Packet, withOpenSubmittedWave1 } from "./seed-fixtures.ts";
 import type { FactoryState } from "./types.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -320,13 +321,13 @@ function runClock(
   return runNode(CLOCK, [], tmpdir(), { preload: prFactsStub(table, commits, commitReads) });
 }
 
-/** The seed with its in-flight packet rewound to draft-ready, so `open-draft` is the next step. */
+/** The seed with its Wave 1 packet rewound to draft-ready, so `open-draft` is the next step. */
 function draftReadyState(): FactoryState {
   const seed = seedState();
   return {
     ...seed,
     packets: seed.packets.map((p) =>
-      p.status === "submitted"
+      p.id === WAVE1_PACKET_ID
         ? {
             ...p,
             status: "draft-ready" as const,
@@ -443,12 +444,12 @@ test("status warns when the live state file has drifted from the committed seed"
   const drifted: FactoryState = {
     ...seed,
     packets: seed.packets.map((p) =>
-      p.status === "submitted" ? { ...p, status: "followed-up" as const } : p,
+      p.id === WAVE1_PACKET_ID ? { ...p, status: "parked" as const } : p,
     ),
   };
   const out = runCli(["status", "--state", writeState(drifted)], tmpdir()).out;
   assert.match(out, /SEED DRIFT/);
-  assert.match(out, /followed-up/);
+  assert.match(out, /parked/);
 
   const clean = runCli(["status", "--state", writeState(seed)], tmpdir()).out;
   assert.equal(/SEED DRIFT/.test(clean), false);
@@ -692,31 +693,18 @@ test("witness-check narrows to one repo and refuses one that is not on the allow
 });
 
 /**
- * The in-flight packet the fatal/advisory split was built around: the committed seed names #1652's
- * live head (the #49 sync), and the evidence still covers a commit two pushes back — a debt no
- * commit to THIS repository can clear, only a sandbox re-run upstream. Read off the seed rather
- * than re-typed: `ledger-check.test.ts` pins the SHAs and the classifier; what the three tests
- * below pin is what the two consumers that print and exit DO with the split.
+ * Wave 1 packet the clock reconciles. After issue #109 it is `followed-up` with an absorbed
+ * close — re-witness and disclosure advisories retire (issue #110). Tests that still need an
+ * open submitted packet use `withOpenSubmittedWave1`.
  */
-const INFLIGHT = seedState().packets.find((p) => p.status === "submitted")!;
+const INFLIGHT = wave1Packet();
 /** A head no packet records — GitHub having moved somewhere the committed ledger does not claim. */
 const UNRECORDED_HEAD = "b0a7edc0ffee11223344556677889900aabbccdd";
 
-test("the clock exits 0 on a ledger that reconciles and still names the debt it cannot clear", () => {
-  // The exit-code decision issue #49 exists to change, at the only place it is made. Both halves
-  // are load-bearing and each is trivially satisfiable alone: gating on advisories reds the default
-  // branch for days over a debt no merge can pay, and dropping the print erases the debt instead —
-  // operationally the same act as re-stamping `evidence.reviewedSha`, which is the dishonesty #43
-  // made impossible in the classifier. The clock must say the ledger reconciles AND say the proof
-  // is behind, and mean both.
-  const witnessed = INFLIGHT.evidence!.reviewedSha!;
-  const live = INFLIGHT.prMeta!.headSha;
-  assert.notEqual(
-    witnessed,
-    live,
-    "the committed seed owes no re-witness any more — re-point this test at the packet that does, or retire it; it cannot pass vacuously",
-  );
-
+test("the clock exits 0 on the absorbed #1652 close with no immortal advisories", () => {
+  // issue #109 / #110: once the seed records the close, the clock reconciles and the re-witness
+  // / disclosure lines retire. An advisory that cannot go green is the failure the predicates
+  // were written to avoid.
   const run = runClock(livePrs());
   assert.equal(run.code, 0, `a ledger GitHub agrees with must not stop the clock:\n${run.out}`);
   assert.equal(/DIVERGENCE/.test(run.out), false, run.out);
@@ -725,15 +713,8 @@ test("the clock exits 0 on a ledger that reconciles and still names the debt it 
     new RegExp(`ledger ok: ${seedState().packets.filter((p) => p.prUrl).length} packets match GitHub`),
     run.out,
   );
-  // The advisory LINE, not the summary's count of it. Deleting the `ADVISORY` print still leaves
-  // `; 1 advisory outstanding (see above)` on stdout pointing at nothing, so a count assertion on
-  // its own stays green over exactly the silence this asserts against.
-  assert.match(
-    run.out,
-    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${witnessed.slice(0, 7)}.*${live.slice(0, 7)}`, "m"),
-    `the clock must name both SHAs of the outstanding re-witness:\n${run.out}`,
-  );
-  assert.match(run.stdout, /1 advisory outstanding/, run.out);
+  assert.equal(/ADVISORY/.test(run.out), false, `absorbed close must not keep printing:\n${run.out}`);
+  assert.doesNotMatch(run.stdout, /advisory outstanding/);
 });
 
 test("the clock exits 1 on a ledger GitHub contradicts, with the advisory printed beside it", () => {
@@ -752,10 +733,10 @@ test("the clock exits 1 on a ledger GitHub contradicts, with the advisory printe
     run.out,
   );
   assert.equal(/ledger ok/.test(run.stdout), false, `a stopped clock must not also report success:\n${run.out}`);
-  assert.match(
-    run.out,
-    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${INFLIGHT.evidence!.reviewedSha!.slice(0, 7)}`, "m"),
-    `the re-witness debt is still owed and must not be swallowed by the divergence:\n${run.out}`,
+  assert.equal(
+    /ADVISORY/.test(run.out),
+    false,
+    `an absorbed close does not owe a re-witness advisory:\n${run.out}`,
   );
 });
 
@@ -790,14 +771,14 @@ test("reconcile calls a contradiction DIVERGENCE and a re-witness debt ADVISORY,
       `a ledger GitHub contradicts is a DIVERGENCE, never an advisory:\n${run.out}`,
     );
   }
-  assert.match(
-    run.out,
-    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${INFLIGHT.evidence!.reviewedSha!.slice(0, 7)}`, "m"),
-    `a debt on a ledger that already reconciles is an ADVISORY, never a divergence:\n${run.out}`,
+  assert.equal(
+    new RegExp(`^ADVISORY ${INFLIGHT.id}:`, "m").test(run.out),
+    false,
+    `an absorbed close must not keep a re-witness advisory:\n${run.out}`,
   );
   assert.match(
     run.stdout,
-    new RegExp(`divergences=${claimedMerged.length} advisories=1`),
+    new RegExp(`divergences=${claimedMerged.length} advisories=0`),
     `the counters must follow the buckets they count:\n${run.out}`,
   );
 });
@@ -835,34 +816,26 @@ test("the clock names the live disclosure drift it cannot fix, and still exits 0
 
   assert.equal(run.code, 0, `a body no commit here can edit must not stop the clock:\n${run.out}`);
   assert.equal(/DIVERGENCE/.test(run.out), false, run.out);
-  // The DRIFT, specifically — not merely the word "disclosure". `disclosureDivergence` also
-  // reports "the body was not supplied", and a call site that stopped passing `synced.body` would
-  // still print a line containing "disclosure": the looser assertion passed under exactly the
-  // wiring mutation this test exists to catch.
-  assert.match(
-    run.out,
-    new RegExp(`^ADVISORY ${INFLIGHT.id}: live PR body carries a Foundry disclosure that is not the current block`, "m"),
-    `the clock must read the live body and name the drift it found:\n${run.out}`,
+  // issue #110: an absorbed close is at rest. The grandfathered body is history; the clock
+  // must not keep printing a line nobody can clear.
+  assert.equal(
+    /ADVISORY/.test(run.out),
+    false,
+    `absorbed close must retire the disclosure advisory:\n${run.out}`,
   );
-  // Beside the re-witness debt, not instead of it: two independent debts on the same packet, and a
-  // check that reported only the newer one would have quietly retired the older.
-  assert.match(
-    run.out,
-    new RegExp(`^ADVISORY ${INFLIGHT.id}: .*${INFLIGHT.evidence!.reviewedSha!.slice(0, 7)}`, "m"),
-    `the re-witness debt must survive alongside the disclosure drift:\n${run.out}`,
-  );
-  assert.match(run.stdout, /2 advisory outstanding/, run.out);
 });
 
 test("reconcile prints the disclosure drift as an ADVISORY and counts it", () => {
   // The split's other consumer. A classifier that buckets correctly behind a call site that never
   // passes the body reports nothing, and the two verbs an operator reads would disagree about
   // whether the doctrine is being checked at all.
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const path = writeState(seed);
   const drifted = `## Summary\n\nFixes #1476\n\n## Disclosure\n\n${LIVE_DISCLOSURE_1652}\n`;
   const run = runCli(["reconcile", "--state", path], tmpdir(), {
-    preload: prFactsStub(livePrs({ [INFLIGHT.prUrl!]: { body: drifted } })),
+    preload: prFactsStub(
+      livePrs({ [INFLIGHT.prUrl!]: { body: drifted, state: "open", merged: false } }),
+    ),
   });
 
   assert.equal(run.code, 0, run.out);
@@ -1151,9 +1124,6 @@ test("tick stands down on a named first issue GitHub has already closed", () => 
       closedBy: "ravidsrk",
       closedByPr: "https://github.com/ravidsrk/orca-fleet/pull/72",
     },
-    // A roster row whose number turns out to name a pull request. Same read, same refusal — the
-    // issues endpoint serves both, so without this the config error reads as a healthy issue.
-    "github/awesome-copilot#2684": { state: "open", isPr: true },
   });
   const path = writeState(emptyLedger());
   const ticked = runCli(["tick", "--state", path], tmpdir(), { preload: stub.preload });
@@ -1169,7 +1139,6 @@ test("tick stands down on a named first issue GitHub has already closed", () => 
   assert.match(ticked.out, /stand down: ravidsrk\/orca-fleet#71 is closed/, ticked.out);
   // Who resolved it, so the operator can go look rather than guess.
   assert.match(ticked.out, /pull\/72/, ticked.out);
-  assert.match(ticked.out, /github\/awesome-copilot#2684 is a pull request, not an issue/, ticked.out);
 
   const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
   assert.equal(
@@ -1756,7 +1725,7 @@ test("the revert verb records a maintainer-stated rollback, halts the repo, and 
   );
 
   // A packet that was never merged has nothing to revert.
-  const inflight = seed.packets.find((p) => p.status === "submitted")!;
+  const inflight = seed.packets.find((p) => p.id === WAVE1_PACKET_ID)!;
   const refused = runCli(["revert", inflight.id, "--reason", reason, "--state", path], tmpdir());
   assert.equal(refused.code, 1, refused.out);
   assert.match(refused.out, /never merged/);
@@ -1901,7 +1870,7 @@ test("revert dates the window from the rollback the operator names, not from whe
 test("sync folds the human review split into the scorecard when the PR reaches a terminal state", () => {
   // The end-to-end shape of issue #39's first two bullets: GitHub's review endpoints, through the
   // bot filter, into the two KPI columns the ledger prints.
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const path = writeState(seed);
   const inflight = seed.packets.find((p) => p.status === "submitted")!;
   const run = runCli(["sync", inflight.id, "--threads-answered", "--state", path], tmpdir(), {
@@ -1933,7 +1902,7 @@ test("sync folds the human review split into the scorecard when the PR reaches a
 });
 
 test("sync counts a silently merged PR as noReview, and the ledger prints it", () => {
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const path = writeState(seed);
   const inflight = seed.packets.find((p) => p.status === "submitted")!;
   const run = runCli(["sync", inflight.id, "--threads-answered", "--state", path], tmpdir(), {
@@ -2085,7 +2054,7 @@ test("a merge reconcile absorbs in the same run is counted once, by the transiti
   //
   // The guard is that the recovery tests the packet as the ledger held it BEFORE this run, so a
   // transition `applyPrSync` is about to handle is never also "recovered".
-  const seed = seedState();
+  const seed = withOpenSubmittedWave1();
   const submitted = seed.packets.find((p) => p.status === "submitted")!;
   const before = seed.scorecard.find((r) => r.repoId === submitted.repoId)!;
   const path = writeState(seed);

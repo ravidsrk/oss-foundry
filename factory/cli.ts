@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALLOWLIST, repoById } from "./allowlist.ts";
+import { readCompetition } from "./competition-read.ts";
 import {
   applyAdvance,
   applyApprove,
@@ -15,6 +16,7 @@ import {
   applyTick,
   bindingFromCompare,
   classifyCompetition,
+  competingWorkAdvisory,
   evidenceBindingViolation,
   isBoundSha,
   findCompetingPull,
@@ -781,7 +783,12 @@ async function main() {
       headSha: head,
       testCommand: repo.testCommand,
       testExit: outcome.witness.testExit,
-      negativeControl: outcome.witness.revertExit !== 0 ? "red-on-revert" : "failed",
+      negativeControl:
+        repo.negativeControl === "no-suite"
+          ? "no-suite"
+          : outcome.witness.revertExit !== 0
+            ? "red-on-revert"
+            : "failed",
       filesChanged: compared.filesChanged,
       diffLines: compared.diffLines,
       notes: [`witnessed via CLI (${outcome.witness.provider}); logs sha256 ${outcome.witness.testLogSha.slice(0, 12)}/${outcome.witness.revertLogSha.slice(0, 12)} kept at ${outcome.witness.testLogPath} and ${outcome.witness.revertLogPath}`],
@@ -816,7 +823,9 @@ async function main() {
     }
     const repos = named ? [named] : ALLOWLIST;
     console.log("witness pre-flight — what the `evidence` verb would run on THIS machine");
-    console.log("shell: bash -c (non-login, non-interactive; inherits this process's environment)");
+    console.log(
+      "shell: bash -c (non-login, non-interactive; child env omits FOUNDRY_PAT, GITHUB_TOKEN, GH_TOKEN, E2B_API_KEY)",
+    );
     // Said out loud because it is the one way this report can be wrong: the witness resolves
     // inside the clone, where a repo that pins its interpreter selects its own.
     console.log(
@@ -904,7 +913,12 @@ async function main() {
       headSha: witness.headSha,
       testCommand,
       testExit: witness.testExit,
-      negativeControl: witness.revertExit !== 0 ? "red-on-revert" : "failed",
+      negativeControl:
+        repo.negativeControl === "no-suite"
+          ? "no-suite"
+          : witness.revertExit !== 0
+            ? "red-on-revert"
+            : "failed",
       filesChanged: compared.filesChanged,
       diffLines: compared.diffLines,
       notes: [
@@ -1152,6 +1166,24 @@ async function main() {
         // neither can forget it — this unit shipped that defect twice before.
         reviewTruncated: synced.reviewTruncated,
       });
+      const stillOpen =
+        (packet.status === "submitted" || packet.status === "followed-up") &&
+        synced.meta.state !== "closed" &&
+        !synced.meta.merged;
+      if (stillOpen) {
+        const competition = await readCompetition(packet);
+        if (!competition.ok) {
+          owed.push(
+            `${packet.id}: could not re-check competing work on ${packet.repoId} — a closing-keyword PR would go unnoticed this run (${competition.error})`,
+          );
+        } else {
+          const line = competingWorkAdvisory(
+            next.packets.find((p) => p.id === packet.id)!,
+            competition.verdict,
+          );
+          if (line) owed.push(line);
+        }
+      }
       doctrine.push(...checks.fatal);
       owed.push(...checks.advisory);
     }
@@ -1255,6 +1287,18 @@ async function main() {
     console.log(
       `synced ${id} → ${after?.status}  quiet=${quietDaysOf(synced.meta, new Date().toISOString())}d  draft=${synced.meta.draft} state=${synced.meta.state} merged=${synced.meta.merged}`,
     );
+    // Re-check competing work on a still-open submitted/followed-up packet (issue #111).
+    if (after && synced.meta.state !== "closed" && !synced.meta.merged) {
+      const competition = await readCompetition(after);
+      if (!competition.ok) {
+        console.error(
+          `ADVISORY ${id}: could not re-check competing work on ${after.repoId} — ${competition.error}`,
+        );
+      } else {
+        const line = competingWorkAdvisory(after, competition.verdict);
+        if (line) console.error(`ADVISORY ${line}`);
+      }
+    }
     return;
   }
 

@@ -1,4 +1,4 @@
-# Live ledger — 2026-08-29
+# Live ledger — 2026-08-31
 
 Operator snapshot. Foundry does not merge. Seed: `factory/seed.ts`. The block between the
 GENERATED markers is emitted by `node --experimental-strip-types factory/cli.ts ledger` — regenerate
@@ -20,7 +20,7 @@ merges/closes into local state without ever releasing the in-flight slot.
 
 | packet | issue | PR | status | attested by |
 |---|---|---|---|---|
-| pkt_ColeMurray_background-agents_1476 | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | https://github.com/ColeMurray/background-agents/pull/1652 | submitted | operator |
+| pkt_ColeMurray_background-agents_1476 | [ColeMurray/background-agents#1476](https://github.com/ColeMurray/background-agents/issues/1476) | https://github.com/ColeMurray/background-agents/pull/1652 | followed-up | operator |
 
 ### Wave 2
 
@@ -40,14 +40,14 @@ Foundry-attested Wave 0 merges: 3 (promotion gate: 2).
 
 - ravidsrk/orca-fleet: opened=2 merged=2 closedUnmerged=0 noReview=1 tone=warm
 - ravidsrk/frontguard: opened=1 merged=1 closedUnmerged=0 noReview=1 tone=warm
-- ColeMurray/background-agents: opened=1 merged=0 closedUnmerged=0 noReview=0 tone=neutral
+- ColeMurray/background-agents: opened=1 merged=0 closedUnmerged=1 noReview=1 tone=neutral
 - bans: 0  mergedTotal: 3
 <!-- /GENERATED -->
 
 Promotion gate (two attested Wave 0 merges on orca-fleet): **passed** (#70, #72).
 frontguard#196 was merged by the operator — recorded, not a promotion-gate merge, not a pattern.
 Fork rehearsal [ravidsrk/background-agents#1](https://github.com/ravidsrk/background-agents/pull/1) is **closed** (draft, unmerged).
-Do **not** open the compare URL again. The upstream PR exists. Follow up. Do not merge.
+Upstream [ColeMurray#1652](https://github.com/ColeMurray/background-agents/pull/1652) is **closed unmerged** (2026-08-30T02:25:22Z) after ColeMurray completed #1476 via #1668. Slot released. Do not re-open #1652.
 
 ## Corrections — 2026-08-28 (issue #3)
 
@@ -277,18 +277,37 @@ is recorded, and it does not license a second one. What changed:
 5. `verify-ledger` now separates a **divergence** (the ledger contradicting GitHub — SPEC.md §7,
    still fatal, still reds `main`) from an **advisory** (a debt on a ledger that already
    reconciles — printed every tick, never a gate). See "What stops the clock" in
-   `docs/08-operations.md`. Two advisories are outstanding on #1652 as of 2026-08-29: the
-   re-witness gap, and the disclosure drift issue #38 added (Next, item 2).
+   `docs/08-operations.md`. Two advisories were outstanding on #1652 as of 2026-08-29: the
+   re-witness gap, and the disclosure drift issue #38 added. Both retired when the close was
+   absorbed (issues #109 / #110) — a closed stranger-repo PR is at rest.
+
+## Corrections — 2026-08-31 (issues #109–#114)
+
+1. **#1652 closed unmerged.** ColeMurray completed #1476 via #1668 at 2026-08-30T02:24:53Z and
+   closed Foundry's #1652 29 seconds later. The committed seed still said `submitted` / `open`,
+   so the 6-hour clock was FATAL on `main` (issue #109). Seed, scorecard (`closedUnmerged: 1`,
+   `noReview: 1`), and this block now record the close. The in-flight slot is free.
+2. **Advisories retire on an absorbed close** (issue #110). `needsRewitness` and
+   `disclosureDivergence` key on `isTerminalReviewSubject` (`prMeta.state === "closed"`), not
+   merely `followed-up`.
+3. **Competing work is re-checked on the clock, `sync`, and `reconcile`** (issue #111), not only
+   at tick / approve / open-draft / attach-draft. Own PR excluded.
+4. **`testCommand: true` is `negativeControl: no-suite`** (issue #112). awesome-copilot and
+   e2b-cookbook keep the noop command, drop `firstIssues`, and cannot be selected until a suite
+   exists that can go red on revert.
+5. **Every GitHub `fetch` carries `AbortSignal.timeout(15s)`** (issue #113). `oss-tick.yml` has
+   `timeout-minutes: 20`.
+6. **Host witness children no longer inherit `FOUNDRY_PAT` / `GITHUB_TOKEN` / `GH_TOKEN` /
+   `E2B_API_KEY`** (issue #114).
 
 ## Next
 
-1. Follow #1652 (**ready for review, not draft**, as of the 2026-08-29 sync — disclosure verbatim **as recorded at open**, no longer matching the current `DISCLOSURE` since ADR 0004's qualifier landed; the draft-only deviation is recorded above and the disclosure drift below) until quiet / merged-by-maintainer / closed.
-2. #1652's body carries the pre-qualifier disclosure block. It is grandfathered and flagged, not
-   falsified: `verify-ledger` prints it as an advisory every tick. Clearing it means editing a pull
-   request on a repository this project does not own — **an outward-facing write needing an explicit
-   operator go, which has not been given.** Until then the advisory is the correct output, and
-   re-wording `DISCLOSURE` back to match would be falsifying doctrine for every future PR to make
-   one old body look compliant. Policy is written beside the constant in `factory/neighbor.ts`.
-3. Re-witness #1652 at `6b6ff04` before its evidence is read as covering the live head. `verify-ledger` reports the gap as an advisory every tick until someone does.
-4. `sync pkt_ColeMurray_background-agents_1476 --threads-answered` once ≥14 quiet days accrue — the slot releases itself.
-5. Idle. One packet in flight.
+1. #1652 is **closed unmerged** (2026-08-30T02:25:22Z). Do not re-open it. Do not tick a
+   replacement on #1476 — that issue is completed.
+2. The draft-only deviation and the pre-ADR-0004 body are history on a closed PR. They stay
+   recorded in PRODUCT.md §8. The clock no longer flags them.
+3. Evidence still covers `48c2242` only. Nobody can re-witness a closed stranger-repo PR; do not
+   read that proof as covering `6b6ff04`.
+4. The in-flight slot is free. Next Wave 1 candidate must have a real `testCommand` (not
+   `true`) and a named `firstIssues` row. awesome-copilot #2684 stays parked until a suite exists.
+5. Idle until a named, witnessable first issue is added.

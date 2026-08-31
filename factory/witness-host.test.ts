@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmp } from "./tmp-dir.ts";
-import { hostRunner, resolveToolchain, witnessEvidence } from "./witness.ts";
+import { hostRunner, resolveToolchain, witnessChildEnv, witnessEvidence } from "./witness.ts";
 
 /**
  * `hostRunner` driven against a real shell — the only assertions in the repo that a fake runner
@@ -227,6 +227,33 @@ test("two witness runs for the same repo under one frozen millisecond both succe
  * #80 was filed for, one layer down. Refused here as well as sanitised by the caller, because a
  * guard that only exists at the call site is one call site away from not existing.
  */
+test("#114: the host runner does not pass FOUNDRY_PAT into the child", async () => {
+  const isolated = witnessChildEnv({
+    PATH: "/usr/bin",
+    FOUNDRY_PAT: "ghp_should_never_leak",
+    GITHUB_TOKEN: "ghs_also_secret",
+    GH_TOKEN: "ghp_gh",
+    E2B_API_KEY: "e2b_secret",
+    HOME: "/tmp",
+  });
+  assert.equal(isolated.FOUNDRY_PAT, undefined);
+  assert.equal(isolated.GITHUB_TOKEN, undefined);
+  assert.equal(isolated.GH_TOKEN, undefined);
+  assert.equal(isolated.E2B_API_KEY, undefined);
+  assert.equal(isolated.PATH, "/usr/bin");
+  assert.equal(isolated.HOME, "/tmp");
+
+  const saved = process.env.FOUNDRY_PAT;
+  process.env.FOUNDRY_PAT = "ghp_should_never_leak";
+  try {
+    const run = await hostRunner("run-tests@head", ["printenv FOUNDRY_PAT || true"]);
+    assert.doesNotMatch(run.output, /ghp_should_never_leak/);
+  } finally {
+    if (saved === undefined) delete process.env.FOUNDRY_PAT;
+    else process.env.FOUNDRY_PAT = saved;
+  }
+});
+
 test("the host runner refuses a scratch prefix that would escape the tmpdir", async () => {
   for (const bad of ["../escape-", "foundry/../../escape-", "a\\b-"]) {
     const result = await hostRunner("mkdtemp", [bad]);

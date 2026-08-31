@@ -152,7 +152,34 @@ test("a denylist id among repos fails assertion under any casing", () => {
   // Same for uniqueness: one repo listed twice under two spellings is one repo, listed twice.
   const twice = yaml.replace(
     "repos:\n",
-    "repos:\n  - id: RavidSrk/Orca-Fleet\n    wave: 0\n    language: TS\n    aiPolicy: owner\n    testCommand: true\n    maxFiles: 1\n    maxDiffLines: 1\n    sandbox: host\n    preferredLabels: []\n    firstIssues: []\n",
+    "repos:\n  - id: RavidSrk/Orca-Fleet\n    wave: 0\n    language: TS\n    aiPolicy: owner\n    testCommand: npm test\n    maxFiles: 1\n    maxDiffLines: 1\n    sandbox: host\n    preferredLabels: []\n    firstIssues: []\n",
   );
   assert.throws(() => assertAllowlist(parseAllowlistYaml(twice)), /duplicate repo/);
+});
+
+test("#112: a noop testCommand without no-suite is refused", () => {
+  const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
+  const parsed = parseAllowlistYaml(yaml.replace(
+    "    testCommand: npm test\n    maxFiles: 6",
+    "    testCommand: true\n    maxFiles: 6",
+  ));
+  assert.throws(() => assertAllowlist(parsed), /cannot implement red-on-revert/);
+});
+
+test("#112: no-suite cannot name firstIssues", () => {
+  const yaml = readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8");
+  const leaked = yaml.replace(
+    "    firstIssues: []\n    policyNotes: \"testCommand true cannot implement red-on-revert",
+    "    firstIssues:\n      - number: 2684\n        title: parked\n        url: https://github.com/github/awesome-copilot/issues/2684\n    policyNotes: \"testCommand true cannot implement red-on-revert",
+  );
+  assert.notEqual(leaked, yaml, "fixture replace matched nothing");
+  assert.throws(() => assertAllowlist(parseAllowlistYaml(leaked)), /cannot name firstIssues/);
+});
+
+test("#112: committed no-suite rows have empty firstIssues", () => {
+  const parsed = parseAllowlistYaml(readFileSync(new URL("../allowlist.yaml", import.meta.url), "utf8"));
+  for (const repo of parsed.repos.filter((r) => r.negativeControl === "no-suite")) {
+    assert.deepEqual(repo.firstIssues, [], repo.id);
+    assert.equal(["true", ":"].includes(repo.testCommand.trim()), true, repo.id);
+  }
 });

@@ -32,6 +32,17 @@ export function draftPullPayload(input: {
   };
 }
 
+/** Bound on every GitHub fetch. A stalled api.github.com must not hang the clock (issue #113). */
+export const GITHUB_FETCH_TIMEOUT_MS = 15_000;
+
+export function githubRequestInit(
+  extra: RequestInit = {},
+  timeoutMs: number = Number(process.env.FOUNDRY_GITHUB_TIMEOUT_MS) || GITHUB_FETCH_TIMEOUT_MS,
+): RequestInit {
+  if (extra.signal) return extra;
+  return { ...extra, signal: AbortSignal.timeout(timeoutMs) };
+}
+
 export function githubApiHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
@@ -160,9 +171,10 @@ export async function fetchIssueState(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return { ok: false, error: `bad repo id ${repoId}` };
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
-      headers: githubApiHeaders(),
-    });
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+      githubRequestInit({ headers: githubApiHeaders() }),
+    );
     if (!res.ok) {
       return { ok: false, error: `GitHub ${res.status} reading ${repoId}#${issueNumber}` };
     }
@@ -251,9 +263,10 @@ export async function fetchRepoFile(
   const [owner, repo] = repoId.split("/");
   if (!owner || !repo) return undefined;
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
-      headers: githubApiHeaders({ Accept: "application/vnd.github.raw" }),
-    });
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+      githubRequestInit({ headers: githubApiHeaders({ Accept: "application/vnd.github.raw" }) }),
+    );
     if (!res.ok) return undefined;
     return await res.text();
   } catch {
@@ -276,7 +289,7 @@ export async function compareCommits(
   try {
     const res = await fetchImpl(
       `https://api.github.com/repos/${owner}/${repo}/compare/${baseSha}...${headSha}`,
-      { headers: githubApiHeaders() },
+      githubRequestInit({ headers: githubApiHeaders() }),
     );
     if (!res.ok) {
       return {
@@ -468,7 +481,7 @@ async function listAllPages<T>(
   let url = firstUrl;
   const items: T[] = [];
   for (let page = 0; page < cap; page += 1) {
-    const res = await fetchImpl(url, { headers: githubApiHeaders() });
+    const res = await fetchImpl(url, githubRequestInit({ headers: githubApiHeaders() }));
     if (!res.ok) return { ok: false, error: `GitHub ${res.status} ${what}` };
     const body = await res.json();
     if (!Array.isArray(body)) return { ok: false, error: `GitHub returned a non-list ${what}` };
@@ -623,7 +636,7 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
   try {
     const res = await fetchImpl(
       `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
-      { headers: githubApiHeaders() },
+      githubRequestInit({ headers: githubApiHeaders() }),
     );
     if (!res.ok) return { ok: false as const, error: `GitHub ${res.status}` };
     const pr = (await res.json()) as {
@@ -719,16 +732,19 @@ export async function createDraftPull(
   }
   const payload = draftPullPayload(input);
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
-      method: "POST",
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "oss-foundry",
-        Authorization: `Bearer ${pat}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${owner}/${repo}/pulls`,
+      githubRequestInit({
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": "oss-foundry",
+          Authorization: `Bearer ${pat}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
     const body = (await res.json().catch(() => ({}))) as {
       html_url?: string;
       number?: number;
