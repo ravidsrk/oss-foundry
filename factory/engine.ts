@@ -1043,16 +1043,20 @@ function recordTerminalReview(
   meta: PrMeta,
   events: FactoryEvent[],
   id: string,
+  reviewTruncated: boolean,
 ): ScorecardRow[] {
   const observed = meta.humanReview;
   if (!observed) {
-    // NAMES BOTH REASONS: this reducer cannot tell an outage from a page cap (issue #69), and the
-    // advice differs — re-running recovers one and caps again on the other. `packetChecks` does know
-    // and says which; this line must stay true WITHOUT the fact, so it carries both.
+    // ONE reason (issue #92). The fact used to be dropped at `applyPrSync`, so this line named
+    // both an outage and a page cap and the operator had to guess. `reviewTruncated` is required
+    // on the opts object so a call site cannot omit it the way an optional field silently becomes
+    // `undefined` under `--experimental-strip-types`.
     events.push(
       ev(
         "follow-up",
-        `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}. If the read FAILED, run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ..."). If it stopped at its PAGE CAP, a re-run will cap again — read the PR by hand or raise the cap deliberately`,
+        reviewTruncated
+          ? `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}. The read stopped at its PAGE CAP; a re-run will cap again — read the PR by hand or raise the cap deliberately`
+          : `Human review not observed for ${meta.url} — noReview and reviewCommentsAvg NOT recorded for ${packet.repoId}. The read FAILED — run \`reconcile\` once GitHub answers the review endpoints (NOT \`sync\`, which refuses a terminal packet: "cannot sync PR from status ...")`,
         id,
       ),
     );
@@ -1099,7 +1103,7 @@ export function applyPrSync(
   state: FactoryState,
   id: string,
   meta: PrMeta,
-  opts: { threadsAnswered: boolean; at?: string },
+  opts: { threadsAnswered: boolean; reviewTruncated: boolean; at?: string },
 ): { state: FactoryState; error?: string } {
   const packet = state.packets.find((p) => p.id === id);
   if (!packet) return { state, error: `unknown packet ${id}` };
@@ -1116,7 +1120,7 @@ export function applyPrSync(
     // Reachable only from submitted/followed-up; the merged status blocks re-entry, so this fires once.
     next = bump(next, { status: "merged", station: "terminal" });
     scorecard = applyPacketToScorecard(scorecard, packet, "merged");
-    scorecard = recordTerminalReview(scorecard, packet, meta, events, id);
+    scorecard = recordTerminalReview(scorecard, packet, meta, events, id, opts.reviewTruncated);
     mergedNow = true;
     events.push(ev("follow-up", `Merged by maintainers — ${meta.url}`, id));
   } else if (meta.state === "closed") {
@@ -1126,7 +1130,7 @@ export function applyPrSync(
     const firstClose = packet.prMeta?.state !== "closed";
     if (firstClose) {
       scorecard = applyPacketToScorecard(scorecard, packet, "closed");
-      scorecard = recordTerminalReview(scorecard, packet, meta, events, id);
+      scorecard = recordTerminalReview(scorecard, packet, meta, events, id, opts.reviewTruncated);
       events.push(ev("follow-up", `Closed unmerged — scorecard closedUnmerged written for ${packet.repoId}`, id));
     }
   } else {
