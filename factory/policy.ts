@@ -8,9 +8,12 @@ import type { PolicyRecord, PolicyVerdict } from "./types.ts";
  * contribution object and a refusal verdict inside one sentence-sized window.
  */
 // Word-boundaried subjects: bare "ai"/"bot" must never match inside maintain/explain/robot.
-const SUBJECT = String.raw`(?:\bai\b|\ba\.i\.|\bllms?\b|\bautonomous\b|\bmachine[- ]generated\b|\bbots?\b|\bagents?\b|\bcopilot\b|\bgenerative\b)`;
-const OBJECT = String.raw`(?:\bcontribut\w*|\bpull[- ]requests?\b|\bprs?\b|\bpatch\w*|\bsubmission\w*|\bcode\b|\bcontent\b|\bissues?\b|\bcomment\w*)`;
-const VERDICT = String.raw`(?:not\s+(?:allowed|welcome|accepted|permitted)|unacceptable|prohibited|banned|forbidden|declin\w*|reject\w*|will\s+be\s+closed|are\s+closed)`;
+// Brands are subjects too (issue #37): "no ChatGPT output" names no generic word.
+const SUBJECT = String.raw`(?:\bai\b|\ba\.i\.|\bllms?\b|\bautonomous\b|\bmachine[- ]generated\b|\bbots?\b|\bagents?\b|\bcopilot\b|\bgenerative\b|\bchatgpt\b|\bclaude\b|\bgemini\b|\bcursor\b|\bdevin\b|\bopenai\b)`;
+const OBJECT = String.raw`(?:\bcontribut\w*|\bpull[- ]requests?\b|\bprs?\b|\bpatch\w*|\bsubmission\w*|\bcode\b|\bcontent\b|\bissues?\b|\bcomment\w*|\boutput\b)`;
+// `not currently accepting` is the present-participle hole (#37). Two filler words cover
+// "not at present accepting" without turning "not a CLA" into a verdict.
+const VERDICT = String.raw`(?:not\s+(?:\w+\s+){0,2}(?:allowed|welcome|accepted|accepting|permitted)|unacceptable|prohibited|banned|forbidden|declin\w*|reject\w*|will\s+be\s+closed|are\s+closed|discard\w*)`;
 // Sentence-sized window that a real period ends — but abbreviation dots (e.g., i.e., etc.) do not.
 const W = String.raw`(?:e\.g\.|i\.e\.|etc\.|[^.\n]){0,90}`;
 
@@ -22,9 +25,23 @@ const FORBIDDEN_STATEMENTS: RegExp[] = [
   /no\s+ai[- ]generated\s+(?:code|prs?|pull[- ]requests?|contributions?|content)/i,
   /do\s+not\s+(?:submit|open|send)\s+(?:ai|llms?|bots?|agents?|machine[- ]generated)\b/i,
   // Active-voice refusals: "we do not accept contributions written by LLMs",
-  // "does not accept machine-generated patches".
-  new RegExp(String.raw`\b(?:do(?:es)?\s+not|don['’]t|never)\s+accept[^.\n]{0,60}${SUBJECT}`, "i"),
+  // "does not accept machine-generated patches". Adverbs between the negation and
+  // accept — "are not currently accepting AI-generated contributions" — are #37.
+  new RegExp(String.raw`\b(?:do(?:es)?\s+not|are\s+not|don['’]t|never)\s+(?:\w+\s+){0,2}accept[^.\n]{0,60}${SUBJECT}`, "i"),
   /autonomous\s+agents?\s+(?:are\s+)?not\s+(?:allowed|welcome|permitted)/i,
+  // Brand-only: "no ChatGPT output in this repo" (no generic subject word).
+  /no\s+(?:chatgpt|claude|gemini|cursor|devin|copilot|openai)\s+(?:output|code|prs?|pull[- ]requests?|contributions?|content|patches?)/i,
+  // Imperative: "keep your LLM at home".
+  /keep\s+(?:your\s+)?(?:ai|llms?|bots?|agents?|chatgpt|claude)\s+at\s+home/i,
+  // Allow-list framing: "only human contributors may open pull requests".
+  // The contribution verb after may/can is load-bearing — "Only humans can legally
+  // certify the DCO" is a signature rule, not a ban, and must stay HOLD_CLA.
+  /only\s+(?:a\s+)?humans?(?:\s+contributors?)?\s+(?:may|can|are\s+allowed\s+to)\s+(?:open|submit|send|file|create|contribute)/i,
+  // Colloquial: "we don't want AI slop here". Mere mention of "AI slop" is not a ban
+  // (agent-framework READMEs name the thing they prevent).
+  /(?:don['’]t|do\s+not|never)\s+want\s+(?:any\s+)?(?:ai|llms?|chatgpt|bots?)\s+slop/i,
+  // Second-person: "if you are a bot, turn back".
+  /if\s+you\s+are\s+(?:an?\s+)?(?:bot|llm|agent|chatgpt)[^.\n]{0,40}(?:turn\s+back|leave|go\s+away|do\s+not\s+submit)/i,
 ];
 
 /** A human gate that is NOT a signature: someone looks, nobody signs. Separate roster so the

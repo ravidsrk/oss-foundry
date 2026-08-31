@@ -43,23 +43,24 @@ merely *discuss* autonomous agents is not banning them.
 
 **The scanner is a high-recall suggester feeding a human gate, not a sufficient arbiter.** Its miss
 mode is real, and stated here rather than left to be inferred: a phrasing nobody has written a
-pattern for reads as silence. Nine paraphrases of real maintainer ban language were run through it
-and seven reached `ALLOW` (issue #37). The matcher work from that issue is **parked** — three review
-rounds failed on it and the unit hit its cap — so this page describes the scanner as it actually is,
-not as the fix would have left it.
+pattern for reads as silence. The nine paraphrases from issue #37 now classify as `DENY_FORBIDDEN`
+(`factory/policy.test.ts` — "the issue #37 probe paraphrases classify"), including present
+participles, brand-only subjects, allow-list framing, and the colloquial/imperative forms that
+used to reach `ALLOW`. A tenth phrasing nobody has written a pattern for will still read as
+silence. That is why this page still calls the scanner a suggester.
 
-Be exact about what catches a miss, because the two guards cover different cases and only one of
-them covers this one. **Deny-by-default covers the no-evidence case, not the missed-ban case.** A
-repo whose `aiPolicy` is `unknown`, with nothing fetched and no affirmative record, is
-`DENY_UNKNOWN_POLICY` and never `ALLOW` — but
-`hasParsedEvidence` is satisfied by *any* fetched document, so a `CONTRIBUTING` whose refusal the
-scanner cannot read is evidence the gate counts, and **a missed ban on a fetched document reaches
-`ALLOW`.** Verified, not assumed, and pinned in `factory/policy.test.ts` ("deny-by-default covers the
-no-evidence case, not the missed-ban case"): three ban phrasings the scanner does not match, supplied
-as fetched docs, each returned `ALLOW`; the same packet with nothing fetched, and the same packet
-with a fetch that came back empty, both returned `DENY_UNKNOWN_POLICY`. The freeze (§3) is the only
-thing standing there. That is precisely why it is now shown the parsed text — the operator reading
-the maintainer's own words is the guard against a scanner miss, and the gate's default is not.
+Be exact about what catches a remaining miss, because the two guards cover different cases and
+only one of them covers this one. **Deny-by-default covers the no-evidence case, not the
+missed-ban case.** A repo whose `aiPolicy` is `unknown`, with nothing fetched and no affirmative
+record, is `DENY_UNKNOWN_POLICY` and never `ALLOW` — but `hasParsedEvidence` is satisfied by *any*
+fetched document, so a `CONTRIBUTING` whose refusal the scanner cannot read is evidence the gate
+counts, and **a missed ban on a fetched document reaches `ALLOW`.** Verified, not assumed, and
+pinned in `factory/policy.test.ts` ("deny-by-default covers the no-evidence case, not the
+missed-ban case"): ordinary contributing prose, supplied as a fetched document, returned
+`ALLOW`; the same packet with nothing fetched, and the same packet with a fetch that came back
+empty, both returned `DENY_UNKNOWN_POLICY`. The freeze (§3) is the only thing standing there.
+That is precisely why it is now shown the parsed text — the operator reading the maintainer's own
+words is the guard against a scanner miss, and the gate's default is not.
 
 The over-block direction is a real cost too, not a free safety margin. `DENY_FORBIDDEN` is terminal
 and there is no in-tool operator override, so a false positive is not a one-look correction at the
@@ -67,8 +68,10 @@ freeze; it is an allowlisted repo the factory cannot work with until a human edi
 `factory/policy.ts`. Most of `allowlist.yaml` is agent and MCP infrastructure — `background-agents`,
 `awesome-copilot`, `e2b-cookbook`, `mcp-use`, `mastra`, `OpenHands`, `orca-fleet` — whose docs use
 `agent`, `bot` and the brand words as ordinary vocabulary rather than as the subject of a refusal.
-That is why broadening recall here is not the cheap change it looks like, and why it was parked
-rather than half-landed.
+The #37 patterns are therefore statement-shaped (a brand plus an object, an allow-list plus a
+contribution verb, "don't want AI slop") rather than topic-word matches, and the must-ALLOW
+fixtures — a framework README that merely discusses agents, ordinary contributing prose, a
+kernel-style DCO conditional — stay `ALLOW` / `HOLD_CLA`.
 
 Precedence: record `forbidden` → scanned
 ban statement → CLA/DCO (from scan or record conditions) → record conditions → unknown-without-

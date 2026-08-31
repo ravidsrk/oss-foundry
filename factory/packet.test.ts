@@ -78,9 +78,9 @@ test("the evidence page and the divergence list agree about a terminal packet", 
  * only way to catch a scanner miss was to go and read the repo out of band, which is exactly the
  * diligence this tool claims to systematize.
  *
- * Scope note: this landed without the matcher work from the same issue, which is parked. Nothing
- * here asserts what the scanner catches; the ban fixture below is one `main` already matches,
- * chosen so these tests move if the *display* breaks and stay still if recall changes.
+ * Scope note: the matcher half of the same issue lives in `policy.test.ts`. Nothing here asserts
+ * what the scanner catches; the ban fixture below is one the scanner already matches, chosen so
+ * these tests move if the *display* breaks and stay still if recall changes.
  */
 const CLEAN_CONTRIBUTING =
   "Thanks for contributing! Run `pnpm test` before opening a pull request, keep the changeset entry short, and open an issue first for anything large.";
