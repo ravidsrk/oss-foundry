@@ -2,6 +2,7 @@ import { ALLOWLIST, CAPS, isDenied, repoById, sameRepoId } from "./allowlist.ts"
 import { parsePrUrl, type IssueLiveState } from "./github-pr.ts";
 import type { LiveIssue } from "./github-scout.ts";
 import { factoryHalt } from "./halt.ts";
+import { mintLedgerId } from "./ids.ts";
 import { AGENT_NAME_RE, commitTrailerLine, DISCLOSURE, type DisclosureTrailer } from "./neighbor.ts";
 import { buildPacket, renderPrBody } from "./packet.ts";
 import { planSandbox, runSandboxDry } from "./sandbox.ts";
@@ -934,7 +935,7 @@ function now() {
 
 function ev(kind: FactoryEvent["kind"], message: string, packetId?: string): FactoryEvent {
   return {
-    id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    id: mintLedgerId("evt"),
     at: now(),
     kind,
     packetId,
@@ -1015,7 +1016,7 @@ export function repliesOwed(packet: TaskPacket): FollowUpEntry[] {
 
 function followUpEntry(at: string, kind: FollowUpEntry["kind"], body: string, url?: string): FollowUpEntry {
   return {
-    id: `fu_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    id: mintLedgerId("fu"),
     at,
     kind,
     body,

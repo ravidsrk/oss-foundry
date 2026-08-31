@@ -1,3 +1,4 @@
+import { mintLedgerId } from "./ids.ts";
 import type { FactoryEvent, FactoryHalt, FactoryState } from "./types.ts";
 
 /**
@@ -16,7 +17,7 @@ export const SECONDARY_LIMIT_BANNER = "=== FACTORY HALT SIGNAL — secondary rat
 
 function ev(message: string): FactoryEvent {
   return {
-    id: `evt_halt_${Date.now().toString(36)}`,
+    id: mintLedgerId("evt_halt"),
     at: new Date().toISOString(),
     kind: "score",
     message,
