@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALLOWLIST, repoById } from "./allowlist.ts";
-import { readCompetition } from "./competition-read.ts";
+import { competitionAdvisories, readCompetition } from "./competition-read.ts";
 import {
   applyAdvance,
   applyApprove,
@@ -16,7 +16,6 @@ import {
   applyTick,
   bindingFromCompare,
   classifyCompetition,
-  competingWorkAdvisory,
   evidenceBindingViolation,
   isBoundSha,
   findCompetingPull,
@@ -1171,18 +1170,12 @@ async function main() {
         synced.meta.state !== "closed" &&
         !synced.meta.merged;
       if (stillOpen) {
-        const competition = await readCompetition(packet);
-        if (!competition.ok) {
-          owed.push(
-            `${packet.id}: could not re-check competing work on ${packet.repoId} — a closing-keyword PR would go unnoticed this run (${competition.error})`,
-          );
-        } else {
-          const line = competingWorkAdvisory(
+        owed.push(
+          ...competitionAdvisories(
             next.packets.find((p) => p.id === packet.id)!,
-            competition.verdict,
-          );
-          if (line) owed.push(line);
-        }
+            await readCompetition(packet),
+          ),
+        );
       }
       doctrine.push(...checks.fatal);
       owed.push(...checks.advisory);
@@ -1289,14 +1282,8 @@ async function main() {
     );
     // Re-check competing work on a still-open submitted/followed-up packet (issue #111).
     if (after && synced.meta.state !== "closed" && !synced.meta.merged) {
-      const competition = await readCompetition(after);
-      if (!competition.ok) {
-        console.error(
-          `ADVISORY ${id}: could not re-check competing work on ${after.repoId} — ${competition.error}`,
-        );
-      } else {
-        const line = competingWorkAdvisory(after, competition.verdict);
-        if (line) console.error(`ADVISORY ${line}`);
+      for (const line of competitionAdvisories(after, await readCompetition(after))) {
+        console.error(`ADVISORY ${line}`);
       }
     }
     return;

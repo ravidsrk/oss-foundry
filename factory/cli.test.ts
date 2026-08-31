@@ -239,7 +239,7 @@ function prFactsStub(
   // refusing outright; `truncate` is GitHub answering with a `Link: rel="next"` that never runs
   // out, so the paginated read stops at its page cap. The second exists because a capped read and
   // a clean one return the same commits and the same verdict — the clock has to tell them apart.
-  commitReads: { fail?: string[]; truncate?: string[] } = {},
+  commitReads: { fail?: string[]; truncate?: string[]; truncateOpenPulls?: boolean } = {},
 ): string {
   const preload = join(tmp("foundry-prfacts-"), "preload.mjs");
   writeFileSync(
@@ -248,12 +248,16 @@ function prFactsStub(
 const commitFacts = ${JSON.stringify(commits)};
 const commitFail = ${JSON.stringify(commitReads.fail ?? [])};
 const commitTruncate = ${JSON.stringify(commitReads.truncate ?? [])};
+const truncateOpenPulls = ${JSON.stringify(commitReads.truncateOpenPulls === true)};
 const json = (status, body, headers = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
 const actors = (list) => (list ?? []).map((u) => ({ user: { login: u.login, type: u.type } }));
 globalThis.fetch = async (url) => {
   const u = String(url);
-  if (/\\/pulls\\?state=open/.test(u)) return json(200, []);
+  if (/\\/pulls\\?state=open/.test(u)) {
+    if (truncateOpenPulls) return json(200, [], { link: "<" + u + ">; rel=\\"next\\"" });
+    return json(200, []);
+  }
   if (/\\/issues\\/\\d+\\/timeline/.test(u)) return json(200, []);
   const parts = new URL(u).pathname.split("/").filter(Boolean);
   // The revert re-check's commit listing (issue #39). Answered per repo; the default is "nothing
@@ -2399,4 +2403,43 @@ test("reconcile and verify-ledger hand packetChecks the same fields", () => {
       );
     }
   }
+});
+
+test("clock, reconcile, and sync all report a capped competition read through one helper", () => {
+  // The same defect class as revertTruncated: `readCompetition` returned `truncated: true` and
+  // three hand-written call sites discarded it, so a short open-pulls read printed as clear.
+  for (const rel of ["./cli.ts", "./verify-ledger.ts"]) {
+    const source = readFileSync(new URL(rel, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /competitionAdvisories/,
+      `${rel} stopped routing the competition re-check through competitionAdvisories, so a capped read can look complete again`,
+    );
+    assert.equal(
+      /competingWorkAdvisory/.test(source),
+      false,
+      `${rel} went back to competingWorkAdvisory alone, which cannot see the cap`,
+    );
+  }
+});
+
+test("reconcile and sync advise when the competing-work re-check hits its page cap", () => {
+  const seed = withOpenSubmittedWave1();
+  const submitted = seed.packets.find((p) => p.status === "submitted")!;
+  const path = writeState(seed);
+  const stub = prFactsStub(
+    livePrs({ [submitted.prUrl!]: { state: "open", merged: false } }),
+    {},
+    { truncateOpenPulls: true },
+  );
+
+  const reconciled = runCli(["reconcile", "--state", path], tmpdir(), { preload: stub });
+  assert.equal(reconciled.code, 0, `a capped re-check is an advisory, not a stop:\n${reconciled.out}`);
+  assert.match(reconciled.out, /^ADVISORY .*page cap/m, reconciled.out);
+  assert.match(reconciled.out, /no competing pull request/, reconciled.out);
+
+  const synced = runCli(["sync", submitted.id, "--state", writeState(seed)], tmpdir(), { preload: stub });
+  assert.equal(synced.code, 0, synced.out);
+  assert.match(synced.out, /^ADVISORY .*page cap/m, synced.out);
+  assert.match(synced.out, /no competing pull request/, synced.out);
 });

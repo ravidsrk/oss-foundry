@@ -35,12 +35,31 @@ export function draftPullPayload(input: {
 /** Bound on every GitHub fetch. A stalled api.github.com must not hang the clock (issue #113). */
 export const GITHUB_FETCH_TIMEOUT_MS = 15_000;
 
+/** Inclusive ceiling on `FOUNDRY_GITHUB_TIMEOUT_MS`. Above this the shipped 15s bound is used. */
+export const GITHUB_FETCH_TIMEOUT_MAX_MS = 3_600_000;
+
+/**
+ * Deadline for one GitHub fetch (issue #113).
+ *
+ * `FOUNDRY_GITHUB_TIMEOUT_MS` is an integer millisecond override. A truthy invalid value
+ * (`-1`, `Infinity`, `15.5`, a non-number) used to reach `AbortSignal.timeout` and throw a
+ * RangeError before any request left — the clock and every CLI verb then died on a low-level
+ * message that did not name the env var. Those values now fall back to the shipped 15s bound.
+ */
+export function githubFetchTimeoutMs(
+  raw: string | number | undefined = process.env.FOUNDRY_GITHUB_TIMEOUT_MS,
+): number {
+  const n = typeof raw === "number" ? raw : raw == null || raw === "" ? Number.NaN : Number(raw);
+  if (Number.isInteger(n) && n >= 1 && n <= GITHUB_FETCH_TIMEOUT_MAX_MS) return n;
+  return GITHUB_FETCH_TIMEOUT_MS;
+}
+
 export function githubRequestInit(
   extra: RequestInit = {},
-  timeoutMs: number = Number(process.env.FOUNDRY_GITHUB_TIMEOUT_MS) || GITHUB_FETCH_TIMEOUT_MS,
+  timeoutMs: number = githubFetchTimeoutMs(),
 ): RequestInit {
   if (extra.signal) return extra;
-  return { ...extra, signal: AbortSignal.timeout(timeoutMs) };
+  return { ...extra, signal: AbortSignal.timeout(githubFetchTimeoutMs(timeoutMs)) };
 }
 
 export function githubApiHeaders(extra: Record<string, string> = {}): Record<string, string> {

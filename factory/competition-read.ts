@@ -1,5 +1,6 @@
-import { classifyCompetition, findCompetingPull, type CompetitionVerdict } from "./engine.ts";
-import { listCrossReferencingOpenPulls, listOpenPulls, parsePrUrl } from "./github-pr.ts";
+import { classifyCompetition, competingWorkAdvisory, findCompetingPull, type CompetitionVerdict } from "./engine.ts";
+import { listCrossReferencingOpenPulls, listOpenPulls, MAX_LIST_PAGES, parsePrUrl } from "./github-pr.ts";
+import type { TaskPacket } from "./types.ts";
 
 /**
  * Live competing-work verdict for one packet. Own PR is excluded — a submitted draft that
@@ -35,4 +36,35 @@ export async function readCompetition(
       packet.repoId,
     ),
   };
+}
+
+export type CompetitionRead = Awaited<ReturnType<typeof readCompetition>>;
+
+/**
+ * What the clock, `sync`, and `reconcile` print after `readCompetition` (issue #111).
+ *
+ * `truncated` is the same fact `refuseIfCapped` gates tick/approve/open-draft on: a short
+ * open-pull or timeline read cannot establish the ABSENCE of a competitor. Those verbs refuse.
+ * These three re-check an already-open packet, so they ADVISE — but they must still say so.
+ * Dropping the flag (the defect this helper exists to close) made a capped `clear` look like
+ * "no competing work" on every surface an operator reads.
+ *
+ * ONE reporter, on purpose. Three hand-written copies is how revertTruncated and reviewTruncated
+ * shipped the same hole twice.
+ */
+export function competitionAdvisories(packet: TaskPacket, read: CompetitionRead): string[] {
+  if (!read.ok) {
+    return [
+      `${packet.id}: could not re-check competing work on ${packet.repoId} — a closing-keyword PR would go unnoticed this run (${read.error})`,
+    ];
+  }
+  const out: string[] = [];
+  if (read.truncated) {
+    out.push(
+      `${packet.id}: the competing-work re-check on ${packet.repoId} hit its ${MAX_LIST_PAGES}-page cap, so "no competing pull request" is not a fact this run can assert. A re-run will cap again — read open PRs by hand, or raise the cap deliberately`,
+    );
+  }
+  const hit = competingWorkAdvisory(packet, read.verdict);
+  if (hit) out.push(hit);
+  return out;
 }

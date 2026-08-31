@@ -1,5 +1,4 @@
-import { competingWorkAdvisory } from "./engine.ts";
-import { readCompetition } from "./competition-read.ts";
+import { competitionAdvisories, readCompetition } from "./competition-read.ts";
 import { packetChecks } from "./ledger-check.ts";
 import { revertCheck, syncGithubPr } from "./github-pr.ts";
 import { seedState } from "./seed.ts";
@@ -72,15 +71,7 @@ for (const packet of withPr) {
     packet.prMeta?.state !== "closed" &&
     !packet.prMeta?.merged;
   if (stillOpen) {
-    const competition = await readCompetition(packet);
-    if (!competition.ok) {
-      advisory.push(
-        `${packet.id}: could not re-check competing work on ${packet.repoId} — a closing-keyword PR would go unnoticed this run (${competition.error})`,
-      );
-    } else {
-      const line = competingWorkAdvisory(packet, competition.verdict);
-      if (line) advisory.push(line);
-    }
+    advisory.push(...competitionAdvisories(packet, await readCompetition(packet)));
   }
 }
 for (const a of advisory) console.error(`ADVISORY ${a}`);
