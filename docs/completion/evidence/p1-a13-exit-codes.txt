@@ -1,0 +1,9 @@
+### ANGLE 13 — CLI exit codes (correct measurement)
+  bogus-command    exit=1    last-line: unknown command bogus-command
+  --help           exit=0    last-line: The factory does not merge. Maintainers own the merge.
+  ledger           exit=0    last-line: - bans: 0  mergedTotal: 3
+  advance          exit=1    last-line: advance requires a packet id
+  halt             exit=1    last-line: halt requires a repo id (owner/name)
+
+### no-args behaviour
+  (no args) exit=0

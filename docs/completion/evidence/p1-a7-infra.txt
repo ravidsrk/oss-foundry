@@ -1,0 +1,52 @@
+### ANGLE 7 — CI / infra
+
+--- workflow files ---
+  .github/workflows/ci.yml (66 lines)
+  .github/workflows/oss-tick.yml (69 lines)
+
+--- triggers ---
+== .github/workflows/ci.yml
+   on:
+     pull_request:
+     push:
+       # Pull requests already cover their own branches; restricting pushes to `main` makes this the
+       # post-merge gate (a merge commit is a state no pull-request run ever tested) without running
+       # the same commit twice on every feature-branch push.
+       branches: ["main"]
+   
+   concurrency:
+== .github/workflows/oss-tick.yml
+   on:
+     schedule:
+       - cron: "0 */6 * * *"
+     workflow_dispatch:
+   
+   jobs:
+
+--- jobs / steps summary ---
+   22:  push:
+   26:    branches: ["main"]
+   33:  group: ci-${{ github.event_name }}-${{ github.head_ref || github.sha }}
+   34:  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+   36:jobs:
+   37:  suite:
+   38:    runs-on: ubuntu-latest
+   39:    permissions:
+   40:      contents: read
+   41:    steps:
+   48:      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+   49:      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+   50:        with:
+   54:          node-version: "22"
+   58:      - name: Test suite
+   59:        run: npm test
+   65:      - name: Validate allowlist and policy records
+   66:        run: npm run validate
+
+--- IaC / containers / deploy ---
+  (none listed above = absent)
+
+--- .gitignore ---
+node_modules/
+.foundry-state.json
+.DS_Store
