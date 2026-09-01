@@ -17,7 +17,7 @@ import {
   revertWindow,
   scorecardRow,
 } from "./scorecard.ts";
-import { foundryAttestedWave0Merges } from "./status.ts";
+import { PROMOTION_GATE_MERGES, promotionGateWave0Merges } from "./status.ts";
 import {
   INFLIGHT_STATUSES,
   inflightCount,
@@ -62,7 +62,10 @@ export function maySelectRepo(
   if (repoHealth(state.scorecard, repoId) === "stop") {
     return { ok: false, reason: `${repoId} is halted on the scorecard.` };
   }
-  if (repo.wave >= 1 && foundryAttestedWave0Merges(state.packets) < 2) {
+  // Counted through `promotionGateWave0Merges`, not `foundryAttestedWave0Merges`: the latter
+  // includes frontguard#196, which PRODUCT.md §8 records and excludes. Using the raw count
+  // would let Wave 1 open on a merge the operator clicked on their own repo.
+  if (repo.wave >= 1 && promotionGateWave0Merges(state.packets) < PROMOTION_GATE_MERGES) {
     return {
       ok: false,
       reason: "Wave 1+ waits on two Foundry-attested Wave 0 merges.",
@@ -131,13 +134,15 @@ export function applyTick(
   }
 
   const packet = buildPacket(candidate);
-  const next: FactoryState = {
-    ...held,
-    packets: [packet, ...held.packets],
-    events: [ev("tick", `Tick scouted ${packet.repoId}#${packet.issueNumber}`, packet.id), ...held.events].slice(0, 80),
-    ticksRun: held.ticksRun + 1,
-    lastTickAt: now(),
-  };
+  const next = appendEvent(
+    {
+      ...held,
+      packets: [packet, ...held.packets],
+      ticksRun: held.ticksRun + 1,
+      lastTickAt: now(),
+    },
+    ev("tick", `Tick scouted ${packet.repoId}#${packet.issueNumber}`, packet.id),
+  );
   return { state: next, packet, reason: packet.policy.allow ? "gated" : packet.policy.code };
 }
 
@@ -200,11 +205,10 @@ export function applyQueueLive(
     agentsMd: docs?.agentsMd ?? issue.agentsMd,
     contributing: docs?.contributing ?? issue.contributing,
   });
-  const next: FactoryState = {
-    ...state,
-    packets: [packet, ...state.packets],
-    events: [ev("scout", `Queued live ${issue.repoId}#${issue.number}`, packet.id), ...state.events].slice(0, 80),
-  };
+  const next = appendEvent(
+    { ...state, packets: [packet, ...state.packets] },
+    ev("scout", `Queued live ${issue.repoId}#${issue.number}`, packet.id),
+  );
   return { state: next, packet, reason: packet.policy.allow ? "gated" : packet.policy.code };
 }
 
@@ -239,12 +243,14 @@ export function applyApprove(
       : p,
   );
   return {
-    state: {
-      ...state,
-      packets,
-      events: [ev("approve", `Approved ${id}`, id), ...state.events].slice(0, 80),
-      humanApprovalsRemaining: Math.max(0, state.humanApprovalsRemaining - 1),
-    },
+    state: appendEvent(
+      {
+        ...state,
+        packets,
+        humanApprovalsRemaining: Math.max(0, state.humanApprovalsRemaining - 1),
+      },
+      ev("approve", `Approved ${id}`, id),
+    ),
   };
 }
 
@@ -290,11 +296,7 @@ export function applyReject(
       : p,
   );
   return {
-    state: {
-      ...state,
-      packets,
-      events: [ev("reject", message, id), ...state.events].slice(0, 80),
-    },
+    state: appendEvent({ ...state, packets }, ev("reject", message, id)),
     warning,
   };
 }
@@ -773,11 +775,7 @@ export function applyAttachEvidence(
   const bound: EvidenceManifest = { ...evidence, shaVerified: true };
   const packets = state.packets.map((p) => (p.id === id ? bump(p, { evidence: bound }) : p));
   return {
-    state: {
-      ...state,
-      packets,
-      events: [ev("review", `Evidence attached for ${id}`, id), ...state.events].slice(0, 80),
-    },
+    state: appendEvent({ ...state, packets }, ev("review", `Evidence attached for ${id}`, id)),
   };
 }
 
@@ -796,11 +794,10 @@ export function applyAdvance(
       p.id === id ? bump(p, { status: "implementing", station: "implement", sandboxSession: session }) : p,
     );
     return {
-      state: {
-        ...state,
-        packets,
-        events: [ev("sandbox", `Sandbox ${session.provider} dry-run planned for ${id}`, id), ...state.events].slice(0, 80),
-      },
+      state: appendEvent(
+        { ...state, packets },
+        ev("sandbox", `Sandbox ${session.provider} dry-run planned for ${id}`, id),
+      ),
     };
   }
 
@@ -809,11 +806,10 @@ export function applyAdvance(
       p.id === id ? bump(p, { status: "reviewing", station: "review" }) : p,
     );
     return {
-      state: {
-        ...state,
-        packets,
-        events: [ev("review", `Build-blind review started for ${id}`, id), ...state.events].slice(0, 80),
-      },
+      state: appendEvent(
+        { ...state, packets },
+        ev("review", `Build-blind review started for ${id}`, id),
+      ),
     };
   }
 
@@ -850,11 +846,10 @@ export function applyAdvance(
         : p,
     );
     return {
-      state: {
-        ...state,
-        packets,
-        events: [ev("draft", `Draft PR body ready for ${packet.repoId}#${packet.issueNumber}`, id), ...state.events].slice(0, 80),
-      },
+      state: appendEvent(
+        { ...state, packets },
+        ev("draft", `Draft PR body ready for ${packet.repoId}#${packet.issueNumber}`, id),
+      ),
     };
   }
 
@@ -921,12 +916,14 @@ export function applyAttachDraft(
     p.id === id ? bump(p, { status: "submitted", station: "follow-up", prUrl: url }) : p,
   );
   return {
-    state: {
-      ...state,
-      packets,
-      scorecard: alreadyOpened ? state.scorecard : applyPacketToScorecard(state.scorecard, packet, "opened"),
-      events: [ev("draft", `Attached draft ${url}`, id), ...state.events].slice(0, 80),
-    },
+    state: appendEvent(
+      {
+        ...state,
+        packets,
+        scorecard: alreadyOpened ? state.scorecard : applyPacketToScorecard(state.scorecard, packet, "opened"),
+      },
+      ev("draft", `Attached draft ${url}`, id),
+    ),
   };
 }
 
@@ -952,8 +949,45 @@ function ev(kind: FactoryEvent["kind"], message: string, packetId?: string): Fac
   };
 }
 
-function appendEvent(state: FactoryState, event: FactoryEvent): FactoryState {
-  return { ...state, events: [event, ...state.events].slice(0, 80) };
+/**
+ * Newest-first bounded ring. Fourteen call sites used to copy `[event, ...events].slice(0, 80)`
+ * by hand; the 81st prepend silently destroyed the oldest with no marker. One helper is the
+ * only way the drop counter stays correct everywhere rather than in one place.
+ *
+ * `eventsDropped` is declared on `FactoryState` (`factory/types.ts`) and validated by
+ * `isFactoryState` as an optional non-negative INTEGER — integer because `eventsDroppedOf`
+ * floors what it reads, so a persisted `1.5` would otherwise be accepted and reported as 1,
+ * understating loss in the one field whose job is accuracy about it. `migrateV6` deliberately
+ * does NOT fill it: an older ledger sitting at the cap may have dropped many events or none,
+ * and writing `0` would state the second as fact. Absence reads as 0, which is the same
+ * number but a missing field rather than a recorded claim.
+ */
+export const EVENT_RING_CAP = 80;
+
+type StateWithEventDrops = FactoryState & { eventsDropped?: number };
+
+export function eventsDroppedOf(state: FactoryState): number {
+  const value = (state as StateWithEventDrops).eventsDropped;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+export function appendEvents(state: FactoryState, incoming: readonly FactoryEvent[]): FactoryState {
+  if (incoming.length === 0) return state;
+  const combined = [...incoming, ...state.events];
+  if (combined.length <= EVENT_RING_CAP) {
+    return { ...state, events: combined };
+  }
+  const droppedNow = combined.length - EVENT_RING_CAP;
+  const next: StateWithEventDrops = {
+    ...state,
+    events: combined.slice(0, EVENT_RING_CAP),
+    eventsDropped: eventsDroppedOf(state) + droppedNow,
+  };
+  return next;
+}
+
+export function appendEvent(state: FactoryState, event: FactoryEvent): FactoryState {
+  return appendEvents(state, [event]);
 }
 
 function park(
@@ -972,11 +1006,7 @@ function park(
         })
       : p,
   );
-  return {
-    ...state,
-    packets,
-    events: [ev(kind, reason, id), ...state.events].slice(0, 80),
-  };
+  return appendEvent({ ...state, packets }, ev(kind, reason, id));
 }
 
 /** The one place the CLI turns a compare result into an evidence binding — fastForward is derived, never asserted. */
@@ -1217,13 +1247,15 @@ export function applyPrSync(
   }
 
   return {
-    state: {
-      ...state,
-      packets: state.packets.map((p) => (p.id === id ? next : p)),
-      scorecard,
-      mergedTotal: mergedNow ? state.mergedTotal + 1 : state.mergedTotal,
-      events: [...events.reverse(), ...state.events].slice(0, 80),
-    },
+    state: appendEvents(
+      {
+        ...state,
+        packets: state.packets.map((p) => (p.id === id ? next : p)),
+        scorecard,
+        mergedTotal: mergedNow ? state.mergedTotal + 1 : state.mergedTotal,
+      },
+      events.reverse(),
+    ),
   };
 }
 

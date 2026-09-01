@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { seedState } from "./seed.ts";
-import { OFF_ALLOWLIST_WAVE, ledgerSections, quietLabel } from "./status.ts";
+import {
+  OFF_ALLOWLIST_WAVE,
+  foundryAttestedWave0Merges,
+  isPromotionGateExcluded,
+  ledgerSections,
+  PROMOTION_GATE_MERGES,
+  promotionGateWave0Merges,
+  quietLabel,
+} from "./status.ts";
 
 /**
  * The ledger is the audit surface. `status` counts every packet; the `ledger` command grouped by
@@ -39,6 +47,55 @@ test("ledger sections keep wave order and drop the ones with nothing in them", (
     true,
   );
   assert.deepEqual(ledgerSections([]), []);
+});
+
+/**
+ * PRODUCT.md §8 and docs/12-ledger.md record three Foundry-attested Wave 0 merges and then
+ * exclude frontguard#196 from the promotion gate: the operator clicked merge on a repo they
+ * own, which Foundry must never do, so the merge is history rather than evidence a stranger
+ * accepted a Foundry patch. Promotion is orca-fleet#70 + #72.
+ *
+ * `foundryAttestedWave0Merges` stays the raw count (status/ledger print 3). The gate reads
+ * `promotionGateWave0Merges`. If the exclusion is dropped, the two counters collapse and
+ * Wave 1 can open on a merge doctrine names as excluded.
+ */
+test("promotion-gate arithmetic excludes frontguard#196 and counts orca-fleet#70+#72", () => {
+  const packets = seedState().packets;
+  assert.equal(
+    foundryAttestedWave0Merges(packets),
+    3,
+    "the ledger records three attested Wave 0 merges, including the excluded one",
+  );
+  assert.equal(
+    promotionGateWave0Merges(packets),
+    PROMOTION_GATE_MERGES,
+    "the gate counts two; frontguard#196 is recorded, not a promotion-gate merge",
+  );
+
+  const excluded = packets.filter(isPromotionGateExcluded);
+  assert.equal(excluded.length, 1, "exactly one packet is named as excluded");
+  assert.equal(excluded[0].repoId, "ravidsrk/frontguard");
+  assert.equal(excluded[0].issueNumber, 195);
+  assert.equal(excluded[0].status, "merged");
+  assert.ok(excluded[0].humanAttest, "the excluded merge is attested; that is why the raw counter includes it");
+
+  const withoutOrca = packets.filter((p) => p.repoId !== "ravidsrk/orca-fleet");
+  assert.equal(foundryAttestedWave0Merges(withoutOrca), 1);
+  assert.equal(
+    promotionGateWave0Merges(withoutOrca),
+    0,
+    "frontguard#196 alone must not satisfy the gate — this is the assertion that dies if the exclusion is dropped",
+  );
+
+  const oneOrcaPlusExcluded = packets.filter(
+    (p) => p.status === "merged" && (p.repoId === "ravidsrk/frontguard" || p.issueNumber === 42),
+  );
+  assert.equal(foundryAttestedWave0Merges(oneOrcaPlusExcluded), 2);
+  assert.equal(
+    promotionGateWave0Merges(oneOrcaPlusExcluded),
+    1,
+    "one orca-fleet merge plus frontguard#196 is still one gate merge, not two",
+  );
 });
 
 /**
