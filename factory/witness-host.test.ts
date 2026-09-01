@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmodSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -244,6 +245,15 @@ test("#114 / G-02: the host runner allowlists the child env and drops planted se
     LANG: "C.UTF-8",
     TZ: "UTC",
     GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
+    HTTPS_PROXY: "http://user:foundry_planted_proxy_pass@proxy.example:8080",
+    HTTP_PROXY: "http://proxy.example:3128",
+    NO_PROXY: "localhost,127.0.0.1",
+    NVM_DIR: "/opt/nvm",
+    NODE_EXTRA_CA_CERTS: "/etc/ssl/corp.pem",
+    GIT_SSL_CAINFO: "/etc/ssl/git.pem",
+    MISE_DATA_DIR: "/opt/mise",
+    MISE_GITHUB_TOKEN: "foundry_planted_mise_token",
+    ASDF_GITHUB_API_TOKEN: "foundry_planted_asdf_token",
     GIT_ASKPASS: "/tmp/askpass",
     SHELL: "/bin/zsh",
     FOUNDRY_PAT: "ghp_should_never_leak",
@@ -262,6 +272,15 @@ test("#114 / G-02: the host runner allowlists the child env and drops planted se
   assert.equal(isolated.LANG, "C.UTF-8");
   assert.equal(isolated.TZ, "UTC");
   assert.equal(isolated.GIT_CONFIG_GLOBAL, "/tmp/gitconfig");
+  assert.equal(isolated.HTTPS_PROXY, "http://proxy.example:8080");
+  assert.equal(isolated.HTTP_PROXY, "http://proxy.example:3128");
+  assert.equal(isolated.NO_PROXY, "localhost,127.0.0.1");
+  assert.equal(isolated.NVM_DIR, "/opt/nvm");
+  assert.equal(isolated.NODE_EXTRA_CA_CERTS, "/etc/ssl/corp.pem");
+  assert.equal(isolated.GIT_SSL_CAINFO, "/etc/ssl/git.pem");
+  assert.equal(isolated.MISE_DATA_DIR, "/opt/mise");
+  assert.equal(isolated.MISE_GITHUB_TOKEN, undefined, "MISE_GITHUB_TOKEN is a credential; no MISE_* glob");
+  assert.equal(isolated.ASDF_GITHUB_API_TOKEN, undefined, "ASDF_GITHUB_API_TOKEN is a credential; no ASDF_* glob");
   assert.equal(isolated.GIT_ASKPASS, undefined, "GIT_ASKPASS is a credential helper, not a toolchain need");
   assert.equal(isolated.SHELL, undefined, "SHELL is not a toolchain need; bash -c is the contract");
   assert.equal(isolated.FOUNDRY_PAT, undefined);
@@ -273,7 +292,24 @@ test("#114 / G-02: the host runner allowlists the child env and drops planted se
   assert.equal(isolated.ANTHROPIC_API_KEY, undefined);
   assert.equal(isolated.OP_SERVICE_ACCOUNT_TOKEN, undefined);
   assert.equal(isolated.NOT_A_TOOLCHAIN_VAR, undefined);
-  assert.deepEqual(Object.keys(isolated).sort(), ["GIT_CONFIG_GLOBAL", "HOME", "LANG", "PATH", "TMPDIR", "TZ"]);
+  assert.deepEqual(
+    Object.keys(isolated).sort(),
+    [
+      "GIT_CONFIG_GLOBAL",
+      "GIT_SSL_CAINFO",
+      "HOME",
+      "HTTPS_PROXY",
+      "HTTP_PROXY",
+      "LANG",
+      "MISE_DATA_DIR",
+      "NODE_EXTRA_CA_CERTS",
+      "NO_PROXY",
+      "NVM_DIR",
+      "PATH",
+      "TMPDIR",
+      "TZ",
+    ].sort(),
+  );
 
   const planted: Record<string, string> = {
     NPM_TOKEN: "foundry_planted_npm_token",
@@ -282,6 +318,9 @@ test("#114 / G-02: the host runner allowlists the child env and drops planted se
     OP_SERVICE_ACCOUNT_TOKEN: "foundry_planted_op_token",
     FOUNDRY_PAT: "foundry_planted_foundry_pat",
     NOT_A_TOOLCHAIN_VAR: "foundry_planted_unrelated",
+    MISE_GITHUB_TOKEN: "foundry_planted_mise_token",
+    HTTPS_PROXY: "http://user:foundry_planted_proxy_pass@127.0.0.1:9",
+    NVM_DIR: "/tmp/foundry-nvm-dir",
   };
   const saved: Record<string, string | undefined> = {};
   for (const key of Object.keys(planted)) saved[key] = process.env[key];
@@ -297,7 +336,14 @@ test("#114 / G-02: the host runner allowlists the child env and drops planted se
     assert.equal(run.exit, 0, run.output);
     assert.match(run.output, /PATH_LEN=[1-9]/, `child PATH was empty — over-aggressive allowlist: ${run.output}`);
     assert.match(run.output, /HOME_SET=yes/, `child HOME was missing: ${run.output}`);
+    assert.match(run.output, /^NVM_DIR=\/tmp\/foundry-nvm-dir$/m, `NVM_DIR did not reach the child: ${run.output}`);
+    assert.match(run.output, /^HTTPS_PROXY=http:\/\/127\.0\.0\.1:9\/?$/m, `stripped proxy URL missing: ${run.output}`);
     for (const [key, value] of Object.entries(planted)) {
+      if (key === "NVM_DIR") continue;
+      if (key === "HTTPS_PROXY") {
+        assert.doesNotMatch(run.output, /foundry_planted_proxy_pass/, `proxy userinfo reached the child: ${run.output}`);
+        continue;
+      }
       assert.doesNotMatch(run.output, new RegExp(value), `${key} reached the child: ${run.output}`);
     }
   } finally {
@@ -340,6 +386,46 @@ test("G-14: a hung witness child is killed at the deadline and the refusal names
     if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
     else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
   }
+});
+
+test("G-14: a hung grandchild is dead after the deadline, not reparented", async () => {
+  // Real clock: we have to observe a live grandchild PID and then that it is gone.
+  // Fake timers cannot tell a reparented `sleep` from a reaped one.
+  const pidFile = join(tmp("foundry-grandchild-"), "pid");
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "400";
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", [`(sleep 20 & echo $! > ${JSON.stringify(pidFile)}; wait)`]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung grandchild parent was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(run.output, /exceeded the 400ms deadline/, run.output);
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    assert.ok(Number.isInteger(pid) && pid > 1, `pid file held ${pid}`);
+    const listed = spawnSync("ps", ["-p", String(pid), "-o", "state="], { encoding: "utf8" });
+    const state = listed.stdout.trim();
+    assert.ok(
+      state === "" || state.startsWith("Z"),
+      `grandchild ${pid} still running (ps state=${JSON.stringify(state)}) — reparented after the shell died`,
+    );
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-14: a self-SIGKILL is not reported as a deadline", async () => {
+  const run = await hostRunner("run-tests@head", ["kill -KILL $$"]);
+  assert.notEqual(run.exit, 0, run.output);
+  assert.doesNotMatch(
+    run.output,
+    /exceeded the .* deadline/,
+    `SIGKILL was mislabeled as a timeout: ${run.output}`,
+  );
+  assert.match(run.output, /killed by SIGKILL/, run.output);
 });
 
 test("G-14: a truthy invalid FOUNDRY_WITNESS_TIMEOUT_MS falls back to the shipped bound", () => {

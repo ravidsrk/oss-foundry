@@ -77,6 +77,17 @@ export type WitnessRunner = (
  * `SHELL` is absent on purpose (see the host-runner contract above). Windows `SystemRoot` /
  * `USERPROFILE` are absent because the host runner is POSIX (`bash -c`, `rm -rf`); Wave 0
  * witnessing does not run on stock Windows.
+ *
+ * Version-manager *directories* are listed, never a `MISE_*` / `ASDF_*` glob:
+ * `MISE_GITHUB_TOKEN` and `ASDF_GITHUB_API_TOKEN` are credentials, and a prefix match
+ * would put them in the child. PATH already carries the shims; these dirs are what
+ * `nvm` / `mise` / `asdf` / `volta` / `fnm` / `pyenv` consult to resolve a pin.
+ *
+ * Proxy URLs (`HTTP_PROXY` and friends) can embed `user:password@`. Copied verbatim,
+ * that password reaches third-party `preinstall` scripts. The *names* still pass —
+ * git/npm cannot reach a corporate proxy without them — but {@link witnessChildEnv}
+ * strips userinfo from the value. A proxy that required that password then fails
+ * closed, without leaking it. `NO_PROXY` is a host list, not a URL, and is copied as-is.
  */
 export const WITNESS_CHILD_ENV_KEYS = [
   "PATH", // git, npm, node, python, bash — a child with no PATH cannot clone or test
@@ -93,14 +104,64 @@ export const WITNESS_CHILD_ENV_KEYS = [
   // sends `git clone` at the real network and the fixture SHAs are not reachable. An operator
   // isolating git config the same way needs the same pass-through. Not a secret.
   "GIT_CONFIG_GLOBAL",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE", // OpenSSL / git / python custom CA file
+  "SSL_CERT_DIR", // OpenSSL hashed CA directory
+  "NODE_EXTRA_CA_CERTS", // Node's extra CA bundle (npm ci on a corp intercepting proxy)
+  "GIT_SSL_CAINFO", // git's own CA override; SSL_CERT_FILE is not always consulted
+  "CURL_CA_BUNDLE",
+  "REQUESTS_CA_BUNDLE", // Python requests; the clone's tests may need the same corp CA
+  "ASDF_DIR",
+  "ASDF_DATA_DIR",
+  "NVM_DIR",
+  "VOLTA_HOME",
+  "FNM_DIR",
+  "FNM_MULTISHELL_PATH",
+  "PYENV_ROOT",
+  "MISE_DATA_DIR",
+  "MISE_CONFIG_DIR",
+  "MISE_CACHE_DIR",
 ] as const;
+
+/** Proxy vars whose value is a URL and may embed `user:password@`. Not `NO_PROXY`. */
+const PROXY_URL_KEYS: readonly string[] = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+];
+
+/**
+ * Drop `user:password@` from a proxy URL. Unparseable values that contain `@` are
+ * treated as credential-shaped and discarded rather than guessed at.
+ */
+function stripProxyUserinfo(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.username === "" && url.password === "") return value;
+    const path = url.pathname === "/" ? "" : url.pathname;
+    return `${url.protocol}//${url.host}${path}${url.search}${url.hash}`;
+  } catch {
+    return value.includes("@") ? "" : value;
+  }
+}
 
 /**
  * The env a clone's `setupCommand` / `testCommand` runs under (issue #114, G-02).
  *
  * Allowlist, not denylist: copies only {@link WITNESS_CHILD_ENV_KEYS} from the parent.
- * Presence of `E2B_API_KEY` is still read by `witnessEvidence` from the *caller* env —
- * that check never reaches this child.
+ * Proxy URL values have userinfo stripped (see the allowlist comment). Presence of
+ * `E2B_API_KEY` is still read by `witnessEvidence` from the *caller* env — that check
+ * never reaches this child.
  */
 export function witnessChildEnv(
   from: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
@@ -109,7 +170,9 @@ export function witnessChildEnv(
   for (const key of WITNESS_CHILD_ENV_KEYS) {
     const value = from[key];
     if (value === undefined) continue;
-    env[key] = value;
+    const copied = PROXY_URL_KEYS.includes(key) ? stripProxyUserinfo(value) : value;
+    if (copied === "") continue;
+    env[key] = copied;
   }
   return env;
 }
@@ -144,10 +207,10 @@ export function witnessChildTimeoutMs(
 }
 
 /**
- * SIGKILL the child and every descendant. `execFile`'s own `timeout` only signals the
- * spawned PID, so `bash -c 'npm test'` would leave the suite running after bash died.
- * `execFile` options do not include `detached`, so the child is not a group leader and
- * `kill(-pid)` is refused; walk `pgrep -P` instead and SIGKILL from the leaves up.
+ * SIGKILL the child and every descendant. The deadline is ours, not `execFile`'s
+ * `timeout`: that option kills only the spawned PID, reparents `bash -c 'npm test'`
+ * grandchildren to init, and then `pgrep -P` on the dead shell sees nothing. Walking
+ * the tree while the shell is still alive, children first, is the whole fix.
  */
 function killWitnessProcessTree(child: ChildProcess): void {
   const pid = child.pid;
@@ -229,29 +292,29 @@ export const hostRunner: WitnessRunner = (step, args, opts) => {
       env: witnessChildEnv(),
       maxBuffer: 16 * 1024 * 1024,
       encoding: "utf8",
-      timeout: timeoutMs,
-      killSignal: "SIGKILL",
     },
     (err, stdout, stderr) => {
       settled = true;
       clearTimeout(timer);
       // `ExecException.code` is already typed `number | undefined`, so the shape needs narrowing, not
       // an assertion: a signal-killed child reports `signal` with no numeric code and must read as 1.
-      // `execFile`'s own `timeout` and our tree-walk can win the race; either one is the deadline.
-      const deadlineHit =
-        timedOut ||
-        (err != null &&
-          err.signal === "SIGKILL" &&
-          err.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
-      if (deadlineHit) {
+      const output = `${stdout}${stderr}`;
+      if (timedOut) {
         resolveRun({
           exit: 1,
-          output: `witness step "${step}" exceeded the ${timeoutMs}ms deadline and was killed\n${stdout}${stderr}`,
+          output: `witness step "${step}" exceeded the ${timeoutMs}ms deadline and was killed\n${output}`,
+        });
+        return;
+      }
+      if (err?.signal) {
+        resolveRun({
+          exit: 1,
+          output: `witness step "${step}" was killed by ${err.signal}\n${output}`,
         });
         return;
       }
       const exit = !err ? 0 : typeof err.code === "number" ? err.code : 1;
-      resolveRun({ exit, output: `${stdout}${stderr}` });
+      resolveRun({ exit, output });
     },
   );
   timer = setTimeout(() => {
