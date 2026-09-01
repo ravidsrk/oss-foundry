@@ -713,20 +713,3 @@ export function evaluatePolicy(
   }
   return { allow: true, code: "ALLOW", reasons, matchedPhrases: matched, record };
 }
-
-export function policyLabel(code: PolicyVerdict["code"]): string {
-  switch (code) {
-    case "ALLOW":
-      return "Allow";
-    case "DENY_FORBIDDEN":
-      return "Denied · forbidden";
-    case "DENY_UNKNOWN_POLICY":
-      return "Denied · unknown policy";
-    case "HOLD_CLA":
-      return "Hold · CLA/DCO";
-    case "HOLD_HUMAN":
-      return "Hold · human";
-    case "HOLD_SCOPE":
-      return "Hold · scope";
-  }
-}

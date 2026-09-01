@@ -94,7 +94,17 @@ See `allowlist.yaml`. Required fields: `id`, `wave`, `aiPolicy`, `testCommand`, 
 `bans`, `humanApprovalsRemaining`, and:
 
 ```
-halt?        { at, reason, source: "secondary-rate-limit", repoId? }
+halt?           { at, reason, source: "secondary-rate-limit", repoId? }
+events          FactoryEvent[], newest first. Bounded ring, cap 80 (`EVENT_RING_CAP` in
+                factory/engine.ts). The 81st prepend drops the oldest. Silent loss is
+                forbidden: every eviction increments `eventsDropped`.
+eventsDropped?  integer ≥ 0, monotonic. Count of events dropped from the ring. Absent
+                means 0 (ledgers written before the counter, and `migrateV6` does not
+                yet fill it). Written by `appendEvents`; not yet on the `FactoryState`
+                TypeScript interface or validated by `isFactoryState` — those live in
+                `factory/types.ts` / `factory/state.ts`, which this change does not own.
+                A follow-up must add the field there so a hand-edited non-number cannot
+                load as a silent 0.
 ```
 
 A durable, factory-wide stop (SPEC.md §6). While it is set, `maySelectRepo` refuses every repo, so
