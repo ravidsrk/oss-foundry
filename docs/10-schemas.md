@@ -98,13 +98,19 @@ halt?           { at, reason, source: "secondary-rate-limit", repoId? }
 events          FactoryEvent[], newest first. Bounded ring, cap 80 (`EVENT_RING_CAP` in
                 factory/engine.ts). The 81st prepend drops the oldest. Silent loss is
                 forbidden: every eviction increments `eventsDropped`.
-eventsDropped?  integer ≥ 0, monotonic. Count of events dropped from the ring. Absent
-                means 0 (ledgers written before the counter, and `migrateV6` does not
-                yet fill it). Written by `appendEvents`; not yet on the `FactoryState`
-                TypeScript interface or validated by `isFactoryState` — those live in
-                `factory/types.ts` / `factory/state.ts`, which this change does not own.
-                A follow-up must add the field there so a hand-edited non-number cannot
-                load as a silent 0.
+eventsDropped?  integer ≥ 0, monotonic. Count of events the 80-entry ring has evicted
+                over this ledger's life. Written by `appendEvents`; declared on
+                `FactoryState` and validated by `isFactoryState` as an optional
+                non-negative INTEGER. Integer and not merely finite because
+                `eventsDroppedOf` floors what it reads, so a persisted `1.5` would
+                otherwise load and be reported as 1 — understating loss in the one field
+                whose whole job is to be accurate about it.
+                Absent means 0, and `migrateV6` deliberately does NOT fill it: an older
+                ledger sitting at the cap may have dropped many events or none, so writing
+                `0` would state the second as fact. Absence reads as the same number but is
+                a missing field rather than a recorded claim.
+                It does not recover the lost events and does not pretend to — it tells a
+                reader that the window they are looking at is not the whole history.
 ```
 
 A durable, factory-wide stop (SPEC.md §6). While it is set, `maySelectRepo` refuses every repo, so

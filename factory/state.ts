@@ -375,7 +375,11 @@ export function isFactoryState(value: unknown): value is FactoryState {
     // refused — the whole point of the field is to be trustworthy about how much history is gone,
     // and a string where a number belongs would read as 0 through `eventsDroppedOf` and quietly
     // claim nothing was lost.
-    optional(o.eventsDropped, (v) => typeof v === "number" && Number.isFinite(v) && v >= 0) &&
+    // `Number.isInteger` and not merely `isFinite`: `eventsDroppedOf` floors what it reads, so a
+    // persisted `1.5` would be accepted here and silently reported as 1 — understating lost events
+    // in the one field whose entire job is to be accurate about how much history is gone. A count of
+    // discrete events has no fractional value, so there is nothing to round.
+    optional(o.eventsDropped, (v) => typeof v === "number" && Number.isInteger(v) && v >= 0) &&
     optional(o.halt, isHalt)
   );
 }

@@ -679,7 +679,10 @@ test("eventsDropped is optional but a wrong type is refused", () => {
   assert.ok(loadedValid.ok, "a numeric eventsDropped must load");
   assert.equal(loadedValid.ok && loadedValid.state.eventsDropped, 7);
 
-  for (const bad of ["7", -1, Number.NaN, Infinity, null, {}]) {
+  // 1.5 is the interesting one and it is not hypothetical: `eventsDroppedOf` floors what it reads,
+  // so a fractional value would load and then be reported as the integer below it — understating
+  // loss in the one field whose entire job is to be accurate about how much history is gone.
+  for (const bad of ["7", -1, 1.5, 0.5, Number.NaN, Infinity, null, {}]) {
     const path = join(dir, `bad-${String(bad)}.json`);
     writeFileSync(path, JSON.stringify({ ...seed, eventsDropped: bad }, null, 2));
     assert.equal(

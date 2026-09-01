@@ -954,10 +954,13 @@ function ev(kind: FactoryEvent["kind"], message: string, packetId?: string): Fac
  * by hand; the 81st prepend silently destroyed the oldest with no marker. One helper is the
  * only way the drop counter stays correct everywhere rather than in one place.
  *
- * `eventsDropped` is written onto the state object but is not yet on `FactoryState` or
- * validated by `isFactoryState` / filled by `migrateV6` (those live in files this change
- * does not own). Absence is 0. A follow-up must add the field to `types.ts` and `state.ts`
- * so a hand-edited non-number cannot load as a silent 0.
+ * `eventsDropped` is declared on `FactoryState` (`factory/types.ts`) and validated by
+ * `isFactoryState` as an optional non-negative INTEGER — integer because `eventsDroppedOf`
+ * floors what it reads, so a persisted `1.5` would otherwise be accepted and reported as 1,
+ * understating loss in the one field whose job is accuracy about it. `migrateV6` deliberately
+ * does NOT fill it: an older ledger sitting at the cap may have dropped many events or none,
+ * and writing `0` would state the second as fact. Absence reads as 0, which is the same
+ * number but a missing field rather than a recorded claim.
  */
 export const EVENT_RING_CAP = 80;
 
