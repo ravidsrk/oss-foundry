@@ -1939,6 +1939,55 @@ test("sync counts a silently merged PR as noReview, and the ledger prints it", (
   );
 });
 
+test("#92: sync prints only the advisory this run produced, not the ledger's history", () => {
+  // The ledger is persisted, so a packet that once had an unreadable review carries that event for
+  // as long as the cap keeps it. Scanning all of `state.events` reprinted it after a CLEAN read, and
+  // the operator reads "the read FAILED — run `reconcile`" as the result of the sync they just ran.
+  //
+  // Keyed by event id rather than position or count: `appendEvent` prepends and caps at 80, so a
+  // tail slice reads the wrong end and a length delta is zero exactly when the cap is working.
+  const seed = withOpenSubmittedWave1();
+  const inflight = seed.packets.find((p) => p.status === "submitted")!;
+  const stale: FactoryState = {
+    ...seed,
+    events: [
+      {
+        id: "evt_stale_0001",
+        at: "2026-08-01T00:00:00.000Z",
+        kind: "follow-up",
+        packetId: inflight.id,
+        message: `Human review not observed for ${inflight.prUrl} — noReview and reviewCommentsAvg NOT recorded for ${inflight.repoId}. The read FAILED — run \`reconcile\` once GitHub answers the review endpoints`,
+      },
+      ...seed.events,
+    ],
+  };
+
+  // This sync reads the reviews perfectly. Nothing about it failed.
+  const clean = runCli(["sync", inflight.id, "--threads-answered", "--state", writeState(stale)], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [inflight.prUrl!]: {
+          state: "closed",
+          merged: true,
+          reviews: [{ login: "ColeMurray", type: "User" }],
+          reviewComments: [{ login: "ColeMurray", type: "User" }],
+        },
+      }),
+    ),
+  });
+  assert.equal(clean.code, 0, clean.out);
+  assert.equal(
+    /ADVISORY[^\n]*Human review not observed/.test(clean.out),
+    false,
+    `a clean sync reprinted a historical advisory:\n${clean.out}`,
+  );
+
+  // ...and the event is still in the ledger, because suppressing the PRINT must not mean losing the
+  // record. `status` and the ledger remain the place history is read.
+  const after = JSON.parse(readFileSync(writeState(stale), "utf8")) as FactoryState;
+  assert.ok(after.events.some((e) => e.id === "evt_stale_0001"), "the historical event must survive");
+});
+
 test("#92: sync names the cap or the outage, not both", () => {
   const seed = withOpenSubmittedWave1();
   const inflight = seed.packets.find((p) => p.status === "submitted")!;

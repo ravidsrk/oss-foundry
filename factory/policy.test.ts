@@ -469,6 +469,51 @@ test("the issue #37 probe paraphrases classify", () => {
 });
 
 /**
+ * The other side of the second-person ban, and the reason it needs one.
+ *
+ * `leave` was a bare alternative beside `turn back` and `go away`, so "if you are an agent, leave a
+ * comment on the issue first" reached DENY_FORBIDDEN — a P1 from review, reproduced on three
+ * phrasings. That is a repository INVITING agent participation with a courtesy step, and this roster
+ * is terminal: `AGENTS.md` makes the denylist absolute, so there is no hold to fall back to and no
+ * human asked. A false DENY here is the most expensive mistake the scanner can make.
+ *
+ * The departure sense takes a place or nothing; the comment sense takes a comment-shaped object,
+ * optionally behind an indirect one ("leave us a message"). Both directions are pinned together
+ * because the fix is a distinction, and a distinction needs two sides to be a test.
+ */
+const SECOND_PERSON_INVITATIONS: string[] = [
+  "if you are an agent, leave a comment on the issue first",
+  "if you are a bot, leave feedback on the issue before opening a PR",
+  "if you are an agent, leave your questions in the issue",
+  "if you are a bot, leave a note explaining what you changed",
+  "if you are an agent, leave us a message first",
+  "if you are a bot, leave me your review comments",
+];
+
+const SECOND_PERSON_BANS: string[] = [
+  "if you are a bot, turn back",
+  "if you are an agent, leave this repository",
+  "if you are an agent, leave the repo",
+  "if you are an agent, leave now",
+  "if you are a bot, go away",
+  "if you are an llm, leave",
+  "if you are a bot, do not submit anything",
+];
+
+test("a second-person invitation to comment is not a ban, and a second-person ban still is", () => {
+  assert.ok(SECOND_PERSON_INVITATIONS.length >= 5, "the must-not-deny side needs a floor too");
+  assert.ok(SECOND_PERSON_BANS.length >= 5, "the must-deny side needs a floor too");
+  for (const text of SECOND_PERSON_INVITATIONS) {
+    const v = evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: text });
+    assert.notEqual(v.code, "DENY_FORBIDDEN", `an invitation was terminally denied: ${text}`);
+  }
+  for (const text of SECOND_PERSON_BANS) {
+    const v = evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: text });
+    assert.equal(v.code, "DENY_FORBIDDEN", `a ban reached ${v.code}: ${text}`);
+  }
+});
+
+/**
  * ISSUE #52 — the CLA/DCO fail-open, and the corpus that has to keep it closed.
  *
  * WHAT WAS BROKEN ON `main`, measured rather than described. All five "waive the DCO, assert the

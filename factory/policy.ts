@@ -41,7 +41,14 @@ const FORBIDDEN_STATEMENTS: RegExp[] = [
   // (agent-framework READMEs name the thing they prevent).
   /(?:don['’]t|do\s+not|never)\s+want\s+(?:any\s+)?(?:ai|llms?|chatgpt|bots?)\s+slop/i,
   // Second-person: "if you are a bot, turn back".
-  /if\s+you\s+are\s+(?:an?\s+)?(?:bot|llm|agent|chatgpt)[^.\n]{0,40}(?:turn\s+back|leave|go\s+away|do\s+not\s+submit)/i,
+  //
+  // `leave` is tempered, and this is a DENY roster so the cost of getting it wrong is terminal. A
+  // repository that says "if you are an agent, leave a comment on the issue first" is INVITING agent
+  // participation with a courtesy step, and a bare `leave` denied it outright — three phrasings
+  // reproduced, all reaching DENY_FORBIDDEN. The departure sense takes a place or nothing ("leave
+  // this repository", "leave now"); the comment sense takes a comment-shaped object. Excluding those
+  // objects keeps the ban and drops the invitation.
+  /if\s+you\s+are\s+(?:an?\s+)?(?:bot|llm|agent|chatgpt)[^.\n]{0,40}(?:turn\s+back|go\s+away|do\s+not\s+submit|leave(?!(?:\s+(?:a|an|the|your|our|some|us|me))*\s+(?:comment|note|feedback|message|remark|review|reply|issue|question)))/i,
 ];
 
 /** A human gate that is NOT a signature: someone looks, nobody signs. Separate roster so the
