@@ -1,0 +1,34 @@
+### TRACK A — abandoned branch: sweep2/issue-37
+issue 37 state: CLOSED — [P0] Policy scanner misses realistic ban phrasings; human fr
+branch commits:
+  c7ad563 fix(policy): restore the imperative ban family; pin the gate by language
+  9873e52 review: bind the object-free refusals to authorship, pin every matcher both ways
+  3fb1007 fix(policy): see realistic ban phrasings; show the freeze the parsed docs
+files touched:
+   docs/04-stations.md    |  67 ++++-
+   docs/10-schemas.md     |   5 +
+   factory/cli.test.ts    |  68 +++++
+   factory/cli.ts         |   8 +-
+   factory/packet.test.ts | 103 +++++++-
+   factory/packet.ts      | 105 +++++++-
+   factory/policy.test.ts | 679 ++++++++++++++++++++++++++++++++++++++++++++++++-
+   factory/policy.ts      | 429 +++++++++++++++++++++++++++++--
+   factory/state.test.ts  |  50 ++++
+   factory/state.ts       |  25 ++
+   factory/types.ts       |  27 ++
+   11 files changed, 1542 insertions(+), 24 deletions(-)
+
+### is its work already on main? (do the branch's own test names exist on main?)
+docs/04-stations.md
+factory/policy.test.ts
+factory/policy.ts
+factory/state.test.ts
+factory/state.ts
+--- sample test names from the branch, checked against main ---
+sed: Broken pipe (os error 32)
+  on main=1 : approve shows the operator the policy text the gate parsed
+  on main=1 : approve names the absence when the gate parsed no policy text at all
+  on main=1 : the packet keeps the policy text the gate parsed
+  on main=1 : a long policy document is truncated on the packet but its true size is
+  on main=1 : the freeze prints the words the scanner read, not a boolean
+  on main=1 : the freeze prints the ban statement the scanner did match

@@ -3,7 +3,7 @@
 Append-only. A session with zero context reads this file and continues from the resume pointer.
 
 ```
-RESUME POINTER: PHASE_2
+RESUME POINTER: P1/T-01
 ```
 
 ---
@@ -65,4 +65,57 @@ Exit criteria: no angle unscored ✔ · every score ≥3 backed by captured evid
 - Deleted a false finding. My first exit-code probe reported `unknown command → exit 0`; `$?` was reading `tail` through a pipeline. Re-measured directly: exit **1**. The bug did not exist.
 - Overrode a scout. `AngleFunctional` reported 105 test failures and flagged it as possibly its own sandbox; it was — one denied `mkdtemp` syscall, and `factory/tmp-dir.ts:52` is the single call site the whole suite funnels through. My own two runs (379/379, twice) stand. The residual observation is kept: 8 of 19 test files hard-require `$TMPDIR` with no skip path.
 
-→ **Next: PHASE 2 — internal archaeology + external research.**
+## PHASE 2 — deep research · COMPLETE
+
+**Track A.** Velocity did not drop, it changed shape: 08-28/29 were breadth (45 PRs, 51 issues closed), 08-30 was depth (86 commits, **one** merged PR — the policy-scanner hardening taking 21 commits and ~20 review rounds). No committed roadmap or prior audit has ever existed, so `docs/completion/` is this repo's first durable plan artifact and there is no plan-vs-reality divergence to explain — every divergence found is doc-vs-code.
+
+**Intent has held.** The first README's sentence (`dd41a55`, 2026-08-27) is still the repo description today, unchanged. Six days added an evidence protocol, a terminal boundary, a fail-closed ledger and a published SPEC — all of it *proving* the original claim, none of it extending scope. There is no scope creep. The gap is between the claim and its demonstration, which is exactly what `AGENTS.md:27` says.
+
+**One salvage decision found.** `sweep2/issue-37` looked like a superseded duplicate (issue #37 is closed). It is not: of 22 tests it adds, 9 are on `main` and **13 are not**, including per-matcher necessity, near-miss non-firing, and a base ratchet. But `policy.ts` was rewritten after the branch was cut, so none apply unmodified → `G-29`, DEFER with an explicit instruction not to delete the branch until a salvage issue exists.
+
+**Track B — six category-only queries, four new gaps.** The two that changed the plan's shape:
+
+- **`X-GitHub-Api-Version` is unpinned, and it matters.** REST API version `2026-03-10` removes `merge_commit_sha`; the tool consumes it at `github-pr.ts:695` and feeds it to `classifyRevert`. When the unversioned default rolls forward, revert detection stops **silently** — on the field that forces `health=stop`. One header. → `G-04`.
+- **`writeFileSync` does not flush.** Node's `flush` option defaults to `false`, so the fix for the top-ranked risk is exact rather than approximate: temp-in-same-dir → `writeFileSync(tmp, json, { flush: true })` → `renameSync`. POSIX rename is atomic; Windows has no such guarantee. → `G-01`.
+
+Three findings recorded as **no effect** so they are not silently dropped, including one that prevents a future mistake: `--experimental-strip-types` is the **correct** spelling and must not be "modernised" to `--strip-types`, which does not exist on the Node 22 line.
+
+Verified rather than assumed: zero enums, namespaces, parameter properties, decorators or import aliases in the tree, so the source is Node 26 forward-compatible even though v26 removed the transform-types escape hatch.
+
+Exit criteria: RESEARCH.md sourced ✔ · every Track B item has an explicit plan effect ✔ · firewall log present ✔.
+
+## PHASE 3 — definition and gap register · COMPLETE
+
+`DEFINITION.md` **frozen at `a708920`**. The bar is the repo's own: *a station without SHA-bound evidence is doctrine-only*. Completion is therefore not feature coverage but three things — every critical flow demonstrated, the ledger survivable, the one integration forward-compatible.
+
+**40 gaps, every one decided. 23 FINISH · 1 CUT · 16 DEFER · 0 ACCEPT.**
+
+| | S0 | S1 | S2 | S3 |
+|---|---|---|---|---|
+| FINISH | 2 | 16 | 5 | 0 |
+| CUT | — | — | 1 | — |
+| DEFER | — | — | 12 | 4 |
+
+Zero `ACCEPT` at any severity. The two standing concessions — operator-equivalent ledger access, and attested-not-witnessed Wave 1+ evidence — are scope statements in `DEFINITION.md` §4 with an expiry, not accepted gaps.
+
+Five angles must move to meet the bar: **3, 6, 7, 9, 17**.
+
+One gap sharpened while writing the register: `G-13` looked like a roster defect, but `load-allowlist.ts:85-93` already throws on an unmarked noop oracle and a `no-suite` repo cannot name a first issue. The live guard is complete; only the **published historical record** in `seed.ts:146-148` is wrong. Much better scoped.
+
+Exit criteria: definition frozen ✔ · every gap decided ✔ · cut line drawn ✔.
+
+## PHASE 4 — phased plan · COMPLETE
+
+**28 tasks across P1–P7. 13 S · 15 M · zero L.** Longest dependency chain: 5. Both S0 gaps land in P2, the safety phase.
+
+`A-11` resolves the one real design tension: a type-check gate needs a type checker, against an explicit, CI-documented zero-dependency property. `typescript` 7.x now ships platform-specific native optional deps, so a devDependency would import a genuine supply chain and a platform-sensitive lockfile. Decision: **CI-only type check via a pinned `npx`** — runtime supply chain stays at exactly zero, the gate still exists, CI still enforces it. The tsconfig is also made to earn its keep: `erasableSyntaxOnly` pins the Node 26 forward-compat property and `verbatimModuleSyntax` catches the type-import-elision hazard the Node docs warn about.
+
+**Three Human Actions filed; two gate launch.** The maximum verdict reachable by the agent alone is therefore **CONDITIONAL GO** — a property of the product's boundary, not of the plan.
+
+`H-03` is the highest-leverage item: **one line in `allowlist.yaml` unblocks three of the seven critical flows.**
+
+Exit criteria: every above-line gap maps to ≥1 task ✔ · every task has acceptance evidence defined ✔ · no L tasks ✔ · human actions filed ✔.
+
+**Second look — one change:** I had scoped `G-17` as "blocked on an E2B account", copying the audit's framing. Re-reading `witness.ts:400-401` against `allowlist.yaml` showed host witnessing is permitted at Wave 0 and that both `ravidsrk/orca-fleet` and `ravidsrk/frontguard` qualify (`wave: 0, sandbox: host`, real test commands). A real machine witness is reachable **today**, on repos the operator owns, with no E2B account. `H-02` was demoted from launch-gating to a product decision with a recommended zero-cost option, and `PLAN.md` says so explicitly.
+
+→ **Next: PHASE 5 — execution begins at `T-01`. Write access to source starts here (R2).**

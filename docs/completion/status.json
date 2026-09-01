@@ -11,12 +11,12 @@
     "note": "npm ci fails (no lockfile); zero declared deps so install is a no-op; 379/379 green from a fresh clone"
   },
   "current_commit": "74af0b27f17ac39cda9779cbc6c73e7ed265e7df",
-  "resume_pointer": "PHASE_2",
-  "definition_frozen_at": null,
+  "resume_pointer": "P1/T-01",
+  "definition_frozen_at": "a708920",
   "completion_pct": 68,
   "gate": {
     "status": "NOT_EVALUATED",
-    "reason": "Definition of Complete is frozen in Phase 3"
+    "reason": "definition frozen; execution begins at P1/T-01. Max reachable by agent alone is CONDITIONAL_GO (H-01, H-03 gate launch)"
   },
   "angles": [
     {
@@ -390,7 +390,476 @@
       "note": "F-8-23: coded and tested, never fired"
     }
   ],
-  "gaps": [],
+  "gaps": [
+    {
+      "id": "G-01",
+      "angle": null,
+      "severity": "S0",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-05",
+        "T-06",
+        "T-07"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-02",
+      "angle": null,
+      "severity": "S0",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-08"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-03",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-25"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-04",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-09"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-05",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-02"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-06",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-01"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-07",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-18"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-08",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-19"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-09",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-20"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-10",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-21"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-11",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-22"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-12",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-12"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-13",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-13"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-14",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-10"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-15",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-23"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-16",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [],
+      "owner": "human:H-01",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-17",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [],
+      "owner": "human:H-02",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-18",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [],
+      "owner": "human:H-03",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-19",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-11"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-20",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-04"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-21",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-14"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-22",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-24"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-23",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-03"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-24",
+      "angle": null,
+      "severity": "S2",
+      "decision": "CUT",
+      "status": "open",
+      "tasks": [
+        "T-15"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-25",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-26",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-27",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-28",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-29",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-30",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-31",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-32",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-33",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-34",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-35",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-36",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-37",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-38",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-39",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-40",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    }
+  ],
   "phases": [
     {
       "id": "P0",
@@ -410,7 +879,7 @@
       ]
     },
     {
-      "id": "P1",
+      "id": "P1-audit",
       "name": "360 audit",
       "status": "complete",
       "exit_criteria": [
@@ -430,10 +899,567 @@
           "evidence": "STATUS.md#second-look"
         }
       ]
+    },
+    {
+      "id": "P2",
+      "name": "Deep research",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "RESEARCH.md complete with sources",
+          "met": true,
+          "evidence": "RESEARCH.md"
+        },
+        {
+          "text": "every Track B item has an explicit plan effect",
+          "met": true,
+          "evidence": "RESEARCH.md"
+        },
+        {
+          "text": "confidentiality firewall log present",
+          "met": true,
+          "evidence": "RESEARCH.md#firewall"
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "name": "Definition and gap register",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "DEFINITION.md frozen",
+          "met": true,
+          "evidence": "DEFINITION.md"
+        },
+        {
+          "text": "every gap decided",
+          "met": true,
+          "evidence": "GAPS.md"
+        },
+        {
+          "text": "cut line drawn",
+          "met": true,
+          "evidence": "GAPS.md#cut-line"
+        }
+      ]
+    },
+    {
+      "id": "P4",
+      "name": "Phased plan",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "every above-line gap maps to >=1 task",
+          "met": true,
+          "evidence": "PLAN.md"
+        },
+        {
+          "text": "every task has acceptance evidence defined",
+          "met": true,
+          "evidence": "PLAN.md"
+        },
+        {
+          "text": "no L-sized tasks",
+          "met": true,
+          "evidence": "PLAN.md#task-counts"
+        },
+        {
+          "text": "human actions filed",
+          "met": true,
+          "evidence": "HUMAN_ACTIONS.md"
+        }
+      ]
     }
   ],
-  "tasks": [],
-  "human_actions": [],
+  "tasks": [
+    {
+      "id": "T-01",
+      "phase": "P1",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-02",
+      "phase": "P1",
+      "size": "M",
+      "depends_on": [
+        "T-01"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-03",
+      "phase": "P1",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-04",
+      "phase": "P1",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-05",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [
+        "T-02"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-06",
+      "phase": "P2",
+      "size": "M",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-07",
+      "phase": "P2",
+      "size": "M",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-08",
+      "phase": "P2",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-09",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-10",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-11",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-12",
+      "phase": "P3",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-13",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-14",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [
+        "T-09"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-15",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [
+        "T-02"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-16",
+      "phase": "P3",
+      "size": "M",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-17",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-18",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-19",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-20",
+      "phase": "P4",
+      "size": "S",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-21",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [
+        "T-09"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-22",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [
+        "T-07"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-23",
+      "phase": "P5",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-24",
+      "phase": "P5",
+      "size": "M",
+      "depends_on": [
+        "T-23"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-25",
+      "phase": "P6",
+      "size": "M",
+      "depends_on": [
+        "T-01",
+        "T-24"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-26",
+      "phase": "P7",
+      "size": "M",
+      "depends_on": [
+        "T-25"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-27",
+      "phase": "P7",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-28",
+      "phase": "P7",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    }
+  ],
+  "human_actions": [
+    {
+      "id": "H-01",
+      "instruction": "Create the machine account and mint a classic public_repo PAT via scripts/machine-account-wizard.sh",
+      "unblocks": [
+        "CF-04",
+        "CF-05"
+      ],
+      "gates_launch": true,
+      "verification": "witness-check, then drive open-draft end to end and capture the draft PR URL",
+      "status": "open"
+    },
+    {
+      "id": "H-02",
+      "instruction": "Decide the E2B / worker-host question; recommendation (a) demonstrate CF-03 at Wave 0 now and defer E2B",
+      "unblocks": [
+        "wave 1+ packets"
+      ],
+      "gates_launch": false,
+      "verification": "capture a real Wave 0 witness with two distinct log sha256s",
+      "status": "open"
+    },
+    {
+      "id": "H-03",
+      "instruction": "Add one firstIssues row to allowlist.yaml on a Wave 0 repo (orca-fleet or frontguard)",
+      "unblocks": [
+        "CF-01",
+        "CF-02",
+        "CF-03"
+      ],
+      "gates_launch": true,
+      "verification": "npm run validate, then tick -> gated ALLOW packet, approve, evidence",
+      "status": "open"
+    }
+  ],
   "assumptions": [
     {
       "id": "A-01",
@@ -484,9 +1510,71 @@
       "id": "A-10",
       "phase": 1,
       "decision": "Angle 4 scored 3/4 despite no coverage instrument"
+    },
+    {
+      "id": "A-11",
+      "phase": "P4",
+      "decision": "Type-check gate runs via a pinned npx typescript in CI only: no dependencies, no devDependencies, no lockfile. typescript 7.x now ships platform-specific native optional deps, so a devDependency would import a real supply chain and a platform-sensitive lockfile into a repo whose zero-dependency property is explicit and CI-documented. Runtime supply chain stays at exactly zero; the gate still exists and CI still enforces it."
     }
   ],
-  "research": [],
+  "research": [
+    {
+      "id": "R-01",
+      "track": "B",
+      "query_category": "Node.js type stripping lifecycle and stability",
+      "url": "https://nodejs.org/api/typescript.html",
+      "fetched": "2026-09-01",
+      "effect": "confirms:G-05"
+    },
+    {
+      "id": "R-02",
+      "track": "B",
+      "query_category": "Node.js 22/24 LTS support windows",
+      "url": "https://github.com/nodejs/Release/blob/main/schedule.json",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-06"
+    },
+    {
+      "id": "R-03",
+      "track": "B",
+      "query_category": "npm engines enforcement and engine-strict default",
+      "url": "https://docs.npmjs.com/cli/v11/using-npm/config",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-06"
+    },
+    {
+      "id": "R-04",
+      "track": "B",
+      "query_category": "GitHub REST API deprecations and API versions",
+      "url": "https://docs.github.com/en/rest/about-the-rest-api/breaking-changes",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-04"
+    },
+    {
+      "id": "R-05",
+      "track": "B",
+      "query_category": "GitHub REST rate limits and recommended handling",
+      "url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "fetched": "2026-09-01",
+      "effect": "confirms:G-10"
+    },
+    {
+      "id": "R-06",
+      "track": "B",
+      "query_category": "atomic file replacement in Node.js POSIX and Windows",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-01"
+    },
+    {
+      "id": "R-07",
+      "track": "A",
+      "query_category": "internal: velocity, abandoned branches, intent drift",
+      "url": "evidence/p2-a1-velocity.txt",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-29"
+    }
+  ],
   "breakers_tripped": [],
   "history": [
     {

@@ -1,0 +1,14 @@
+### Node 26 forward-compat: syntax with NO escape hatch after v26.0.0 removed --experimental-transform-types
+--- enum declarations ---
+  count: 0
+--- namespace with runtime code ---
+  count: 0
+--- parameter properties (ctor with modifier) ---
+  count: 0
+--- decorators ---
+  count: 0
+--- import aliases (import x = y) ---
+
+### does it actually run on the current Node line? (local v24.20.0)
+v24.20.0
+suite ok — 379 tests across 19 files, every file accounted for
