@@ -16,11 +16,16 @@ import {
   nextPageUrl,
   revertCheck,
   syncGithubPr,
+  githubApiHeaders,
   githubRequestInit,
   githubFetchTimeoutMs,
+  GITHUB_API_VERSION,
+  GITHUB_AUTHENTICATED_RATE_LIMIT_PER_HOUR,
+  GITHUB_UNAUTHENTICATED_RATE_LIMIT_PER_HOUR,
   GITHUB_FETCH_TIMEOUT_MS,
   GITHUB_FETCH_TIMEOUT_MAX_MS,
   MAX_LIST_PAGES,
+  resetUnauthenticatedGithubWarning,
 } from "./github-pr.ts";
 import { REVERT_WINDOW_DAYS } from "./scorecard.ts";
 
@@ -1072,4 +1077,235 @@ test("#113: a truthy invalid FOUNDRY_GITHUB_TIMEOUT_MS falls back to the shipped
     else process.env.FOUNDRY_GITHUB_TIMEOUT_MS = prev;
   }
   assert.doesNotThrow(() => githubRequestInit({}, Number.POSITIVE_INFINITY));
+});
+
+/**
+ * G-04 / T-09. The pin is the whole fix: without `X-GitHub-Api-Version` every request inherits
+ * GitHub's rolling default, and version `2026-03-10` removes `merge_commit_sha` — the field
+ * `syncGithubPr` copies onto `PrMeta.mergeCommitSha` and the sole input to `classifyRevert`.
+ * A test that only inspects `githubApiHeaders()` would miss `createDraftPull`, which builds
+ * its headers inline, so this enumerates every shipped GitHub call site and asserts the header
+ * on the request that actually left. The version string is written here, not read out of the
+ * constant, for the same reason the page-cap test writes `10`.
+ */
+test("every GitHub fetch carries X-GitHub-Api-Version 2022-11-28", async () => {
+  assert.equal(GITHUB_API_VERSION, "2022-11-28");
+  assert.equal(
+    githubApiHeaders({ "X-GitHub-Api-Version": "2026-03-10" })["X-GitHub-Api-Version"],
+    "2022-11-28",
+    "a caller must not be able to drop the pin via extra headers",
+  );
+
+  const seen: { name: string; version: string | null }[] = [];
+  const tracking =
+    (name: string): typeof fetch =>
+    async (_url, init) => {
+      seen.push({ name, version: new Headers(init?.headers).get("X-GitHub-Api-Version") });
+      return jsonResponse(200, []);
+    };
+
+  const sites: { name: string; run: (f: typeof fetch) => Promise<unknown> }[] = [
+    { name: "listOpenPulls", run: (f) => listOpenPulls("ravidsrk/orca-fleet", f) },
+    {
+      name: "listCrossReferencingOpenPulls",
+      run: (f) => listCrossReferencingOpenPulls("ravidsrk/orca-fleet", 71, f),
+    },
+    { name: "fetchIssueState", run: (f) => fetchIssueState("ravidsrk/orca-fleet", 71, f) },
+    { name: "fetchIssueClosingRef", run: (f) => fetchIssueClosingRef("ravidsrk/orca-fleet", 71, f) },
+    { name: "fetchRepoFile", run: (f) => fetchRepoFile("ravidsrk/orca-fleet", "AGENTS.md", f) },
+    { name: "compareCommits", run: (f) => compareCommits("ravidsrk/orca-fleet", BASE, HEAD, f) },
+    { name: "fetchHumanReview", run: (f) => fetchHumanReview("ravidsrk/orca-fleet", 70, f) },
+    {
+      name: "listCommitsSince",
+      run: (f) => listCommitsSince("ravidsrk/orca-fleet", { since: "2026-08-27T07:04:52Z" }, f),
+    },
+    {
+      name: "revertCheck",
+      run: (f) =>
+        revertCheck(
+          "ravidsrk/orca-fleet",
+          { mergeCommitSha: HEAD, mergedAt: "2026-08-27T07:04:52Z", baseRef: "main" },
+          f,
+        ),
+    },
+    {
+      name: "syncGithubPr",
+      run: (f) => syncGithubPr({ url: "https://github.com/ravidsrk/orca-fleet/pull/70" }, f),
+    },
+    {
+      name: "createDraftPull",
+      run: (f) =>
+        createDraftPull(
+          "ColeMurray/background-agents",
+          { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+          f,
+          { FOUNDRY_PAT: "ghp_x" },
+        ),
+    },
+  ];
+  assert.equal(
+    sites.length,
+    11,
+    "the shipped GitHub call-site count; a new site must be added here so the pin cannot go missing on it",
+  );
+
+  for (const site of sites) await site.run(tracking(site.name));
+
+  assert.ok(seen.length >= sites.length, `expected at least one fetch per call site, got ${seen.length}`);
+  const missing = seen.filter((row) => row.version !== "2022-11-28");
+  assert.deepEqual(missing, [], `requests missing the pin: ${JSON.stringify(missing)}`);
+  const names = [...new Set(seen.map((row) => row.name))].sort();
+  assert.deepEqual(
+    names,
+    sites.map((s) => s.name).sort(),
+    "a listed call site made no request — it cannot prove it carries the pin",
+  );
+});
+
+const PRIMARY_RESET_UNIX = 1_770_000_000;
+
+function primaryLimitResponse(status: number, extra: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "0",
+      "x-ratelimit-used": "5000",
+      "x-ratelimit-reset": String(PRIMARY_RESET_UNIX),
+      "x-ratelimit-resource": "core",
+      ...extra,
+    },
+  });
+}
+
+/**
+ * G-10 / T-21. A quota-exhausted 403 used to be byte-identical to any other 403 (`GitHub 403
+ * listing pulls on …`). Primary state lives in `x-ratelimit-*`; secondary limits already halt
+ * on a body match and must keep doing that — GitHub's own guidance is to back off, not retry,
+ * and this product goes further with a durable factory halt. No retries are added here.
+ */
+test("primary rate limit exhaustion is distinguishable from an ordinary 403", async () => {
+  assert.equal(GITHUB_AUTHENTICATED_RATE_LIMIT_PER_HOUR, 5_000);
+  assert.equal(GITHUB_UNAUTHENTICATED_RATE_LIMIT_PER_HOUR, 60);
+  const resetIso = new Date(PRIMARY_RESET_UNIX * 1000).toISOString();
+
+  const exhausted = await listOpenPulls("ravidsrk/orca-fleet", async () => primaryLimitResponse(403));
+  assert.equal(exhausted.ok, false);
+  if (!exhausted.ok) {
+    assert.match(exhausted.error, /primary rate limit exhausted/i);
+    assert.match(exhausted.error, /core/);
+    assert.match(exhausted.error, /5000 requests\/hour/);
+    assert.match(exhausted.error, new RegExp(resetIso.replaceAll(".", "\\.")));
+    assert.doesNotMatch(exhausted.error, /^GitHub 403 listing pulls/);
+  }
+
+  const exhausted429 = await listOpenPulls("ravidsrk/orca-fleet", async () => primaryLimitResponse(429));
+  assert.equal(exhausted429.ok, false);
+  if (!exhausted429.ok) assert.match(exhausted429.error, /primary rate limit exhausted/i);
+
+  const ordinary = await listOpenPulls("ravidsrk/orca-fleet", async () => jsonResponse(403, { message: "nope" }));
+  assert.equal(ordinary.ok, false);
+  if (!ordinary.ok) {
+    assert.match(ordinary.error, /GitHub 403 listing pulls/);
+    assert.doesNotMatch(ordinary.error, /primary rate limit/i);
+  }
+
+  const secondary = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () => jsonResponse(403, { message: "You have exceeded a secondary rate limit. Please wait." }),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(secondary.ok, false);
+  if (!secondary.ok) {
+    assert.equal(secondary.halt, true);
+    assert.match(secondary.error, /secondary rate limit/i);
+    assert.doesNotMatch(secondary.error, /primary rate limit/i);
+  }
+
+  // Secondary wins even when primary headers are also present — the halt path must not be
+  // reclassified as quota exhaustion.
+  const secondaryWithPrimaryHeaders = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () =>
+      new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit. Please wait." }), {
+        status: 403,
+        headers: {
+          "Content-Type": "application/json",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(PRIMARY_RESET_UNIX),
+          "x-ratelimit-resource": "core",
+        },
+      }),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(secondaryWithPrimaryHeaders.ok, false);
+  if (!secondaryWithPrimaryHeaders.ok) {
+    assert.equal(secondaryWithPrimaryHeaders.halt, true);
+    assert.match(secondaryWithPrimaryHeaders.error, /HALT/i);
+  }
+
+  const quotaOnCreate = await createDraftPull(
+    "ColeMurray/background-agents",
+    { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+    async () => primaryLimitResponse(403),
+    { FOUNDRY_PAT: "ghp_x" },
+  );
+  assert.equal(quotaOnCreate.ok, false);
+  if (!quotaOnCreate.ok) {
+    assert.equal(quotaOnCreate.halt, undefined);
+    assert.match(quotaOnCreate.error, /primary rate limit exhausted/i);
+    assert.match(quotaOnCreate.error, /creating the draft/);
+  }
+});
+
+/**
+ * G-10 / T-21. Reads are silently unauthenticated when neither `GITHUB_TOKEN` nor `GH_TOKEN`
+ * is set, which drops the ceiling from 5,000/hr to 60/hr against a ~19-requests-per-tick spend.
+ * Warn once, clearly; do not make the token mandatory.
+ */
+test("unauthenticated GitHub reads warn once, and stay quiet when a token is set", async () => {
+  const prevGithub = process.env.GITHUB_TOKEN;
+  const prevGh = process.env.GH_TOKEN;
+  const origError = console.error;
+  const lines: string[] = [];
+  console.error = ((...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  }) as typeof console.error;
+  const unauthWarnings = () => lines.filter((l) => /unauthenticated/i.test(l));
+
+  try {
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GH_TOKEN;
+    resetUnauthenticatedGithubWarning();
+    lines.length = 0;
+    await listOpenPulls("ravidsrk/orca-fleet", async () => jsonResponse(200, []));
+    await listOpenPulls("ravidsrk/orca-fleet", async () => jsonResponse(200, []));
+    assert.equal(unauthWarnings().length, 1, "the warning must fire once per process, not once per request");
+    assert.match(unauthWarnings()[0] ?? "", /60 requests\/hour/);
+    assert.match(unauthWarnings()[0] ?? "", /5,?000/);
+    assert.match(unauthWarnings()[0] ?? "", /GITHUB_TOKEN|GH_TOKEN/);
+
+    resetUnauthenticatedGithubWarning();
+    lines.length = 0;
+    process.env.GITHUB_TOKEN = "ghp_test";
+    await listOpenPulls("ravidsrk/orca-fleet", async () => jsonResponse(200, []));
+    assert.deepEqual(unauthWarnings(), [], "GITHUB_TOKEN must suppress the unauthenticated warning");
+
+    delete process.env.GITHUB_TOKEN;
+    process.env.GH_TOKEN = "ghp_test";
+    resetUnauthenticatedGithubWarning();
+    lines.length = 0;
+    await listOpenPulls("ravidsrk/orca-fleet", async () => jsonResponse(200, []));
+    assert.deepEqual(unauthWarnings(), [], "GH_TOKEN must suppress the unauthenticated warning");
+  } finally {
+    console.error = origError;
+    if (prevGithub === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = prevGithub;
+    if (prevGh === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = prevGh;
+    resetUnauthenticatedGithubWarning();
+  }
 });

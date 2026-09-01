@@ -62,14 +62,103 @@ export function githubRequestInit(
   return { ...extra, signal: AbortSignal.timeout(githubFetchTimeoutMs(timeoutMs)) };
 }
 
+/**
+ * REST API version this client pins on every request.
+ *
+ * Unversioned requests inherit GitHub's rolling default. Version `2026-03-10`
+ * removes `merge_commit_sha` from every PR payload. This module copies that
+ * field onto `PrMeta.mergeCommitSha` in `syncGithubPr`, and that value is the
+ * sole input to `classifyRevert` — the entire revert-detection path. When the
+ * unversioned default rolls forward the field is `undefined`, `revertCheck`
+ * short-circuits on `if (!meta.mergeCommitSha)`, and revert detection stops
+ * **silently**. `reverts > 0` is what forces `health=stop`, so the failure
+ * mode is a governance gate that quietly stops firing. `2022-11-28` is
+ * supported until 2028-03-10.
+ */
+export const GITHUB_API_VERSION = "2022-11-28";
+
+/**
+ * GitHub REST **primary** (core) rate-limit ceilings. They appeared nowhere in
+ * the repo, so headroom against a measured ~19-requests-per-tick spend could
+ * not be computed (G-10 / R-05).
+ *
+ * Authenticated PAT: 5,000 requests/hour. Unauthenticated: 60/hour — the
+ * fourth tick of an hour then fails with an unexplained 403 if reads run
+ * without `GITHUB_TOKEN`/`GH_TOKEN`. Secondary limits are a different class
+ * (body matching `/secondary rate limit/i`) and already halt-and-never-retry;
+ * this module does not add retries for either class.
+ */
+export const GITHUB_AUTHENTICATED_RATE_LIMIT_PER_HOUR = 5_000;
+export const GITHUB_UNAUTHENTICATED_RATE_LIMIT_PER_HOUR = 60;
+
+let unauthenticatedGithubWarningEmitted = false;
+
+/**
+ * The unauthenticated warning is process-wide and once-only so a tick does not
+ * print 19 copies of the same ceiling. Tests reset it so they do not depend on
+ * suite order.
+ */
+export function resetUnauthenticatedGithubWarning(): void {
+  unauthenticatedGithubWarningEmitted = false;
+}
+
+function warnUnauthenticatedGithubReads(): void {
+  if (unauthenticatedGithubWarningEmitted) return;
+  unauthenticatedGithubWarningEmitted = true;
+  console.error(
+    `warning: GitHub reads are unauthenticated (neither GITHUB_TOKEN nor GH_TOKEN is set). Anonymous ceiling is ${GITHUB_UNAUTHENTICATED_RATE_LIMIT_PER_HOUR} requests/hour against a documented ~19-requests-per-tick spend, so the fourth tick of an hour fails with 403. Authenticated PAT ceiling is ${GITHUB_AUTHENTICATED_RATE_LIMIT_PER_HOUR}/hour. The token is not required; set GITHUB_TOKEN or GH_TOKEN to raise the ceiling.`,
+  );
+}
+
+/** `x-ratelimit-reset` is unix seconds; ISO is the operator-readable form. */
+function formatRateLimitReset(raw: string | null | undefined): string {
+  const n = raw == null || raw === "" ? Number.NaN : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return "at an unknown time";
+  const ms = n < 1e12 ? n * 1000 : n;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "at an unknown time";
+  return d.toISOString();
+}
+
+/**
+ * Primary quota exhaustion only: 403/429 with `x-ratelimit-remaining: 0`.
+ * Absent remaining is not a match — that is how an ordinary 403 stays an
+ * ordinary 403, and how a secondary-limit body is left to its own handler.
+ */
+function primaryRateLimitMessage(res: Response): string | undefined {
+  if (res.status !== 403 && res.status !== 429) return undefined;
+  const remaining = res.headers?.get("x-ratelimit-remaining");
+  if (remaining !== "0") return undefined;
+  const resource = res.headers?.get("x-ratelimit-resource") ?? "core";
+  const limit = res.headers?.get("x-ratelimit-limit");
+  const resetAt = formatRateLimitReset(res.headers?.get("x-ratelimit-reset"));
+  const retryAfter = res.headers?.get("retry-after");
+  const retry = retryAfter ? `; retry-after ${retryAfter}s` : "";
+  const ceiling =
+    limit != null && limit !== ""
+      ? `${limit} requests/hour`
+      : `${GITHUB_AUTHENTICATED_RATE_LIMIT_PER_HOUR}/hour authenticated, ${GITHUB_UNAUTHENTICATED_RATE_LIMIT_PER_HOUR}/hour unauthenticated`;
+  return `GitHub primary rate limit exhausted (${resource}: ${ceiling}, remaining 0, resets ${resetAt}${retry})`;
+}
+
+function githubHttpError(res: Response, what: string): string {
+  const primary = primaryRateLimitMessage(res);
+  if (primary) return what ? `${primary} ${what}` : primary;
+  return what ? `GitHub ${res.status} ${what}` : `GitHub ${res.status}`;
+}
+
 export function githubApiHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "oss-foundry",
     ...extra,
+    // Spread extra first so a caller cannot drop the pin. `Accept` may still
+    // be overridden (raw-file reads); the version may not.
+    "X-GitHub-Api-Version": GITHUB_API_VERSION,
   };
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (token) headers.Authorization = `Bearer ${token}`;
+  else if (!headers.Authorization) warnUnauthenticatedGithubReads();
   return headers;
 }
 
@@ -195,7 +284,7 @@ export async function fetchIssueState(
       githubRequestInit({ headers: githubApiHeaders() }),
     );
     if (!res.ok) {
-      return { ok: false, error: `GitHub ${res.status} reading ${repoId}#${issueNumber}` };
+      return { ok: false, error: githubHttpError(res, `reading ${repoId}#${issueNumber}`) };
     }
     const body = (await res.json()) as {
       number?: number;
@@ -313,7 +402,10 @@ export async function compareCommits(
     if (!res.ok) {
       return {
         ok: false,
-        error: `GitHub ${res.status} comparing ${baseSha.slice(0, 7)}...${headSha.slice(0, 7)} on ${repoId}`,
+        error: githubHttpError(
+          res,
+          `comparing ${baseSha.slice(0, 7)}...${headSha.slice(0, 7)} on ${repoId}`,
+        ),
       };
     }
     const body = (await res.json()) as {
@@ -501,7 +593,7 @@ async function listAllPages<T>(
   const items: T[] = [];
   for (let page = 0; page < cap; page += 1) {
     const res = await fetchImpl(url, githubRequestInit({ headers: githubApiHeaders() }));
-    if (!res.ok) return { ok: false, error: `GitHub ${res.status} ${what}` };
+    if (!res.ok) return { ok: false, error: githubHttpError(res, what) };
     const body = await res.json();
     if (!Array.isArray(body)) return { ok: false, error: `GitHub returned a non-list ${what}` };
     items.push(...(body as T[]));
@@ -657,7 +749,7 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
       `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
       githubRequestInit({ headers: githubApiHeaders() }),
     );
-    if (!res.ok) return { ok: false as const, error: `GitHub ${res.status}` };
+    if (!res.ok) return { ok: false as const, error: githubHttpError(res, "") };
     const pr = (await res.json()) as {
       html_url: string;
       title: string;
@@ -760,6 +852,7 @@ export async function createDraftPull(
           "User-Agent": "oss-foundry",
           Authorization: `Bearer ${pat}`,
           "Content-Type": "application/json",
+          "X-GitHub-Api-Version": GITHUB_API_VERSION,
         },
         body: JSON.stringify(payload),
       }),
@@ -777,6 +870,10 @@ export async function createDraftPull(
         error:
           "GitHub secondary rate limit on content creation — HALT the factory (AUP: excessive automated bulk activity). Do not retry; investigate before any further create.",
       };
+    }
+    const primary = primaryRateLimitMessage(res);
+    if (primary) {
+      return { ok: false, error: `${primary} creating the draft on ${repoId}` };
     }
     if (res.status === 403) {
       return {

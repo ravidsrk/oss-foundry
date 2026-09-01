@@ -1,0 +1,59 @@
+### T-09 — pin X-GitHub-Api-Version: 2022-11-28 (G-04)
+
+Pinned in `githubApiHeaders` as `GITHUB_API_VERSION`, after the extra-header spread so a
+caller cannot drop it. `createDraftPull` builds headers inline (FOUNDRY_PAT must win over
+GITHUB_TOKEN) so it sets the same named constant itself.
+
+Why this version: `2026-03-10` removes `merge_commit_sha` from every PR payload. This code
+copies that field at `syncGithubPr` onto `PrMeta.mergeCommitSha`, the sole input to
+`classifyRevert`. When the unversioned default rolls forward, revert detection stops
+silently and `reverts > 0` stops forcing `health=stop`. `2022-11-28` is supported until
+2028-03-10.
+
+--- header the client now sends ---
+
+  "X-GitHub-Api-Version": GITHUB_API_VERSION   // "2022-11-28"
+
+--- 11 call sites, each observed carrying the pin ---
+
+  listOpenPulls
+  listCrossReferencingOpenPulls
+  fetchIssueState
+  fetchIssueClosingRef
+  fetchRepoFile
+  compareCommits
+  fetchHumanReview
+  listCommitsSince
+  revertCheck
+  syncGithubPr
+  createDraftPull
+
+Test: "every GitHub fetch carries X-GitHub-Api-Version 2022-11-28"
+  enumerates the 11 sites through the injected fetchImpl seam; asserts every request's
+  X-GitHub-Api-Version is the literal "2022-11-28" (not read out of the constant);
+  also asserts extra headers cannot override the pin.
+
+$ node --experimental-strip-types --test --test-name-pattern 'every GitHub fetch carries X-GitHub-Api-Version' factory/github-pr.test.ts
+  ✔ every GitHub fetch carries X-GitHub-Api-Version 2022-11-28
+  tests 1 / pass 1 / fail 0
+
+--- NEGATIVE CONTROL 1: drop both pin sites (githubApiHeaders + createDraftPull) ---
+
+  removed 2 pin lines
+  ✖ every GitHub fetch carries X-GitHub-Api-Version 2022-11-28
+  AssertionError: a caller must not be able to drop the pin via extra headers
+    actual: '2026-03-10'
+    expected: '2022-11-28'
+  EXIT:1
+  restored
+
+--- NEGATIVE CONTROL 2: drop only the createDraftPull pin (proves enumeration, not just githubApiHeaders) ---
+
+  T-09b: dropped createDraftPull pin only
+  ✖ every GitHub fetch carries X-GitHub-Api-Version 2022-11-28
+  AssertionError: requests missing the pin: [{"name":"createDraftPull","version":null}]
+  EXIT:1
+  restored
+
+$ npm test
+  suite ok — 382 tests across 19 files, every file accounted for

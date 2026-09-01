@@ -1,0 +1,56 @@
+### T-21 — detect primary rate limit; warn when unauthenticated (G-10)
+
+Primary quota exhaustion is now a distinct error: a 403 or 429 with
+`x-ratelimit-remaining: 0` reports the resource, the ceiling, remaining 0, and the reset
+as ISO-8601 (unix-seconds `x-ratelimit-reset`). `retry-after` is named when present.
+No retries are added.
+
+Ceilings documented in `factory/github-pr.ts` (they appeared nowhere in the repo):
+  authenticated PAT: 5,000 requests/hour
+  unauthenticated:      60 requests/hour
+  measured spend:     ~19 requests/tick
+  so an unauthenticated hour fails on the fourth tick.
+
+Secondary-limit handling is unchanged: a 403/429 whose body matches /secondary rate limit/i
+still returns `{halt: true}` and is checked BEFORE the primary remaining-0 path, including
+when primary headers are also present.
+
+Unauthenticated reads (neither GITHUB_TOKEN nor GH_TOKEN): warn once via console.error.
+The token is not mandatory; GITHUB_TOKEN or GH_TOKEN suppresses the warning.
+
+--- simulated exhausted quota (listOpenPulls, x-ratelimit-remaining: 0, reset 1770000000) ---
+
+  GitHub primary rate limit exhausted (core: 5000 requests/hour, remaining 0, resets 2026-02-02T02:40:00.000Z) listing pulls on ravidsrk/orca-fleet
+
+  Ordinary 403 without remaining-0 stays:
+  GitHub 403 listing pulls on ravidsrk/orca-fleet
+
+Tests (driven through fetchImpl):
+  ✔ primary rate limit exhaustion is distinguishable from an ordinary 403
+  ✔ unauthenticated GitHub reads warn once, and stay quiet when a token is set
+
+$ node --experimental-strip-types --test --test-name-pattern 'primary rate limit|unauthenticated GitHub reads' factory/github-pr.test.ts
+  ✔ primary rate limit exhaustion is distinguishable from an ordinary 403
+  ✔ unauthenticated GitHub reads warn once, and stay quiet when a token is set
+  tests 2 / pass 2 / fail 0
+
+--- NEGATIVE CONTROL 1: primaryRateLimitMessage always returns undefined ---
+
+  T-21a: primaryRateLimitMessage always undefined
+  ✖ primary rate limit exhaustion is distinguishable from an ordinary 403
+  AssertionError: The input did not match /primary rate limit exhausted/i
+  Input: 'GitHub 403 listing pulls on ravidsrk/orca-fleet'
+  EXIT:1
+  restored
+
+--- NEGATIVE CONTROL 2: skip the unauthenticated warning ---
+
+  T-21b: unauthenticated warning skipped
+  ✖ unauthenticated GitHub reads warn once, and stay quiet when a token is set
+  AssertionError: the warning must fire once per process, not once per request
+  0 !== 1
+  EXIT:1
+  restored
+
+$ npm test
+  suite ok — 382 tests across 19 files, every file accounted for
