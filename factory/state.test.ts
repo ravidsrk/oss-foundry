@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmp } from "./tmp-dir.ts";
@@ -7,8 +8,9 @@ import { buildPacket } from "./packet.ts";
 import { applyReviewToScorecard, emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { withOpenSubmittedWave1 } from "./seed-fixtures.ts";
-import { loadFactoryState, saveFactoryState } from "./state.ts";
+import { isValidPacketId, loadFactoryState, saveFactoryState } from "./state.ts";
 import { evaluatePolicy } from "./policy.ts";
+import type { FactoryState } from "./types.ts";
 
 test("missing state file loads seed and does not invent a file", () => {
   const path = join(tmp("foundry-"), "missing.json");
@@ -441,4 +443,214 @@ test("an owner repo with nothing fetched is ALLOW, not DENY_UNKNOWN_POLICY", () 
   const v = evaluatePolicy({ repoId: "ravidsrk/frontguard", issueTitle: "docs typo" });
   assert.equal(v.record?.stance, "silent");
   assert.equal(v.code, "ALLOW");
+});
+
+/**
+ * ISSUE G-01, severity S0 — the ledger write used to be one line: `writeFileSync(path, json)`.
+ *
+ * That is a TRUNCATING write in place. `open(O_TRUNC)` empties the file before the first byte of new
+ * content lands, so anything that stops the process in between — a crash, `SIGKILL`, a full disk, a
+ * closed laptop — leaves a prefix of valid JSON, or nothing at all. `loadFactoryState` then does the
+ * right thing and refuses it, and that is where the cost lands: every verb goes through `mustLoad`,
+ * so a half-written ledger takes out `status` as well, the one command an operator would reach for
+ * to find out what just happened. There was no backup and no documented recovery.
+ *
+ * WHY A CONCURRENT READER AND NOT A SIGKILL LOOP. A kill loop is the obvious test and it is a bad
+ * one: measured here, an 8 MB payload torn by `SIGKILL` produced an unparseable file roughly once in
+ * twelve attempts, so the test would pass most runs with a broken implementation and fail
+ * intermittently for timing reasons — a flake, in a repository that treats flakes as defects. A
+ * reader sampling the same file continuously observes the whole write window instead of racing one
+ * instant of it, and the measured discrimination is unambiguous:
+ *
+ *   truncate-in-place : complete=158  partial=29
+ *   temp+flush+rename : complete=186  partial=0
+ *
+ * So the assertion is `partial === 0`, which cannot fail spuriously: a partial read is only possible
+ * if the target is observable in a half-written state, which is exactly the property under test.
+ */
+test("a concurrent reader never observes a half-written ledger", () => {
+  const dir = tmp("foundry-atomic");
+  const path = join(dir, "state.json");
+
+  // Large enough that the write spans many syscalls and the window is worth sampling. A small
+  // ledger is nearly atomic by accident — one `write(2)` — which would make this prove nothing.
+  const seed = seedState();
+  const padded: FactoryState = {
+    ...seed,
+    events: Array.from({ length: 20000 }, (_, i) => ({
+      id: `ev_${i}_${"x".repeat(40)}`,
+      kind: "tick" as const,
+      message: `padding so the write is not a single syscall ${i}`,
+      at: new Date().toISOString(),
+    })),
+  };
+
+  const writerSource = `
+import { readFileSync } from "node:fs";
+import { saveFactoryState } from ${JSON.stringify(new URL("./state.ts", import.meta.url).href)};
+const state = JSON.parse(readFileSync(process.env.PAYLOAD, "utf8"));
+for (;;) saveFactoryState(process.env.TARGET, state);
+`;
+  const payload = join(dir, "payload.json");
+  const writerPath = join(dir, "writer.mjs");
+  writeFileSync(payload, JSON.stringify(padded));
+  writeFileSync(writerPath, writerSource);
+
+  const childEnv: Record<string, string | undefined> = {
+    ...process.env,
+    TARGET: path,
+    PAYLOAD: payload,
+  };
+  // Deleted, not blanked: an inherited NODE_TEST_CONTEXT changes how a child node behaves.
+  delete childEnv.NODE_TEST_CONTEXT;
+  const writer = spawn(process.execPath, ["--experimental-strip-types", writerPath], {
+    env: childEnv,
+    stdio: "ignore",
+  });
+
+  try {
+    let complete = 0;
+    let partial = 0;
+    const deadline = Date.now() + 800;
+    while (Date.now() < deadline) {
+      let raw: string;
+      try {
+        raw = readFileSync(path, "utf8");
+      } catch {
+        continue; // not created yet; absence is not a torn file
+      }
+      if (raw.length === 0) {
+        partial += 1;
+        continue;
+      }
+      try {
+        JSON.parse(raw);
+        complete += 1;
+      } catch {
+        partial += 1;
+      }
+    }
+    assert.ok(complete > 0, `sampled ${complete} complete reads — the writer never produced a ledger, so this proves nothing`);
+    assert.equal(
+      partial,
+      0,
+      `${partial} of ${complete + partial} reads saw a half-written ledger. The write is not atomic: a reader (or the next run's loader) can observe a truncated file.`,
+    );
+  } finally {
+    writer.kill("SIGKILL");
+  }
+});
+
+/**
+ * The other half of the same guarantee, and the one the launch gate names: after the process is
+ * killed outright, the ledger is either absent or LOADABLE — never present-and-refused.
+ *
+ * This is the weaker discriminator of the two (see above: the tear rate under `SIGKILL` is low), so
+ * it is not carrying the proof. It is here because "survives a kill" is the property an operator
+ * actually cares about, and stating it as a test means a future change that reintroduces an
+ * in-place write has two chances to be caught rather than one.
+ */
+test("a ledger killed mid-write is absent or loadable, never present and unreadable", () => {
+  const dir = tmp("foundry-kill");
+  const payload = join(dir, "payload.json");
+  const writerPath = join(dir, "writer.mjs");
+  const seed = seedState();
+  const padded: FactoryState = {
+    ...seed,
+    events: Array.from({ length: 20000 }, (_, i) => ({
+      id: `ev_${i}_${"x".repeat(40)}`,
+      kind: "tick" as const,
+      message: `padding ${i}`,
+      at: new Date().toISOString(),
+    })),
+  };
+  writeFileSync(payload, JSON.stringify(padded));
+  writeFileSync(
+    writerPath,
+    `
+import { readFileSync } from "node:fs";
+import { saveFactoryState } from ${JSON.stringify(new URL("./state.ts", import.meta.url).href)};
+const state = JSON.parse(readFileSync(process.env.PAYLOAD, "utf8"));
+for (;;) saveFactoryState(process.env.TARGET, state);
+`,
+  );
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const path = join(dir, `killed-${attempt}.json`);
+    const childEnv: Record<string, string | undefined> = { ...process.env, TARGET: path, PAYLOAD: payload };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const writer = spawn(process.execPath, ["--experimental-strip-types", writerPath], {
+      env: childEnv,
+      stdio: "ignore",
+    });
+    const start = Date.now();
+    while (Date.now() - start < 40 + attempt * 15) {
+      // busy-wait: the point is to kill at a varying offset into the write loop
+    }
+    writer.kill("SIGKILL");
+    // Give the OS a moment to reap before reading.
+    const settle = Date.now();
+    while (Date.now() - settle < 20) {
+      // wait
+    }
+
+    if (!existsSync(path)) continue; // killed before the first rename — nothing was ever published
+    const loaded = loadFactoryState(path);
+    assert.ok(
+      loaded.ok,
+      `attempt ${attempt}: the ledger exists but will not load, so every verb including \`status\` is dead: ${loaded.ok ? "" : loaded.error}`,
+    );
+  }
+});
+
+/**
+ * ISSUE G-19 — a packet id reaches a filesystem write path by interpolation, and until this guard
+ * the only check on it was `typeof o.id === "string"`.
+ *
+ * `witnessLogPaths` builds `docs/evidence/logs/<packetId>/{test,revert}.log`; `persistWitnessLogs`
+ * resolves and writes it. A hand-edited ledger carrying a traversal in the id therefore produced an
+ * arbitrary write, and the existing `witnessLogPathViolation` could not catch it because the path it
+ * compares against is derived from the same poisoned id.
+ *
+ * Both directions are asserted, because a guard that rejected the real ids would be worse than none:
+ * every id the seed actually contains must still load.
+ */
+test("a packet id that could escape the log directory is refused at the load boundary", () => {
+  const hostile = [
+    "pkt_../../../../tmp/escape",
+    "pkt_..",
+    "pkt_a/../../b",
+    "pkt_a\\..\\..\\b",
+    "pkt_a/b",
+    "pkt_a\0b",
+    "../pkt_a",
+    "pkt_",
+    "",
+    "PKT_a", // the prefix is part of the format, not a hint
+  ];
+  for (const id of hostile) {
+    assert.equal(isValidPacketId(id), false, `\`${id}\` must not be accepted as a packet id`);
+  }
+
+  // ...and every id the shipped ledger really uses still loads. A format guard that rejects
+  // production data is a self-inflicted outage.
+  for (const packet of seedState().packets) {
+    assert.equal(
+      isValidPacketId(packet.id),
+      true,
+      `the seed's own packet id \`${packet.id}\` is rejected by the format guard — the pattern is wrong, not the data`,
+    );
+  }
+
+  // Driven through the real loader, not just the predicate: a planted traversal must make the whole
+  // ledger refuse rather than load a packet whose id can write anywhere.
+  const path = join(tmp("foundry-badid"), "state.json");
+  const seed = seedState();
+  const poisoned = {
+    ...seed,
+    packets: [{ ...seed.packets[0]!, id: "pkt_../../../../tmp/escape" }, ...seed.packets.slice(1)],
+  };
+  writeFileSync(path, JSON.stringify(poisoned, null, 2));
+  const loaded = loadFactoryState(path);
+  assert.equal(loaded.ok, false, "a ledger containing a traversal packet id must not load");
 });

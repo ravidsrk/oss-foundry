@@ -4,6 +4,7 @@ node_modules/
 # `docs/12-ledger.md` are the durable, reviewable record, and `verify-ledger.ts` reconciles the
 # COMMITTED seed against live GitHub rather than reading this file (docs/08-operations.md).
 .foundry-state.json
+.foundry-state.json.bak
 
 # Secrets, none of which this repo needs at rest but all of which an operator's shell may carry:
 # FOUNDRY_PAT, GITHUB_TOKEN/GH_TOKEN, E2B_API_KEY. There is no `.env` in the documented workflow —
