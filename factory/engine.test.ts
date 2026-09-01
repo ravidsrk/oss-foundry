@@ -841,6 +841,149 @@ test("every in-repo quotation of the disclosure block is the constant, byte for 
     quoting.length >= 3,
     `only ${quoting.length} in-repo quotation(s) found (${quoting.join(", ")}) — the discovery has drifted`,
   );
+
+  /**
+   * ISSUE #106, the residual this guard was filed with: a block sharing NO wording with the current
+   * constant or any retired one matches no fingerprint, so the loop above never looks at it.
+   *
+   * The issue offered structural detection and rejected it as unmeasured. Measuring settles it, once
+   * the hand-written surface is separated from the generated one. `renderEvidencePage` emits
+   * `DISCLOSURE` directly (`factory/packet.ts`), so the evidence page's copy cannot go stale on its
+   * own — and it is bare prose besides. Every HAND-WRITTEN quotation is a fenced block, and across
+   * `docs/` plus `README.md` there are exactly two fenced blocks of three or more lines naming this
+   * factory, both of them the disclosure. Zero false positives, measured rather than assumed.
+   *
+   * So the fence is the structural marker the issue was looking for, and an invented block written
+   * the way both real ones are written is caught by SHAPE instead of by wording.
+   *
+   * WHAT REMAINS, smaller than the issue and not to be mistaken for gone: a block that neither
+   * shares wording NOR names the factory matches nothing. The only bare-prose copy in the tree is
+   * generated, so that shape has no example to imitate — but it is not detected.
+   */
+  for (const file of candidates) {
+    for (const body of fencedFactoryBlocks(readFileSync(file, "utf8"))) {
+      assert.ok(
+        body.includes(DISCLOSURE),
+        `${file.slice(root.length)} fences a multi-line block naming this factory that is not \`DISCLOSURE\` — the shape a hand-written disclosure takes here, so it is read as one`,
+      );
+    }
+  }
+  // The two assertions that follow are DRIFT guards, not behaviour, and their mutants survive: the
+  // tree correctly holds no bad document, so weakening either one changes nothing today. That is
+  // what `fencedFactoryBlocks`'s own test below is for — the detector is proved on text, and these
+  // two only have to notice the tree moving underneath it.
+  const fencedCount = candidates.reduce(
+    (n, file) => n + fencedFactoryBlocks(readFileSync(file, "utf8")).length,
+    0,
+  );
+  assert.ok(
+    fencedCount >= 2,
+    `only ${fencedCount} fenced disclosure block(s) found — the structural half of the guard has gone vacuous`,
+  );
+});
+
+/**
+ * Fenced blocks of three or more lines that name this factory: the shape a hand-written disclosure
+ * takes in these docs, and the structural half of the #106 guard above.
+ *
+ * Separated from the walk so it can be tested on text rather than only on the tree. The tree
+ * correctly contains no bad document, so a check that only runs over it cannot be shown to work —
+ * two mutants survived proving exactly that before this existed.
+ */
+function fencedFactoryBlocks(markdown: string): string[] {
+  const out: string[] = [];
+  for (const block of markdown.matchAll(/```[^\n]*\n([\s\S]*?)```/g)) {
+    const body = block[1]!;
+    const lines = body.split("\n").filter((l) => l.trim());
+    if (lines.length < 3) continue;
+    if (!/Foundry/i.test(body)) continue;
+    // PROSE, not payload. Review's P2: a fence is also how CLI output, config and transcripts are
+    // shown, and any of those naming the factory would have reddened CI for a future author who
+    // pasted one. A disclosure is sentences — every line opens like one and closes like one — which
+    // command output and YAML do not. Narrowing here rather than widening the roster of exceptions,
+    // because an exception list is the thing that rots.
+    if (!lines.every((l) => /^["'(\[]?[A-Z]/.test(l.trim()) && /[.!?"')\]]$/.test(l.trim()))) continue;
+    out.push(body);
+  }
+  return out;
+}
+
+test("the structural disclosure detector reads shape, not wording (issue #106)", () => {
+  const invented = [
+    "# What we send",
+    "",
+    "```",
+    "This change was produced by Foundry on behalf of its operator.",
+    "A person looked at the result before it was proposed to you.",
+    "Merging remains entirely the maintainer's decision.",
+    "```",
+  ].join("\n");
+  // The case #106 was filed for: every line invented, no fingerprint, no retired entry. Found by
+  // shape, and the assertion above is what then rejects it for not being the constant.
+  assert.equal(fencedFactoryBlocks(invented).length, 1, "an invented disclosure block must be found");
+  assert.equal(
+    fencedFactoryBlocks(invented)[0]!.includes(DISCLOSURE),
+    false,
+    "...and must not pass as the constant",
+  );
+
+  // The real thing still reads as one, or the guard above would be checking nothing.
+  assert.equal(fencedFactoryBlocks(`x\n\n\`\`\`\n${DISCLOSURE}\n\`\`\`\n`).length, 1);
+
+  // ...and the three ways a fence is NOT a disclosure. Each of these is why the guard has zero false
+  // positives on the real tree, and a mutant dropping any of them survives without these rows.
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nnpm run foundry -- tick\n```"),
+    [],
+    "a short command block is not a disclosure, even naming the binary",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nline one\nline two\nline three\n```"),
+    [],
+    "a multi-line block that names no factory is not a disclosure",
+  );
+  assert.deepEqual(fencedFactoryBlocks("Foundry sends a disclosure with every patch."), [], "prose is not a fence");
+
+  // ...and the shapes a fence is normally used for, which is review's P2: a doc author pasting any
+  // of these would have reddened CI on a block that asserts nothing about what the factory sends.
+  assert.deepEqual(
+    fencedFactoryBlocks("```\n$ npm run foundry -- tick\nFoundry clock fired, no packet open\npacket already open https://example.invalid/1\n```"),
+    [],
+    "CLI output naming the factory is payload, not a disclosure",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```yaml\nfoundry:\n  live: true\n  repo: ravidsrk/oss-foundry\n```"),
+    [],
+    "configuration naming the factory is payload, not a disclosure",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nERROR Foundry refused the packet\n  at tick (factory/cli.ts:1)\n  at main (factory/cli.ts:2)\n```"),
+    [],
+    "a stack trace naming the factory is payload, not a disclosure",
+  );
+
+  // One row per condition, each isolating the one it names. Without these the conditions cover for
+  // each other and a mutant deleting any single one survives — which is how this list was found.
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nFoundry Config Reference\nRepo Name\nLive Flag\n```"),
+    [],
+    "capitalised headings that never close a sentence are not prose",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nfoundry runs the clock every six hours.\nit opens no pull requests.\nit files an issue instead.\n```"),
+    [],
+    "sentences that never open with a capital are not prose either",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nFoundry sends this block.\nA human reviewed it.\n```"),
+    [],
+    "two lines is below the floor, however prose-shaped",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nThis patch was prepared automatically.\nA human reviewed it first.\nThe tool does not merge.\n```"),
+    [],
+    "prose of the right shape that names no factory is not this factory's disclosure",
+  );
 });
 
 test("attach-draft refuses a PR body without the verbatim disclosure block", () => {
