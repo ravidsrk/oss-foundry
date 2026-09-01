@@ -6,7 +6,7 @@
 VERDICT: PHASE 4 COMPLETE — plan frozen, execution ready
 COMPLETION: 68% (baseline 74af0b2)   GATE: not evaluated — evaluation is T-28, after the work
 CRITICAL FLOWS: 7 total · 1 verified · 2 works · 4 partial · 0 cut
-GAPS: 40 decided — S0 2 · S1 16 · S2 17 · S3 4 · FINISH 23 · CUT 1 · DEFER 16 · ACCEPT 0
+GAPS: 40 decided — S0 2 · S1 16 · S2 18 · S3 4 · FINISH 23 · CUT 1 · DEFER 16 · ACCEPT 0
 TASKS: 0/28 · BLOCKED 0 · HUMAN ACTIONS gating launch: 2 (H-01, H-03)
 NEXT: T-01 — raise the Node floor and enforce it at runtime (npm does not enforce `engines`)
 ```
