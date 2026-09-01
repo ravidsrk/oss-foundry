@@ -408,7 +408,13 @@ test("every operator entry point installs the terminal boundary — driven, not 
   const stripYamlComments = (text: string) =>
     text
       .split("\n")
-      .filter((line) => !/^\s*#/.test(line))
+      // Whole-line comments go, and so does the tail of an INLINE one — review round 1 caught that
+      // stripping only full lines left `- run: npm test  # see factory/phantom.ts` discoverable,
+      // which is the same false positive one character further along. `(^|\s)#` is YAML's own rule:
+      // a `#` starts a comment at line start or after whitespace, so a `#` inside a token (a URL
+      // fragment, a colour) is left alone.
+      .map((line) => line.replace(/(^|\s)#.*$/, ""))
+      .filter((line) => line.trim().length > 0)
       .join("\n");
   const workflows = readdirSync(join(REPO_ROOT, ".github/workflows")).map((f) =>
     stripYamlComments(readFileSync(join(REPO_ROOT, ".github/workflows", f), "utf8")),
@@ -441,6 +447,12 @@ test("every operator entry point installs the terminal boundary — driven, not 
   // point, and a real `run:` line must still produce one — a stripper that ate everything would
   // make this whole guard vacuous and the assertion above would not notice.
   const commented = "jobs:\n  x:\n    steps:\n      # see factory/phantom.ts for why\n      - run: npm test\n";
+  const inlineCommented = "jobs:\n  x:\n    steps:\n      - run: npm test  # see factory/phantom.ts for why\n";
+  assert.deepEqual(
+    [...stripYamlComments(inlineCommented).matchAll(ENTRY_POINT)].map((m) => m[1]),
+    [],
+    "a file named in an INLINE YAML comment must not be discovered either",
+  );
   assert.deepEqual(
     [...stripYamlComments(commented).matchAll(ENTRY_POINT)].map((m) => m[1]),
     [],

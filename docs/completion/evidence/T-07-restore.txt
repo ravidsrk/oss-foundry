@@ -1,0 +1,24 @@
+### T-07 — backup and restore, rehearsed end to end
+
+--- 1. first mutating run creates the ledger (nothing to back up yet) ---
+    files: state.json 
+
+--- 2. second mutating run: the previous ledger is copied to .bak FIRST ---
+    files: state.json state.json.bak 
+    ledger 36570 bytes · backup 36392 bytes
+    live ledger has BOTH halts; the backup has only the first:
+      live:   ravidsrk/orca-fleet  opened=2 merged=2 tone=banned health=stop|ravidsrk/frontguard  opened=1 merged=1 tone=banned health=stop|
+      backup: ravidsrk/orca-fleet  opened=2 merged=2 tone=warm health=good|ravidsrk/frontguard  opened=1 merged=1 tone=banned health=stop|
+
+--- 3. corrupt the ledger the way a torn write would ---
+    ledger is now 200 bytes
+    exit=1  (every verb is dead, including status)
+    refusing to load /var/folders/65/nfjkpf196n5_xrwbkyrrgqrc0000gn/T/tmp.dE9xzTWJ0P/state.json: Unterminated string in JSON at position 200 (line 8 column 34). Fix or remove it; will not overwrite with seed.
+
+--- 4. RESTORE: the documented procedure is one command ---
+    $ cp "$STATE.bak" "$STATE"
+    exit=0  (loads again)
+    restored state: ravidsrk/orca-fleet  opened=2 merged=2 tone=warm health=good|ravidsrk/frontguard  opened=1 merged=1 tone=banned health=stop|
+
+--- 5. and the restore is honest about what it costs: the second halt is gone ---
+    the backup is one generation, so restoring loses work done after it was taken.

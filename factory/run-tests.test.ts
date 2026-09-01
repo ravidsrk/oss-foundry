@@ -25,6 +25,14 @@ const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
  * summary — attempted first, and it reported zero summaries rather than one. A child process is
  * also the honest shape: it observes what the real oracle observes, in the same conditions.
  *
+ * The probe target is a generated `.mjs` file, NOT one of this repository's own `.ts` test files,
+ * and that is the fix for a real portability failure rather than a stylistic choice. Pointing it at
+ * `factory/ids.test.ts` passed locally on Node 24 and FAILED on the declared floor 22.6.0 in CI with
+ * "expected one per-file summary, got 0": `run()` spawns its own child per file, and whether
+ * `--experimental-strip-types` reaches that grandchild differs by version. So the probe would have
+ * been reporting Node's flag propagation, not the property under test. Plain JavaScript needs no
+ * flag and the question becomes version-independent.
+ *
  * The probe is written to a FILE rather than passed with `--eval`, and that is not incidental.
  * Under `--input-type=module --eval`, `run({ files: [...] })` emits no per-file summary at all —
  * confirmed against a working file-based probe side by side. Two false negatives came out of that
@@ -43,18 +51,20 @@ stream.on("end", () => { process.stdout.write(JSON.stringify(counts)); });
 `;
 
 test("node:test's per-file summary really carries a numeric `failed` count", () => {
-  // `ids.test.ts` is the probe target: fast, no scratch-dir dependency, and a file the oracle
-  // accounts for anyway.
-  const probePath = join(tmp("foundry-oracle-probe"), "probe.mjs");
+  const dir = tmp("foundry-oracle-probe");
+  const probePath = join(dir, "probe.mjs");
+  // A trivial, flag-free target with a known non-zero test count.
+  const targetPath = join(dir, "target.test.mjs");
+  writeFileSync(targetPath, 'import test from "node:test";\ntest("a", () => {});\ntest("b", () => {});\n');
   writeFileSync(probePath, PROBE);
   // `NODE_TEST_CONTEXT` must be DELETED, not blanked. Node keys "am I inside a test file?" on the
   // variable's presence, so an inherited one makes the child print `run() is being called
   // recursively within a test file. skipping running files.` and emit nothing — the third false
   // negative this test produced before the cause was found, and again indistinguishable from the
   // property being absent. Setting it to "" is still setting it.
-  const childEnv: Record<string, string | undefined> = { ...process.env, PROBE_FILE: "factory/ids.test.ts" };
+  const childEnv: Record<string, string | undefined> = { ...process.env, PROBE_FILE: targetPath };
   delete childEnv.NODE_TEST_CONTEXT;
-  const out = execFileSync(process.execPath, ["--experimental-strip-types", probePath], {
+  const out = execFileSync(process.execPath, [probePath], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
