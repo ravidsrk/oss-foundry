@@ -207,22 +207,26 @@ export function witnessChildTimeoutMs(
 }
 
 /**
- * SIGKILL the child and every descendant, including ones that daemonized.
+ * SIGKILL the child and every descendant that stayed in its process group.
  *
- * `pgrep -P` only sees current children. A setup command that double-forks (the
- * intermediate parent exits, the worker is reparented to init) is invisible to
- * that walk — and then the factory reports the step killed, deletes the scratch
- * dir, and leaves repository code running on the operator host.
+ * Reach: ordinary children, `&` background jobs, and double-forked workers that
+ * were reparented to init but kept the group (membership is inherited and
+ * survives reparenting). `pgrep -P` cannot see those reparented workers; the
+ * group signal can. Negative-pid signalling is POSIX; Wave 0 host witnessing
+ * is `bash -c` / `rm -rf` and does not run on stock Windows.
  *
- * The child is spawned `detached` so it is a process-group leader. Group
- * membership is inherited and survives reparenting, so `process.kill(-pid)`
- * reaches those workers. Negative-pid signalling is POSIX; Wave 0 host
- * witnessing is `bash -c` / `rm -rf` and does not run on stock Windows.
+ * Do not reach: a process that called `setsid()` / `setpgid()` and left the
+ * session. Containing that needs a cgroup, a jail, or a VM. A best-effort pid
+ * scan that sometimes kills the wrong process is worse than this limit, so
+ * we do not try. ADR 0003 puts untrusted execution in a sandbox; Wave 0 host
+ * witnessing is only repos the operator owns (`load-allowlist.ts` refuses
+ * `wave >= 1 && sandbox === "host"`). The process group is a courtesy on top
+ * of that doctrine, not a substitute for it.
  *
- * The `pgrep -P` walk stays as a second pass for anything that was not in the
- * group. `detached` also means the child no longer dies with this process's
- * terminal, so every settlement (deadline *and* a normal exit) reaps the group
- * — otherwise a green `npm test` that daemonized a helper would leak it.
+ * `spawn({ detached: true })` makes the child a group leader (`execFile`
+ * silently drops `detached`, so `kill(-pid)` was ESRCH). The group is reaped
+ * on every settlement — deadline *and* a normal exit — because a detached
+ * child no longer dies with this process's terminal.
  */
 function killWitnessProcessTree(child: ChildProcess): void {
   const pid = child.pid;
@@ -263,7 +267,7 @@ function killPidTree(pid: number): void {
 
 export const hostRunner: WitnessRunner = (step, args, opts) => {
   /**
-   * Handled before the `execFile` shapes below because it is the one step with no command: the OS
+   * Handled before the `spawn` shapes below because it is the one step with no command: the OS
    * allocates the name, which is the entire point. `mkdtempSync` appends its own random suffix to
    * the prefix and fails if the result already exists, so two witness runs starting in the same
    * millisecond cannot collide — the defect in issue #56, where the directory was named from

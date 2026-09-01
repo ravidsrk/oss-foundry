@@ -457,6 +457,67 @@ test("G-14: a daemonized grandchild is dead after the deadline", async () => {
   }
 });
 
+test("G-14: a setsid grandchild is not reached — that is the sandbox boundary", async () => {
+  // Pins the documented limit, not a bug. A process that calls setsid() leaves
+  // the group we signal and is not a pgrep -P child after the intermediate
+  // parent exits. Defeating it would need a cgroup/jail/VM (ADR 0003); a
+  // best-effort pid scan that sometimes kills the wrong process is worse.
+  // This test fails if the limit silently changes shape (we start reaching it,
+  // or we stop spawning a group at all and start claiming we do).
+  const dir = tmp("foundry-setsid-");
+  const pidFile = join(dir, "pid");
+  const script = join(dir, "escape.py");
+  writeFileSync(
+    script,
+    [
+      "import os, sys, time",
+      "pid = os.fork()",
+      "if pid > 0:",
+      "    sys.stdout.write(str(pid))",
+      "    sys.exit(0)",
+      "os.setsid()",
+      "devnull = os.open(os.devnull, os.O_RDWR)",
+      "os.dup2(devnull, 0)",
+      "os.dup2(devnull, 1)",
+      "os.dup2(devnull, 2)",
+      "time.sleep(20)",
+    ].join("\n"),
+  );
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "400";
+  let escapedPid: number | undefined;
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", [
+        `python3 ${JSON.stringify(script)} > ${JSON.stringify(pidFile)} 2>/dev/null; sleep 20`,
+      ]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("setsid parent was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(run.output, /exceeded the 400ms deadline/, run.output);
+    escapedPid = Number(readFileSync(pidFile, "utf8").trim());
+    assert.ok(Number.isInteger(escapedPid) && escapedPid > 1, `pid file held ${escapedPid}`);
+    const listed = spawnSync("ps", ["-p", String(escapedPid), "-o", "state="], { encoding: "utf8" });
+    const state = listed.stdout.trim();
+    assert.ok(
+      state.length > 0 && !state.startsWith("Z"),
+      `setsid grandchild ${escapedPid} was reached (ps state=${JSON.stringify(state)}) — the session-escape boundary moved`,
+    );
+  } finally {
+    if (escapedPid !== undefined) {
+      try {
+        process.kill(escapedPid, "SIGKILL");
+      } catch {
+        // already dead
+      }
+    }
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
 test("G-14: a self-SIGKILL is not reported as a deadline", async () => {
   const run = await hostRunner("run-tests@head", ["kill -KILL $$"]);
   assert.notEqual(run.exit, 0, run.output);
