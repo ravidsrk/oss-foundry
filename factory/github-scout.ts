@@ -1,5 +1,5 @@
 import { ALLOWLIST } from "./allowlist.ts";
-import { githubApiHeaders } from "./github-pr.ts";
+import { githubApiHeaders, githubRequestInit } from "./github-pr.ts";
 import { rankIssues } from "./scout.ts";
 import type { ScoutScore } from "./types.ts";
 
@@ -27,7 +27,10 @@ export interface LiveIssue {
  * classifies every candidate first and splits the verdict into `competingKeys` (stand down) and
  * `adjacentKeys` (hold for human triage) before anything is queued (issue #44 item 8).
  */
-export async function scoutGithub(data: { maxPerRepo?: number } = {}) {
+export async function scoutGithub(
+  data: { maxPerRepo?: number } = {},
+  fetchImpl: typeof fetch = fetch,
+) {
   const maxPerRepo = Math.min(Math.max(data.maxPerRepo ?? 5, 1), 8);
   const found: Omit<LiveIssue, "scout">[] = [];
   const errors: string[] = [];
@@ -36,7 +39,10 @@ export async function scoutGithub(data: { maxPerRepo?: number } = {}) {
   for (const repo of ALLOWLIST.filter((r) => r.wave <= 1)) {
     const url = `https://api.github.com/repos/${repo.owner}/${repo.name}/issues?state=open&per_page=${maxPerRepo}&sort=updated`;
     try {
-      const res = await fetch(url, { headers });
+      // Deadline via githubRequestInit (G-26). Wiring this module is out of scope; the
+      // fetch still must not hang the process if someone calls it. `fetchImpl` is a test
+      // seam so the deadline is asserted without a network.
+      const res = await fetchImpl(url, githubRequestInit({ headers }));
       if (!res.ok) {
         errors.push(
           res.status === 403

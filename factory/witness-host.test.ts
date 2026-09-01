@@ -4,7 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmp } from "./tmp-dir.ts";
-import { hostRunner, resolveToolchain, witnessChildEnv, witnessEvidence } from "./witness.ts";
+import { scoutGithub } from "./github-scout.ts";
+import {
+  hostRunner,
+  resolveToolchain,
+  witnessChildEnv,
+  witnessChildTimeoutMs,
+  witnessEvidence,
+  WITNESS_CHILD_TIMEOUT_MS,
+  WITNESS_CHILD_TIMEOUT_MAX_MS,
+} from "./witness.ts";
 
 /**
  * `hostRunner` driven against a real shell — the only assertions in the repo that a fake runner
@@ -227,30 +236,75 @@ test("two witness runs for the same repo under one frozen millisecond both succe
  * #80 was filed for, one layer down. Refused here as well as sanitised by the caller, because a
  * guard that only exists at the call site is one call site away from not existing.
  */
-test("#114: the host runner does not pass FOUNDRY_PAT into the child", async () => {
+test("#114 / G-02: the host runner allowlists the child env and drops planted secrets", async () => {
   const isolated = witnessChildEnv({
     PATH: "/usr/bin",
+    HOME: "/tmp",
+    TMPDIR: "/tmp",
+    LANG: "C.UTF-8",
+    TZ: "UTC",
+    GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
+    GIT_ASKPASS: "/tmp/askpass",
+    SHELL: "/bin/zsh",
     FOUNDRY_PAT: "ghp_should_never_leak",
     GITHUB_TOKEN: "ghs_also_secret",
     GH_TOKEN: "ghp_gh",
     E2B_API_KEY: "e2b_secret",
-    HOME: "/tmp",
+    NPM_TOKEN: "foundry_planted_npm_token",
+    AWS_SECRET_ACCESS_KEY: "foundry_planted_aws_secret",
+    ANTHROPIC_API_KEY: "foundry_planted_anthropic_key",
+    OP_SERVICE_ACCOUNT_TOKEN: "foundry_planted_op_token",
+    NOT_A_TOOLCHAIN_VAR: "foundry_planted_unrelated",
   });
+  assert.equal(isolated.PATH, "/usr/bin");
+  assert.equal(isolated.HOME, "/tmp");
+  assert.equal(isolated.TMPDIR, "/tmp");
+  assert.equal(isolated.LANG, "C.UTF-8");
+  assert.equal(isolated.TZ, "UTC");
+  assert.equal(isolated.GIT_CONFIG_GLOBAL, "/tmp/gitconfig");
+  assert.equal(isolated.GIT_ASKPASS, undefined, "GIT_ASKPASS is a credential helper, not a toolchain need");
+  assert.equal(isolated.SHELL, undefined, "SHELL is not a toolchain need; bash -c is the contract");
   assert.equal(isolated.FOUNDRY_PAT, undefined);
   assert.equal(isolated.GITHUB_TOKEN, undefined);
   assert.equal(isolated.GH_TOKEN, undefined);
   assert.equal(isolated.E2B_API_KEY, undefined);
-  assert.equal(isolated.PATH, "/usr/bin");
-  assert.equal(isolated.HOME, "/tmp");
+  assert.equal(isolated.NPM_TOKEN, undefined);
+  assert.equal(isolated.AWS_SECRET_ACCESS_KEY, undefined);
+  assert.equal(isolated.ANTHROPIC_API_KEY, undefined);
+  assert.equal(isolated.OP_SERVICE_ACCOUNT_TOKEN, undefined);
+  assert.equal(isolated.NOT_A_TOOLCHAIN_VAR, undefined);
+  assert.deepEqual(Object.keys(isolated).sort(), ["GIT_CONFIG_GLOBAL", "HOME", "LANG", "PATH", "TMPDIR", "TZ"]);
 
-  const saved = process.env.FOUNDRY_PAT;
-  process.env.FOUNDRY_PAT = "ghp_should_never_leak";
+  const planted: Record<string, string> = {
+    NPM_TOKEN: "foundry_planted_npm_token",
+    AWS_SECRET_ACCESS_KEY: "foundry_planted_aws_secret",
+    ANTHROPIC_API_KEY: "foundry_planted_anthropic_key",
+    OP_SERVICE_ACCOUNT_TOKEN: "foundry_planted_op_token",
+    FOUNDRY_PAT: "foundry_planted_foundry_pat",
+    NOT_A_TOOLCHAIN_VAR: "foundry_planted_unrelated",
+  };
+  const saved: Record<string, string | undefined> = {};
+  for (const key of Object.keys(planted)) saved[key] = process.env[key];
   try {
-    const run = await hostRunner("run-tests@head", ["printenv FOUNDRY_PAT || true"]);
-    assert.doesNotMatch(run.output, /ghp_should_never_leak/);
+    Object.assign(process.env, planted);
+    const run = await hostRunner("run-tests@head", [
+      [
+        'echo PATH_LEN=${#PATH}',
+        'echo HOME_SET=$(if [ -n "$HOME" ]; then echo yes; else echo no; fi)',
+        "printenv",
+      ].join("; "),
+    ]);
+    assert.equal(run.exit, 0, run.output);
+    assert.match(run.output, /PATH_LEN=[1-9]/, `child PATH was empty — over-aggressive allowlist: ${run.output}`);
+    assert.match(run.output, /HOME_SET=yes/, `child HOME was missing: ${run.output}`);
+    for (const [key, value] of Object.entries(planted)) {
+      assert.doesNotMatch(run.output, new RegExp(value), `${key} reached the child: ${run.output}`);
+    }
   } finally {
-    if (saved === undefined) delete process.env.FOUNDRY_PAT;
-    else process.env.FOUNDRY_PAT = saved;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 
@@ -259,5 +313,110 @@ test("the host runner refuses a scratch prefix that would escape the tmpdir", as
     const result = await hostRunner("mkdtemp", [bad]);
     assert.equal(result.exit, 1, `${bad} was accepted: ${result.output}`);
     assert.match(result.output, /path separator/, result.output);
+  }
+});
+
+test("G-14: a hung witness child is killed at the deadline and the refusal names the step", async () => {
+  // Real clock on purpose: the production deadline is `setTimeout` + SIGKILL of a live
+  // `sleep` process group. Fake timers cannot observe whether the grandchild actually died.
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "250";
+  const started = Date.now();
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", ["sleep 10"]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung witness child was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(
+      run.output,
+      /witness step "run-tests@head" exceeded the 250ms deadline and was killed/,
+      run.output,
+    );
+    assert.ok(Date.now() - started < 2000, `hung child took ${Date.now() - started}ms`);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-14: a truthy invalid FOUNDRY_WITNESS_TIMEOUT_MS falls back to the shipped bound", () => {
+  assert.equal(witnessChildTimeoutMs(undefined), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(""), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("nope"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("0"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("-1"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("Infinity"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("15.5"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(WITNESS_CHILD_TIMEOUT_MAX_MS + 1), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(-1), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(Number.POSITIVE_INFINITY), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("250"), 250);
+  assert.equal(witnessChildTimeoutMs(250), 250);
+  assert.equal(witnessChildTimeoutMs(WITNESS_CHILD_TIMEOUT_MAX_MS), WITNESS_CHILD_TIMEOUT_MAX_MS);
+
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "-1";
+  try {
+    assert.equal(witnessChildTimeoutMs(), WITNESS_CHILD_TIMEOUT_MS);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-26: the unwired scout's fetch carries a deadline", async () => {
+  let fetches = 0;
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    fetches += 1;
+    assert.ok(init?.signal, "scout fetch received no AbortSignal — githubRequestInit must attach a deadline");
+    return new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const result = await scoutGithub({ maxPerRepo: 1 }, fetchImpl);
+  assert.equal(result.ok, true);
+  assert.ok(fetches > 0, "scout never called fetch");
+  assert.equal(result.errors.length, 0, result.errors.join("; "));
+});
+
+test("G-26: a hung scout fetch fails closed within the deadline", async () => {
+  // Real clock: `AbortSignal.timeout` is what production attaches, and fake timers do not
+  // fire it. The watchdog holds node:test's event loop until the abort (or 2s, the failure).
+  const hung: typeof fetch = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("hung fetch received no AbortSignal — scoutGithub must attach a deadline"));
+        return;
+      }
+      const fail = () =>
+        reject(signal.reason ?? new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      if (signal.aborted) {
+        fail();
+        return;
+      }
+      signal.addEventListener("abort", fail, { once: true });
+    });
+  const prev = process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+  process.env.FOUNDRY_GITHUB_TIMEOUT_MS = "40";
+  const started = Date.now();
+  try {
+    const result = await Promise.race([
+      scoutGithub({ maxPerRepo: 1 }, hung),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung scout fetch was not aborted")), 2000),
+      ),
+    ]);
+    assert.equal(result.ok, true);
+    assert.ok(result.errors.length > 0, "hung scout produced no errors");
+    assert.match(result.errors.join("\n"), /abort|timeout|This operation was aborted/i);
+    assert.ok(Date.now() - started < 2000, `hung scout fetch took ${Date.now() - started}ms`);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+    else process.env.FOUNDRY_GITHUB_TIMEOUT_MS = prev;
   }
 });

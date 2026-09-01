@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +42,7 @@ export type WitnessRunner = (
  * exit code we then publish as evidence. It is also the one part of the protocol a fake runner
  * cannot cover, so it needs to be importable without dragging the CLI in (`witness-host.test.ts`).
  *
- * **The shell is `bash -c`: non-login, non-interactive, with secrets stripped from the child env.**
+ * **The shell is `bash -c`: non-login, non-interactive, with an allowlisted child env.**
  * That is the whole of the contract, and each half of it was chosen against a failure:
  *
  * - **Non-login.** `bash -lc` sources `/etc/profile`, and on macOS that runs `path_helper`, which
@@ -52,42 +52,137 @@ export type WitnessRunner = (
  *   and the repo's suite died on `str | None` at head with no output. Issue #41.
  * - **Non-interactive, and no `$SHELL`.** The operator's login shell is not a stable contract: it
  *   may be zsh, fish, or nushell, whose `-c` semantics differ, and whose rc files are theirs to
- *   change. `bash -c` is the same shell everywhere the factory runs, including CI.
+ *   change. `bash -c` is the same shell everywhere the factory runs, including CI. `$SHELL` is
+ *   therefore not on the child allowlist — passing it would reintroduce the operator's shell as
+ *   a side channel without changing which interpreter we invoke.
  * - **Isolated environment.** `execFile` used to inherit `process.env` wholesale, so a Wave 0
  *   `setupCommand` (`npm ci` on frontguard) ran lifecycle scripts with `FOUNDRY_PAT` in the
- *   child's environment (issue #114). The child now gets `witnessChildEnv()`: PATH and toolchain
- *   vars pass through; machine-account and platform secrets do not. `witness-check` reports the
- *   isolation, not inheritance.
+ *   child's environment (issue #114). A four-name denylist closed that one leak and left
+ *   `NPM_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY` — every other secret in the
+ *   operator shell — still reaching third-party `preinstall` scripts (G-02). The child now
+ *   gets `witnessChildEnv()`: an allowlist of what `git clone` / `npm ci` / a test command
+ *   actually need. Presence of `E2B_API_KEY` is still read by `witnessEvidence` from the
+ *   *caller* env — that check never reaches this child.
  *
  * A repo needing anything more than this declares it as `setupCommand` in `allowlist.yaml`, where
  * it is visible, rather than relying on a profile nobody reads.
  */
 
-/** Names a host-witness child must never see. The operator shell still holds them for `open-draft`. */
-export const WITNESS_SECRET_KEYS = [
-  "FOUNDRY_PAT",
-  "GITHUB_TOKEN",
-  "GH_TOKEN",
-  "E2B_API_KEY",
+/**
+ * Names copied into a host-witness child. Anything not listed is dropped — including
+ * `NPM_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY`, `OP_SERVICE_ACCOUNT_TOKEN`,
+ * `FOUNDRY_PAT`, and every other operator secret. A denylist cannot stay complete; this
+ * list is the whole contract (G-02).
+ *
+ * `SHELL` is absent on purpose (see the host-runner contract above). Windows `SystemRoot` /
+ * `USERPROFILE` are absent because the host runner is POSIX (`bash -c`, `rm -rf`); Wave 0
+ * witnessing does not run on stock Windows.
+ */
+export const WITNESS_CHILD_ENV_KEYS = [
+  "PATH", // git, npm, node, python, bash — a child with no PATH cannot clone or test
+  "HOME", // npm cache (~/.npm); git/python user-level files the toolchain actually reads
+  "TMPDIR", // npm extract + test temp files; Node's os.tmpdir() honours this
+  "TEMP", // Windows-style alias some tools read even on POSIX when the operator set it
+  "TMP", // Windows-style alias of TMPDIR
+  "LANG", // UTF-8 / locale-sensitive tools (git, python) without a C locale surprise
+  "LC_ALL", // overrides LANG when the operator set a full locale
+  "LC_CTYPE", // character type / UTF-8 without a full locale override
+  "TZ", // timestamps in logs and time-sensitive tests
+  // git's documented override for ~/.gitconfig. The evidence fixtures rewrite the clone URL
+  // through `url.insteadOf` here so a local origin is cloned instead of GitHub; dropping it
+  // sends `git clone` at the real network and the fixture SHAs are not reachable. An operator
+  // isolating git config the same way needs the same pass-through. Not a secret.
+  "GIT_CONFIG_GLOBAL",
 ] as const;
 
 /**
- * The env a clone's `setupCommand` / `testCommand` runs under (issue #114).
+ * The env a clone's `setupCommand` / `testCommand` runs under (issue #114, G-02).
  *
- * Copies the parent environment and strips the secrets the factory holds for GitHub writes and
- * the E2B worker. Presence of `E2B_API_KEY` is still read by `witnessEvidence` from the *caller*
- * env — that check never reaches this child.
+ * Allowlist, not denylist: copies only {@link WITNESS_CHILD_ENV_KEYS} from the parent.
+ * Presence of `E2B_API_KEY` is still read by `witnessEvidence` from the *caller* env —
+ * that check never reaches this child.
  */
 export function witnessChildEnv(
   from: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(from)) {
+  for (const key of WITNESS_CHILD_ENV_KEYS) {
+    const value = from[key];
     if (value === undefined) continue;
-    if ((WITNESS_SECRET_KEYS as readonly string[]).includes(key)) continue;
     env[key] = value;
   }
   return env;
+}
+
+/**
+ * Default deadline for one host-witness child (`git clone`, `setupCommand`, `testCommand`).
+ *
+ * Minutes, not seconds: a cold `npm ci` plus an upstream suite is a multi-minute job, and
+ * the 15s GitHub-fetch bound would kill a healthy run. Fifteen minutes is long enough for
+ * that job on a laptop and short enough that a hung registry or an upstream `while true`
+ * cannot pin the `evidence` verb until the operator SIGKILLs the factory.
+ */
+export const WITNESS_CHILD_TIMEOUT_MS = 15 * 60 * 1000;
+
+/** Inclusive ceiling on `FOUNDRY_WITNESS_TIMEOUT_MS`. Above this the shipped 15-minute bound is used. */
+export const WITNESS_CHILD_TIMEOUT_MAX_MS = 60 * 60 * 1000;
+
+/**
+ * Deadline for one host-witness `execFile` (G-14).
+ *
+ * `FOUNDRY_WITNESS_TIMEOUT_MS` is an integer millisecond override. A truthy invalid value
+ * (`-1`, `Infinity`, `15.5`, a non-number) must not reach the timer as `NaN` / `0` (which
+ * would disable the deadline) — those values fall back to the shipped 15-minute bound,
+ * matching `githubFetchTimeoutMs`.
+ */
+export function witnessChildTimeoutMs(
+  raw: string | number | undefined = process.env.FOUNDRY_WITNESS_TIMEOUT_MS,
+): number {
+  const n = typeof raw === "number" ? raw : raw == null || raw === "" ? Number.NaN : Number(raw);
+  if (Number.isInteger(n) && n >= 1 && n <= WITNESS_CHILD_TIMEOUT_MAX_MS) return n;
+  return WITNESS_CHILD_TIMEOUT_MS;
+}
+
+/**
+ * SIGKILL the child and every descendant. `execFile`'s own `timeout` only signals the
+ * spawned PID, so `bash -c 'npm test'` would leave the suite running after bash died.
+ * `execFile` options do not include `detached`, so the child is not a group leader and
+ * `kill(-pid)` is refused; walk `pgrep -P` instead and SIGKILL from the leaves up.
+ */
+function killWitnessProcessTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined) {
+    child.kill("SIGKILL");
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+    return;
+  } catch {
+    // Not a process-group leader — expected for execFile.
+  }
+  killPidTree(pid);
+}
+
+function killPidTree(pid: number): void {
+  let children: string[] = [];
+  try {
+    const listed = spawnSync("pgrep", ["-P", String(pid)], { encoding: "utf8" });
+    if (listed.status === 0) {
+      children = listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+    }
+  } catch {
+    // pgrep is absent; fall through and kill this pid alone.
+  }
+  for (const childPid of children) {
+    const n = Number(childPid);
+    if (Number.isInteger(n) && n > 1) killPidTree(n);
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // already exited
+  }
 }
 
 export const hostRunner: WitnessRunner = (step, args, opts) => {
@@ -116,22 +211,54 @@ export const hostRunner: WitnessRunner = (step, args, opts) => {
     }
   }
   const { promise, resolve: resolveRun } = Promise.withResolvers<{ exit: number; output: string }>();
+  const timeoutMs = witnessChildTimeoutMs();
   const [cmd, cmdArgs] =
     step === "git"
       ? ["git", args]
       : step === "cleanup"
         ? ["rm", ["-rf", ...args]]
         : ["bash", ["-c", args[0] ?? "false"]]; // run-setup, probe and both run-tests phases execute the repo's own commands
-  execFile(
+  let timedOut = false;
+  let settled = false;
+  let timer: NodeJS.Timeout | undefined;
+  const child = execFile(
     cmd,
     cmdArgs,
-    { cwd: opts?.cwd, env: witnessChildEnv(), maxBuffer: 16 * 1024 * 1024 },
+    {
+      cwd: opts?.cwd,
+      env: witnessChildEnv(),
+      maxBuffer: 16 * 1024 * 1024,
+      encoding: "utf8",
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+    },
     (err, stdout, stderr) => {
-    // `ExecException.code` is already typed `number | undefined`, so the shape needs narrowing, not
-    // an assertion: a signal-killed child reports `signal` with no numeric code and must read as 1.
-    const exit = !err ? 0 : typeof err.code === "number" ? err.code : 1;
-    resolveRun({ exit, output: `${stdout}${stderr}` });
-  });
+      settled = true;
+      clearTimeout(timer);
+      // `ExecException.code` is already typed `number | undefined`, so the shape needs narrowing, not
+      // an assertion: a signal-killed child reports `signal` with no numeric code and must read as 1.
+      // `execFile`'s own `timeout` and our tree-walk can win the race; either one is the deadline.
+      const deadlineHit =
+        timedOut ||
+        (err != null &&
+          err.signal === "SIGKILL" &&
+          err.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
+      if (deadlineHit) {
+        resolveRun({
+          exit: 1,
+          output: `witness step "${step}" exceeded the ${timeoutMs}ms deadline and was killed\n${stdout}${stderr}`,
+        });
+        return;
+      }
+      const exit = !err ? 0 : typeof err.code === "number" ? err.code : 1;
+      resolveRun({ exit, output: `${stdout}${stderr}` });
+    },
+  );
+  timer = setTimeout(() => {
+    if (settled) return;
+    timedOut = true;
+    killWitnessProcessTree(child);
+  }, timeoutMs);
   return promise;
 };
 
