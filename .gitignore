@@ -1,3 +1,19 @@
 node_modules/
+
+# The live ledger. Deliberately never committed: `factory/seed.ts` plus the generated block in
+# `docs/12-ledger.md` are the durable, reviewable record, and `verify-ledger.ts` reconciles the
+# COMMITTED seed against live GitHub rather than reading this file (docs/08-operations.md).
 .foundry-state.json
+
+# Secrets, none of which this repo needs at rest but all of which an operator's shell may carry:
+# FOUNDRY_PAT, GITHUB_TOKEN/GH_TOKEN, E2B_API_KEY. There is no `.env` in the documented workflow —
+# this exists so that adding one cannot be committed by accident.
+.env
+.env.*
+!.env.example
+
+# Editor/agent local state. This was previously ignored only by the developer's personal global
+# gitignore, so a fresh clone on another machine would not have ignored it.
+.claude/settings.local.json
+
 .DS_Store
