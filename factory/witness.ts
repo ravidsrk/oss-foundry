@@ -1,4 +1,4 @@
-import { execFile, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -207,10 +207,22 @@ export function witnessChildTimeoutMs(
 }
 
 /**
- * SIGKILL the child and every descendant. The deadline is ours, not `execFile`'s
- * `timeout`: that option kills only the spawned PID, reparents `bash -c 'npm test'`
- * grandchildren to init, and then `pgrep -P` on the dead shell sees nothing. Walking
- * the tree while the shell is still alive, children first, is the whole fix.
+ * SIGKILL the child and every descendant, including ones that daemonized.
+ *
+ * `pgrep -P` only sees current children. A setup command that double-forks (the
+ * intermediate parent exits, the worker is reparented to init) is invisible to
+ * that walk — and then the factory reports the step killed, deletes the scratch
+ * dir, and leaves repository code running on the operator host.
+ *
+ * The child is spawned `detached` so it is a process-group leader. Group
+ * membership is inherited and survives reparenting, so `process.kill(-pid)`
+ * reaches those workers. Negative-pid signalling is POSIX; Wave 0 host
+ * witnessing is `bash -c` / `rm -rf` and does not run on stock Windows.
+ *
+ * The `pgrep -P` walk stays as a second pass for anything that was not in the
+ * group. `detached` also means the child no longer dies with this process's
+ * terminal, so every settlement (deadline *and* a normal exit) reaps the group
+ * — otherwise a green `npm test` that daemonized a helper would leak it.
  */
 function killWitnessProcessTree(child: ChildProcess): void {
   const pid = child.pid;
@@ -218,11 +230,12 @@ function killWitnessProcessTree(child: ChildProcess): void {
     child.kill("SIGKILL");
     return;
   }
-  try {
-    process.kill(-pid, "SIGKILL");
-    return;
-  } catch {
-    // Not a process-group leader — expected for execFile.
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // group already gone, or this pid was never a leader
+    }
   }
   killPidTree(pid);
 }
@@ -284,39 +297,57 @@ export const hostRunner: WitnessRunner = (step, args, opts) => {
   let timedOut = false;
   let settled = false;
   let timer: NodeJS.Timeout | undefined;
-  const child = execFile(
-    cmd,
-    cmdArgs,
-    {
-      cwd: opts?.cwd,
-      env: witnessChildEnv(),
-      maxBuffer: 16 * 1024 * 1024,
-      encoding: "utf8",
-    },
-    (err, stdout, stderr) => {
-      settled = true;
-      clearTimeout(timer);
-      // `ExecException.code` is already typed `number | undefined`, so the shape needs narrowing, not
-      // an assertion: a signal-killed child reports `signal` with no numeric code and must read as 1.
-      const output = `${stdout}${stderr}`;
-      if (timedOut) {
-        resolveRun({
-          exit: 1,
-          output: `witness step "${step}" exceeded the ${timeoutMs}ms deadline and was killed\n${output}`,
-        });
-        return;
-      }
-      if (err?.signal) {
-        resolveRun({
-          exit: 1,
-          output: `witness step "${step}" was killed by ${err.signal}\n${output}`,
-        });
-        return;
-      }
-      const exit = !err ? 0 : typeof err.code === "number" ? err.code : 1;
-      resolveRun({ exit, output });
-    },
-  );
+  // `execFile` silently drops `detached` — the child keeps this process's
+  // group, so `kill(-pid)` is ESRCH. `spawn` actually creates the group.
+  const child = spawn(cmd, cmdArgs, {
+    cwd: opts?.cwd,
+    env: witnessChildEnv(),
+    // Own process group so a double-forked descendant is still reachable after
+    // it is reparented to init. Off on Windows: `kill(-pid)` is POSIX, and this
+    // runner is Wave-0-host (`bash -c`) only.
+    detached: process.platform !== "win32",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  const maxBuffer = 16 * 1024 * 1024;
+  const take = (chunk: string, which: "out" | "err"): void => {
+    if (stdout.length + stderr.length > maxBuffer) return;
+    if (which === "out") stdout += chunk;
+    else stderr += chunk;
+    if (stdout.length + stderr.length > maxBuffer) killWitnessProcessTree(child);
+  };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => take(chunk, "out"));
+  child.stderr.on("data", (chunk: string) => take(chunk, "err"));
+  const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    // Reap the group on every settlement. `detached` children outlive this
+    // process's terminal; a successful command that daemonized a helper would
+    // otherwise leave that helper running after we delete the scratch dir.
+    if (!timedOut) killWitnessProcessTree(child);
+    const output = `${stdout}${stderr}`;
+    if (timedOut) {
+      resolveRun({
+        exit: 1,
+        output: `witness step "${step}" exceeded the ${timeoutMs}ms deadline and was killed\n${output}`,
+      });
+      return;
+    }
+    if (signal) {
+      resolveRun({
+        exit: 1,
+        output: `witness step "${step}" was killed by ${signal}\n${output}`,
+      });
+      return;
+    }
+    resolveRun({ exit: code ?? 1, output });
+  };
+  child.on("error", () => finish(1, null));
+  child.on("close", (code, signal) => finish(code, signal));
   timer = setTimeout(() => {
     if (settled) return;
     timedOut = true;

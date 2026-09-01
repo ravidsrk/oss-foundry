@@ -417,6 +417,46 @@ test("G-14: a hung grandchild is dead after the deadline, not reparented", async
   }
 });
 
+test("G-14: a daemonized grandchild is dead after the deadline", async () => {
+  // Real clock. The intermediate subshell exits immediately so `sleep` is
+  // reparented to init — `pgrep -P` on the witness shell cannot see it.
+  // Process-group membership survives that; a group SIGKILL must reap it.
+  const pidFile = join(tmp("foundry-daemon-"), "pid");
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "400";
+  let daemonPid: number | undefined;
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", [
+        `(sleep 20 >/dev/null 2>&1 & echo $! > ${JSON.stringify(pidFile)}); sleep 20`,
+      ]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung daemon parent was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(run.output, /exceeded the 400ms deadline/, run.output);
+    daemonPid = Number(readFileSync(pidFile, "utf8").trim());
+    assert.ok(Number.isInteger(daemonPid) && daemonPid > 1, `pid file held ${daemonPid}`);
+    const listed = spawnSync("ps", ["-p", String(daemonPid), "-o", "state="], { encoding: "utf8" });
+    const state = listed.stdout.trim();
+    assert.ok(
+      state === "" || state.startsWith("Z"),
+      `daemonized grandchild ${daemonPid} still running (ps state=${JSON.stringify(state)}) — escaped the process group`,
+    );
+  } finally {
+    if (daemonPid !== undefined) {
+      try {
+        process.kill(daemonPid, "SIGKILL");
+      } catch {
+        // already dead
+      }
+    }
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
 test("G-14: a self-SIGKILL is not reported as a deadline", async () => {
   const run = await hostRunner("run-tests@head", ["kill -KILL $$"]);
   assert.notEqual(run.exit, 0, run.output);
