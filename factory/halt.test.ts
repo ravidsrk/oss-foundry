@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { tmp } from "./tmp-dir.ts";
 import { maySelectRepo } from "./engine.ts";
 import { applySecondaryLimitHalt, clearFactoryHalt, factoryHalt } from "./halt.ts";
+import { mintLedgerId } from "./ids.ts";
 import { seedState } from "./seed.ts";
 import { loadFactoryState, saveFactoryState } from "./state.ts";
 
@@ -81,6 +82,28 @@ test("a malformed halt record is refused at load, not read defensively", () => {
   if (!loaded.ok) return;
   assert.ok(factoryHalt(loaded.state));
   assert.equal(maySelectRepo(loaded.state, "ravidsrk/orca-fleet").ok, false);
+});
+
+test("#88: two halt events in the same millisecond do not share an id", () => {
+  const realNow = Date.now;
+  Date.now = () => 1_787_981_801_727;
+  try {
+    const first = applySecondaryLimitHalt(seedState(), {
+      repoId: "ColeMurray/background-agents",
+      at: "2026-08-29T09:00:00.000Z",
+    });
+    const second = applySecondaryLimitHalt(first, {
+      repoId: "ravidsrk/orca-fleet",
+      at: "2026-08-29T09:00:00.001Z",
+    });
+    const haltIds = [first.events[0].id, second.events[0].id];
+    assert.notEqual(haltIds[0], haltIds[1], `same-millisecond halt ids collided: ${haltIds.join(", ")}`);
+    assert.match(haltIds[0], /^evt_halt_/);
+    assert.match(haltIds[1], /^evt_halt_/);
+    assert.notEqual(haltIds[0], mintLedgerId("evt_halt", 1_787_981_801_727, 0));
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 test("only a human clears the halt, and the ledger records who", () => {

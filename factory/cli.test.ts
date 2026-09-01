@@ -1939,6 +1939,82 @@ test("sync counts a silently merged PR as noReview, and the ledger prints it", (
   );
 });
 
+test("#92: sync prints only the advisory this run produced, not the ledger's history", () => {
+  // The ledger is persisted, so a packet that once had an unreadable review carries that event for
+  // as long as the cap keeps it. Scanning all of `state.events` reprinted it after a CLEAN read, and
+  // the operator reads "the read FAILED — run `reconcile`" as the result of the sync they just ran.
+  //
+  // Keyed by event id rather than position or count: `appendEvent` prepends and caps at 80, so a
+  // tail slice reads the wrong end and a length delta is zero exactly when the cap is working.
+  const seed = withOpenSubmittedWave1();
+  const inflight = seed.packets.find((p) => p.status === "submitted")!;
+  const stale: FactoryState = {
+    ...seed,
+    events: [
+      {
+        id: "evt_stale_0001",
+        at: "2026-08-01T00:00:00.000Z",
+        kind: "follow-up",
+        packetId: inflight.id,
+        message: `Human review not observed for ${inflight.prUrl} — noReview and reviewCommentsAvg NOT recorded for ${inflight.repoId}. The read FAILED — run \`reconcile\` once GitHub answers the review endpoints`,
+      },
+      ...seed.events,
+    ],
+  };
+
+  // This sync reads the reviews perfectly. Nothing about it failed.
+  const clean = runCli(["sync", inflight.id, "--threads-answered", "--state", writeState(stale)], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [inflight.prUrl!]: {
+          state: "closed",
+          merged: true,
+          reviews: [{ login: "ColeMurray", type: "User" }],
+          reviewComments: [{ login: "ColeMurray", type: "User" }],
+        },
+      }),
+    ),
+  });
+  assert.equal(clean.code, 0, clean.out);
+  assert.equal(
+    /ADVISORY[^\n]*Human review not observed/.test(clean.out),
+    false,
+    `a clean sync reprinted a historical advisory:\n${clean.out}`,
+  );
+
+  // ...and the event is still in the ledger, because suppressing the PRINT must not mean losing the
+  // record. `status` and the ledger remain the place history is read.
+  const after = JSON.parse(readFileSync(writeState(stale), "utf8")) as FactoryState;
+  assert.ok(after.events.some((e) => e.id === "evt_stale_0001"), "the historical event must survive");
+});
+
+test("#92: sync names the cap or the outage, not both", () => {
+  const seed = withOpenSubmittedWave1();
+  const inflight = seed.packets.find((p) => p.status === "submitted")!;
+
+  const capped = runCli(["sync", inflight.id, "--threads-answered", "--state", writeState(seed)], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [inflight.prUrl!]: { state: "closed", merged: true, reviewsTruncated: true },
+      }),
+    ),
+  });
+  assert.equal(capped.code, 0, capped.out);
+  assert.match(capped.out, /PAGE CAP/, capped.out);
+  assert.equal(/FAILED/.test(capped.out), false, `a capped sync must not also name the outage:\n${capped.out}`);
+
+  const outage = runCli(["sync", inflight.id, "--threads-answered", "--state", writeState(seed)], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [inflight.prUrl!]: { state: "closed", merged: true, reviewsUnreadable: true },
+      }),
+    ),
+  });
+  assert.equal(outage.code, 0, outage.out);
+  assert.match(outage.out, /FAILED/, outage.out);
+  assert.equal(/PAGE CAP/.test(outage.out), false, `an outage sync must not also name the cap:\n${outage.out}`);
+});
+
 /**
  * The seed with one merged packet's review observation stripped — the shape a packet is left in
  * when GitHub's review endpoints were down for the single tick that absorbed its merge.
@@ -2400,6 +2476,51 @@ test("reconcile and verify-ledger hand packetChecks the same fields", () => {
         call,
         new RegExp(`\\b${field}:`),
         `${rel} stopped handing packetChecks \`${field}\`, so that check silently reports it did not run`,
+      );
+    }
+  }
+});
+
+test("applyPrSync call sites supply reviewTruncated (issue #92)", () => {
+  // The same defect class as revertTruncated: an omitted optional field is `undefined` at
+  // runtime under strip-types, never a compile error. The field is required on the opts
+  // object; this guard reds a call site that drops it. Count only the applyPrSync argument
+  // blocks — `packetChecks` also takes `reviewTruncated: synced.reviewTruncated` and is
+  // not this writer.
+  function applyPrSyncOptBlocks(source: string): string[] {
+    const blocks: string[] = [];
+    let searchFrom = 0;
+    while (true) {
+      const at = source.indexOf("applyPrSync(", searchFrom);
+      if (at === -1) break;
+      const brace = source.indexOf("{", at);
+      if (brace === -1) break;
+      let depth = 0;
+      let end = brace;
+      for (let i = brace; i < source.length; i++) {
+        if (source[i] === "{") depth++;
+        else if (source[i] === "}") {
+          depth--;
+          if (depth === 0) {
+            end = i;
+            break;
+          }
+        }
+      }
+      blocks.push(source.slice(brace, end + 1));
+      searchFrom = end + 1;
+    }
+    return blocks;
+  }
+  for (const rel of ["./cli.ts"]) {
+    const source = readFileSync(new URL(rel, import.meta.url), "utf8");
+    const blocks = applyPrSyncOptBlocks(source);
+    assert.equal(blocks.length, 2, `${rel} applyPrSync call-site count drifted`);
+    for (const [i, block] of blocks.entries()) {
+      assert.match(
+        block,
+        /reviewTruncated:\s*synced\.reviewTruncated/,
+        `${rel} applyPrSync #${i + 1} dropped reviewTruncated — a dropped field silently names both reasons again`,
       );
     }
   }

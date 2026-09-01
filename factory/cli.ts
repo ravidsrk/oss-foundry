@@ -1099,7 +1099,10 @@ async function main() {
       if (packet.status === "submitted" || packet.status === "followed-up") {
         // Mechanical absorption only: reconcile never attests threads answered, so it can
         // record merges/closes but never release the in-flight slot.
-        const applied = applyPrSync(next, packet.id, synced.meta, { threadsAnswered: false });
+        const applied = applyPrSync(next, packet.id, synced.meta, {
+          threadsAnswered: false,
+          reviewTruncated: synced.reviewTruncated,
+        });
         if (!applied.error) next = applied.state;
       }
       // The review-KPI recovery (issue #39 round 3), and the reason `syncGithubPr` keeps paying 2
@@ -1268,8 +1271,17 @@ async function main() {
     }
     // --threads-answered is the operator's attestation that every review thread has a reply.
     // Without it, quiet days accrue but the slot is never released.
+    // Only THIS sync's events are the operator's business below. The ledger is persisted, so
+    // scanning all of it reprinted a month-old advisory after a clean read, and the operator reads
+    // "the read FAILED" as the current result. Reproduced before fixing.
+    //
+    // By ID, not by position or count: `appendEvent` PREPENDS and caps the ledger at 80, so a tail
+    // slice reads the wrong end and a length delta is 0 exactly when the cap is doing its job. Ids
+    // are unique enough to key on because #88 in this same PR made them so.
+    const eventIdsBefore = new Set(state.events.map((e) => e.id));
     const result = applyPrSync(state, id, synced.meta, {
       threadsAnswered: rest.includes("--threads-answered"),
+      reviewTruncated: synced.reviewTruncated,
     });
     if (result.error) {
       console.error(result.error);
@@ -1280,6 +1292,15 @@ async function main() {
     console.log(
       `synced ${id} → ${after?.status}  quiet=${quietDaysOf(synced.meta, new Date().toISOString())}d  draft=${synced.meta.draft} state=${synced.meta.state} merged=${synced.meta.merged}`,
     );
+    // Issue #92: the reason the observation is missing is now on the opts object, so `sync`
+    // can say which. Print it — an event nobody reads is the same as no event. Only the events THIS
+    // call appended: see `eventsBefore`.
+    for (const e of result.state.events) {
+      if (eventIdsBefore.has(e.id)) continue;
+      if (e.packetId === id && e.message.includes("Human review not observed")) {
+        console.error(`ADVISORY ${e.message}`);
+      }
+    }
     // Re-check competing work on a still-open submitted/followed-up packet (issue #111).
     if (after && synced.meta.state !== "closed" && !synced.meta.merged) {
       for (const line of competitionAdvisories(after, await readCompetition(after))) {

@@ -244,7 +244,7 @@ const MUTANTS: Mutant[] = [
     file: "factory/packet.ts",
     from: "  } else if (withheld > 0) {",
     to: "  } else if (false) {",
-    why: "the freeze closes with `no ban statement matched in N chars` over text the operator was never shown — the sentence directly above the attest, and #37's parked scanner leg is what makes the missed ban real",
+    why: "the freeze closes with `no ban statement matched in N chars` over text the operator was never shown — the sentence directly above the attest, and a remaining scanner miss is what makes that claim dangerous",
   },
   {
     label: "i77-marker",

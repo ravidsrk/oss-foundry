@@ -401,32 +401,23 @@ test("the committed policy records parse under the quote guard", () => {
  * Issue #37, leg 4 — the assertion behind a sentence in docs/04-stations.md §2, not a claim about
  * recall.
  *
- * The page used to leave a reader to infer that deny-by-default covers a scanner miss. It does
- * not, and the two guards must not be conflated: `hasParsedEvidence` is satisfied by ANY fetched
- * document, so a `CONTRIBUTING` whose refusal the scanner cannot read is evidence the gate counts,
- * and the packet reaches `ALLOW`. Only the no-evidence case denies.
+ * Deny-by-default covers the no-evidence case. It does not cover a scanner miss: `hasParsedEvidence`
+ * is satisfied by ANY fetched document, so ordinary contributing prose (not a ban) is evidence the
+ * gate counts and the packet reaches `ALLOW`. Only the no-evidence case denies. The freeze is what
+ * stands between a remaining miss and a PR.
  *
- * This is a CHARACTERIZATION test of the gate as it stands, deliberately asserting `ALLOW` on
- * phrasings the scanner misses. It is not a recall assertion and must not be read as endorsing the
- * miss: the matcher work from the same issue is parked, and the freeze display (`renderFreezeEvidence`)
- * is what stands between these strings and a PR. If the matchers are later broadened so that these
- * DENY, this test is the thing that should be rewritten alongside the sentence it pins — that is
- * what it is for.
+ * The original probe paraphrases that used to pin this as `ALLOW` now DENY — that is the matcher
+ * half of #37, asserted by `the issue #37 probe paraphrases classify`. This test keeps the
+ * structural claim and must not be rewritten back into a recall assertion.
  */
 test("deny-by-default covers the no-evidence case, not the missed-ban case", () => {
-  // Paraphrases from the issue's own probe table that this tree's scanner does not match.
-  const missed = [
-    "we are not currently accepting AI-generated contributions",
-    "only human contributors may open pull requests",
-    "we don't want AI slop here",
-  ];
-  for (const text of missed) {
-    assert.equal(
-      evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: text }).code,
-      "ALLOW",
-      `a ban the scanner cannot read reaches ALLOW: ${text}`,
-    );
-  }
+  // A fetched document the scanner reads as silence is still evidence. That is the miss-shaped
+  // hole deny-by-default does not cover — the freeze is what stands there.
+  assert.equal(
+    evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: PYDANTIC_WELCOME }).code,
+    "ALLOW",
+    "a fetched document that is not a ban satisfies hasParsedEvidence and reaches ALLOW",
+  );
   // The same packet with nothing fetched is the case deny-by-default actually covers...
   assert.equal(
     evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo" }).code,
@@ -437,6 +428,105 @@ test("deny-by-default covers the no-evidence case, not the missed-ban case", () 
     evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: "" }).code,
     "DENY_UNKNOWN_POLICY",
   );
+});
+
+/**
+ * Issue #37 matcher half. The issue's own probe table: nine paraphrases of real maintainer ban
+ * language, seven of which reached ALLOW on `main`. Both directions — these DENY, and the
+ * must-ALLOW fixtures (`descriptive mention of autonomous agents`, `ordinary contributing prose`)
+ * stay ALLOW. A floor so emptying the table cannot ship as `suite ok` the way round 3 did.
+ *
+ * Process-framed had no example in the table; the shape is a ban that names a discard/drop
+ * procedure rather than "will be closed" (already DENY) or a subject/object/verdict triad that
+ * used `accepted` instead of `accepting`.
+ */
+const ISSUE_37_PROBES: { style: string; text: string }[] = [
+  { style: "present participle", text: "we are not currently accepting AI-generated contributions" },
+  { style: "brand-name only", text: "no ChatGPT output in this repo" },
+  { style: "imperative refusal", text: "keep your LLM at home" },
+  { style: "procedural refusal", text: "AI-generated pull requests are discarded without review" },
+  { style: "allow-list framing", text: "only human contributors may open pull requests" },
+  { style: "colloquial", text: "we don't want AI slop here" },
+  { style: "second-person imperative", text: "if you are a bot, turn back" },
+  { style: "explicit verdict", text: MATPLOTLIB_STYLE_BAN },
+  {
+    style: "ban late in a long paragraph",
+    text: `${"Please read the style guide before opening anything. ".repeat(12)}we are not currently accepting AI-generated contributions`,
+  },
+];
+
+test("the issue #37 probe paraphrases classify", () => {
+  assert.ok(ISSUE_37_PROBES.length >= 9, `probe table has ${ISSUE_37_PROBES.length} rows; the floor is 9`);
+  assert.equal(
+    new Set(ISSUE_37_PROBES.map((r) => r.text)).size,
+    ISSUE_37_PROBES.length,
+    "probe table holds duplicate documents",
+  );
+  for (const { style, text } of ISSUE_37_PROBES) {
+    const v = evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: text });
+    assert.equal(v.code, "DENY_FORBIDDEN", `${style} reached ${v.code}: ${text.slice(0, 80)}`);
+  }
+});
+
+/**
+ * The other side of the second-person ban, and the reason it needs one.
+ *
+ * `leave` was a bare alternative beside `turn back` and `go away`, so "if you are an agent, leave a
+ * comment on the issue first" reached DENY_FORBIDDEN — a P1 from review, reproduced on three
+ * phrasings. That is a repository INVITING agent participation with a courtesy step, and this roster
+ * is terminal: `AGENTS.md` makes the denylist absolute, so there is no hold to fall back to and no
+ * human asked. A false DENY here is the most expensive mistake the scanner can make.
+ *
+ * The first fix excluded comment-shaped objects and review broke it with one adjective ("leave a
+ * quick comment"): enumerating the innocent reading is the wrong POLARITY, because every word not yet
+ * listed defaults to DENY. The ban now requires positive evidence of departure — a place, an adverb of
+ * leaving, or nothing at all — so anything unrecognised is not a ban. Both directions are pinned
+ * together because the fix is a distinction, and a distinction needs two sides to be a test.
+ */
+const SECOND_PERSON_INVITATIONS: string[] = [
+  "if you are an agent, leave a comment on the issue first",
+  "if you are a bot, leave feedback on the issue before opening a PR",
+  "if you are an agent, leave your questions in the issue",
+  "if you are a bot, leave a note explaining what you changed",
+  "if you are an agent, leave us a message first",
+  "if you are a bot, leave me your review comments",
+  // Modifiers, which is where the first fix broke: an adjective between determiner and noun.
+  "if you are an agent, leave a quick comment",
+  "if you are a bot, leave detailed feedback in the issue",
+  "if you are an agent, leave a brief note explaining the change",
+  "if you are an agent, leave us a short message first",
+  // The indirect-object reading: a place named, and a comment still asked for.
+  "if you are an agent, leave the repo a comment",
+  "if you are a bot, leave the project a short note",
+];
+
+const SECOND_PERSON_BANS: string[] = [
+  "if you are a bot, turn back",
+  "if you are an agent, leave this repository",
+  "if you are an agent, leave the repo",
+  "if you are an agent, leave now",
+  "if you are a bot, go away",
+  "if you are an llm, leave",
+  "if you are a bot, do not submit anything",
+  "if you are an agent, leave immediately",
+  "if you are an llm, leave.",
+  "if you are a bot, leave us alone",
+  // ...and the row that keeps the exclusion above honest: a place followed by more BAN, not a
+  // comment. If the exclusion were widened to any continuation, this would stop denying.
+  "if you are an agent, leave the repository and never come back",
+];
+
+test("a second-person invitation to comment is not a ban, and a second-person ban still is", () => {
+  assert.ok(SECOND_PERSON_INVITATIONS.length >= 5, "the must-not-deny side needs a floor too");
+  assert.ok(SECOND_PERSON_BANS.length >= 5, "the must-deny side needs a floor too");
+  for (const text of SECOND_PERSON_INVITATIONS) {
+    const v = evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: text });
+    assert.notEqual(v.code, "DENY_FORBIDDEN", `an invitation was terminally denied: ${text}`);
+  }
+  for (const text of SECOND_PERSON_BANS) {
+    const v = evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs typo", contributing: text });
+    assert.equal(v.code, "DENY_FORBIDDEN", `a ban reached ${v.code}: ${text}`);
+  }
 });
 
 /**

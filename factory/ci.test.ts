@@ -240,8 +240,9 @@ test("the live-GitHub ledger check stays off the pull-request path", () => {
 test("every workflow action is pinned to an immutable commit", () => {
   const seen: string[] = [];
   for (const w of workflows()) {
-    for (const m of w.text.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)) {
+    for (const m of w.text.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)) {
       const ref = m[1];
+      const comment = m[2];
       seen.push(`${w.name}: ${ref}`);
       const at = ref.lastIndexOf("@");
       assert.notEqual(at, -1, `${w.name} uses \`${ref}\` with no ref at all, so it floats on the default branch`);
@@ -250,9 +251,21 @@ test("every workflow action is pinned to an immutable commit", () => {
         /^[0-9a-f]{40}$/,
         `${w.name} uses \`${ref}\`, a mutable ref. Pin the 40-character commit SHA with a trailing \`# vX.Y.Z\` comment; the upstream owner can retarget a tag, and this runs before every check in the job.`,
       );
+      assert.match(
+        comment,
+        /#\s*v\d+\.\d+\.\d+/,
+        `${w.name} pins \`${ref}\` without a \`# vX.Y.Z\` comment, so Dependabot cannot name the release it is updating`,
+      );
     }
   }
   // The scan itself is not vacuous: a rename or an indentation change that made the pattern miss
   // every `uses:` line would otherwise pass this test by finding nothing to check.
   assert.ok(seen.length >= 4, `action discovery found only ${seen.length} \`uses:\` lines (${seen.join(", ")})`);
+});
+
+test("pinned action SHAs have a keep-current mechanism (issue #85)", () => {
+  const text = readFileSync(join(REPO_ROOT, ".github/dependabot.yml"), "utf8");
+  assert.match(text, /package-ecosystem:\s*github-actions/);
+  assert.match(text, /directory:\s*\//);
+  assert.match(text, /schedule:/);
 });

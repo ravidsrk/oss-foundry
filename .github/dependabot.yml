@@ -1,0 +1,11 @@
+# Keep pinned GitHub Action SHAs current (issue #85).
+# A pin nobody updates trades a small supply-chain risk for certain drift.
+# Dependabot opens a PR that bumps the SHA and preserves the `# vX.Y.Z` comment.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 4

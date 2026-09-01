@@ -143,9 +143,10 @@ function withheldChars(docs: PolicyDocSource[]): number {
  * CONTRIBUTING" — a claim of coverage over the 1,234 characters the reader had not been given,
  * phrased as reassurance, immediately above the attest. Those two numbers are the fixture in
  * `packet.test.ts` ("the freeze never claims a clean scan over characters it did not show"), so the
- * example is re-derivable rather than illustrative. Combined with the scanner's known-and-parked
- * miss mode (#37) that is an operator approving a contribution to a repository that said in words
- * not to.
+ * example is re-derivable rather than illustrative. Combined with a remaining scanner miss
+ * (a phrasing nobody has written a pattern for — issue #37 closed the nine probe shapes, not
+ * every possible one) that is an operator approving a contribution to a repository that said
+ * in words not to.
  *
  * The fix is loudness, not more text, and the reason is that the excerpt limit is a LEDGER bound:
  * `policyDocs` is stored state, the full document is never kept, and re-fetching at freeze time

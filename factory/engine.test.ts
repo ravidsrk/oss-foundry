@@ -1379,7 +1379,7 @@ test("answered threads plus 14 quiet days release the in-flight slot", () => {
   assert.ok(submitted);
   const at = "2026-09-20T00:00:00.000Z";
   const result = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at,
   });
   assert.equal(result.error, undefined);
@@ -1394,12 +1394,12 @@ test("13 quiet days do not release the slot; unanswered threads never do", () =>
   const submitted = state.packets.find((p) => p.status === "submitted");
   const at = "2026-09-14T00:00:00.000Z";
   const early = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at,
   });
   assert.equal(early.state.packets.find((p) => p.id === submitted!.id)?.status, "submitted");
   const unanswered = applyPrSync(state, submitted!.id, prMetaAt("2026-08-01T00:00:00.000Z"), {
-    threadsAnswered: false,
+    reviewTruncated: false, threadsAnswered: false,
     at: "2026-09-20T00:00:00.000Z",
   });
   assert.equal(unanswered.state.packets.find((p) => p.id === submitted!.id)?.status, "submitted");
@@ -1409,11 +1409,11 @@ test("maintainer activity on a followed-up packet re-blocks the factory", () => 
   const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const released = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-20T00:00:00.000Z",
   });
   const woken = applyPrSync(released.state, submitted!.id, prMetaAt("2026-09-21T08:00:00.000Z", { issueComments: 2 }), {
-    threadsAnswered: false,
+    reviewTruncated: false, threadsAnswered: false,
     at: "2026-09-21T09:00:00.000Z",
   });
   const after = woken.state.packets.find((p) => p.id === submitted!.id);
@@ -1427,7 +1427,7 @@ test("wake does not reclaim submitted when another packet already holds the in-f
   const state = withOpenSubmittedWave1();
   const a = state.packets.find((p) => p.status === "submitted")!;
   const released = applyPrSync(state, a.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-20T00:00:00.000Z",
   });
   assert.equal(released.state.packets.find((p) => p.id === a.id)?.status, "followed-up");
@@ -1447,7 +1447,7 @@ test("wake does not reclaim submitted when another packet already holds the in-f
   assert.equal(inflightCount(withB.packets), 1);
 
   const woken = applyPrSync(withB, a.id, prMetaAt("2026-09-21T08:00:00.000Z", { issueComments: 2 }), {
-    threadsAnswered: false,
+    reviewTruncated: false, threadsAnswered: false,
     at: "2026-09-21T09:00:00.000Z",
   });
   assert.equal(woken.error, undefined);
@@ -1480,7 +1480,7 @@ test("merged and closed syncs write the scorecard and end follow-up", () => {
   const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const merged = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-02T00:00:00.000Z",
   });
   const mergedPacket = merged.state.packets.find((p) => p.id === submitted!.id);
@@ -1489,7 +1489,7 @@ test("merged and closed syncs write the scorecard and end follow-up", () => {
   assert.equal(mergedRow?.merged, 1);
 
   const closed = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" }), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-02T00:00:00.000Z",
   });
   const closedPacket = closed.state.packets.find((p) => p.id === submitted!.id);
@@ -1502,7 +1502,7 @@ test("45 quiet days record a stale-intent note but never auto-close", () => {
   const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const result = applyPrSync(state, submitted!.id, prMetaAt("2026-08-28T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-10-20T00:00:00.000Z",
   });
   const after = result.state.packets.find((p) => p.id === submitted!.id);
@@ -1518,19 +1518,19 @@ test("re-syncing a closed PR writes closedUnmerged exactly once; merged bumps me
   const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const closedMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
-  const once = applyPrSync(state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" });
-  const twice = applyPrSync(once.state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-03T00:00:00.000Z" });
-  const thrice = applyPrSync(twice.state, submitted!.id, closedMeta, { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" });
+  const once = applyPrSync(state, submitted!.id, closedMeta, { reviewTruncated: false, threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" });
+  const twice = applyPrSync(once.state, submitted!.id, closedMeta, { reviewTruncated: false, threadsAnswered: true, at: "2026-09-03T00:00:00.000Z" });
+  const thrice = applyPrSync(twice.state, submitted!.id, closedMeta, { reviewTruncated: false, threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" });
   const row = thrice.state.scorecard.find((r) => r.repoId === submitted!.repoId);
   assert.equal(row?.closedUnmerged, 1);
 
   const merged = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-02T00:00:00.000Z",
   });
   assert.equal(merged.state.mergedTotal, state.mergedTotal + 1);
   const again = applyPrSync(merged.state, submitted!.id, prMetaAt("2026-09-05T00:00:00.000Z", { merged: true, state: "closed" }), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-06T00:00:00.000Z",
   });
   assert.match(again.error ?? "", /cannot sync/);
@@ -1540,13 +1540,13 @@ test("quiet-day thresholds hold at their exact boundaries", () => {
   const state = withOpenSubmittedWave1();
   const submitted = state.packets.find((p) => p.status === "submitted");
   const at14 = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-15T00:00:00.000Z",
   });
   assert.equal(at14.state.packets.find((p) => p.id === submitted!.id)?.status, "followed-up");
 
   const at45 = applyPrSync(state, submitted!.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-10-16T00:00:00.000Z",
   });
   const after45 = at45.state.packets.find((p) => p.id === submitted!.id);
@@ -1691,7 +1691,7 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
     humanReview: { reviews: 1, comments: 2 },
   });
   const absorbed = applyPrSync(state, submitted.id, closedMeta, {
-    threadsAnswered: false,
+    reviewTruncated: false, threadsAnswered: false,
     at: "2026-09-02T00:00:00.000Z",
   });
   const after = absorbed.state.packets.find((p) => p.id === submitted.id)!;
@@ -1713,7 +1713,7 @@ test("an absorbed close is at rest: reconcile-style re-diff reports no divergenc
   // nothing GitHub says), and it must not be silent either.
   const blindMeta = prMetaAt("2026-09-01T00:00:00.000Z", { state: "closed" });
   const blind = applyPrSync(state, submitted.id, blindMeta, {
-    threadsAnswered: false,
+    reviewTruncated: false, threadsAnswered: false,
     at: "2026-09-02T00:00:00.000Z",
   });
   const unobserved = blind.state.packets.find((p) => p.id === submitted.id)!;
@@ -1852,7 +1852,7 @@ test("the reject warning is scoped to submitted, not to every packet that names 
   const seed = withOpenSubmittedWave1();
   const submitted = seed.packets.find((p) => p.status === "submitted")!;
   const released = applyPrSync(seed, submitted.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-20T00:00:00.000Z",
   });
   const followedUp = released.state.packets.find((p) => p.id === submitted.id)!;
@@ -1891,7 +1891,7 @@ test("status does not claim a re-block that the held slot already prevented", ()
   const seed = withOpenSubmittedWave1();
   const a = seed.packets.find((p) => p.status === "submitted")!;
   const released = applyPrSync(seed, a.id, prMetaAt("2026-09-01T00:00:00.000Z"), {
-    threadsAnswered: true,
+    reviewTruncated: false, threadsAnswered: true,
     at: "2026-09-20T00:00:00.000Z",
   });
 
@@ -1912,7 +1912,7 @@ test("status does not claim a re-block that the held slot already prevented", ()
     packets: [{ ...b, status: "gated", station: "freeze" }, ...released.state.packets],
   };
   const woken = applyPrSync(withB, a.id, prMetaAt("2026-09-21T08:00:00.000Z", { issueComments: 2 }), {
-    threadsAnswered: false,
+    reviewTruncated: false, threadsAnswered: false,
     at: "2026-09-21T09:00:00.000Z",
   });
   assert.equal(woken.state.packets.find((p) => p.id === a.id)?.status, "followed-up");
@@ -4517,7 +4517,7 @@ test("applyPrSync writes noReview on the merge transition and names the packet i
       state: "closed",
       humanReview: { reviews: 0, comments: 0 },
     }),
-    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+    { reviewTruncated: false, threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
   );
   assert.equal(merged.error, undefined);
   const row = scorecardRow(merged.state.scorecard, submitted.repoId)!;
@@ -4539,7 +4539,7 @@ test("applyPrSync folds review comments into the mean on the closedUnmerged tran
       state: "closed",
       humanReview: { reviews: 2, comments: 3 },
     }),
-    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+    { reviewTruncated: false, threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
   );
   assert.equal(closed.error, undefined);
   const row = scorecardRow(closed.state.scorecard, submitted.repoId)!;
@@ -4559,7 +4559,7 @@ test("applyPrSync folds review comments into the mean on the closedUnmerged tran
     closed.state,
     submitted.id,
     prMetaAt("2026-09-03T00:00:00.000Z", { state: "closed", humanReview: { reviews: 2, comments: 3 } }),
-    { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" },
+    { reviewTruncated: false, threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" },
   );
   const twice = scorecardRow(again.state.scorecard, submitted.repoId)!;
   assert.equal(twice.humanReviewedPrs, 1, "a second sync of the same close is not a second PR");
@@ -4573,7 +4573,7 @@ test("a terminal transition with no observed review split records nothing and sa
     state,
     submitted.id,
     prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }),
-    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+    { reviewTruncated: false, threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
   );
   const row = scorecardRow(merged.state.scorecard, submitted.repoId)!;
   assert.equal(row.noReview, 0, "an unread endpoint must not be recorded as silence");
@@ -4600,16 +4600,16 @@ test("a terminal transition with no observed review split records nothing and sa
     false,
     `\`sync\` refuses a terminal packet, so naming it is advice that cannot be followed:\n${gap}`,
   );
-  // ...and the OTHER reason: this reducer cannot tell an outage from a page cap (issue #69), and a
-  // line offering only the retry was misleading for half the cases it fires on.
-  assert.match(gap, /PAGE CAP/, `the advice must cover a capped read as well as an outage:\n${gap}`);
-  assert.match(gap, /cap again/, gap);
+  // Issue #92: the outage path names the outage, not the cap. Passing `reviewTruncated: false`
+  // is the unread-endpoint case this test built.
+  assert.match(gap, /FAILED/, `the outage line must name the outage:\n${gap}`);
+  assert.equal(/PAGE CAP/.test(gap), false, `an outage must not also name the cap:\n${gap}`);
   // Not a claim about the wording — a claim about the verb. `sync` really does refuse this packet.
   const refused = applyPrSync(
     merged.state,
     submitted.id,
     prMetaAt("2026-09-03T00:00:00.000Z", { merged: true, state: "closed" }),
-    { threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" },
+    { reviewTruncated: false, threadsAnswered: true, at: "2026-09-04T00:00:00.000Z" },
   );
   assert.match(
     refused.error ?? "",
@@ -4621,6 +4621,22 @@ test("a terminal transition with no observed review split records nothing and sa
   assert.equal(recovered.error, undefined, recovered.error);
   assert.equal(recovered.recorded, true, "the named remedy must actually move the KPI");
   assert.equal(scorecardRow(recovered.state.scorecard, submitted.repoId)!.humanReviewedPrs, 1);
+});
+
+test("#92: a capped review read names the cap, not the outage", () => {
+  const state = withOpenSubmittedWave1();
+  const submitted = state.packets.find((p) => p.status === "submitted")!;
+  const merged = applyPrSync(
+    state,
+    submitted.id,
+    prMetaAt("2026-09-01T00:00:00.000Z", { merged: true, state: "closed" }),
+    { reviewTruncated: true, threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+  );
+  const gap = merged.state.events.map((e) => e.message).find((m) => m.includes("Human review not observed"))!;
+  assert.match(gap, /PAGE CAP/, gap);
+  assert.match(gap, /cap again/, gap);
+  assert.equal(/FAILED/.test(gap), false, `a capped read must not also name the outage:\n${gap}`);
+  assert.equal(/run `reconcile`/.test(gap), false, `reconcile will cap again, so it is not the remedy:\n${gap}`);
 });
 
 test("the review-KPI writer and reporter share one predicate, so they cannot disagree", () => {
@@ -5150,7 +5166,7 @@ test("a bare approval is review activity that moves neither counter, and says so
       state: "closed",
       humanReview: { reviews: 1, comments: 0 },
     }),
-    { threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
+    { reviewTruncated: false, threadsAnswered: true, at: "2026-09-02T00:00:00.000Z" },
   );
   assert.equal(approved.error, undefined);
   const row = scorecardRow(approved.state.scorecard, submitted.repoId)!;
@@ -5536,7 +5552,7 @@ test("#110: applyPrSync close then packetChecks has no re-witness or disclosure 
       merged: false,
       humanReview: { reviews: 0, comments: 0 },
     },
-    { threadsAnswered: false, at: "2026-08-30T02:25:22.000Z" },
+    { reviewTruncated: false, threadsAnswered: false, at: "2026-08-30T02:25:22.000Z" },
   );
   assert.equal(closed.error, undefined);
   const after = closed.state.packets.find((p) => p.id === submitted.id)!;
