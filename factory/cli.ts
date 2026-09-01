@@ -413,8 +413,11 @@ function eventsNewestFirst(events: readonly FactoryEvent[]): FactoryEvent[] {
     const aId = eventIdMs(a.id);
     const bId = eventIdMs(b.id);
     if (aId !== undefined && bId !== undefined && aId !== bId) return bId - aId;
-    if (a.id < b.id) return -1;
-    if (a.id > b.id) return 1;
+    // Genuine tie: same `at` (or both unparseable) and the same minted millisecond (or
+    // neither id carries one). Return 0 so the stable sort keeps ledger order.
+    // `appendEvent` prepends, so the array order IS the causal sequence at a single
+    // instant. Sorting by the base-36 entropy token would invent an order that never
+    // happened.
     return 0;
   });
 }

@@ -2667,6 +2667,35 @@ test("events sorts on read, so a disordered ledger still prints newest first", (
   const tiedLines = tied.stdout.split("\n").filter((l) => /^\d{4}-/.test(l));
   assert.match(tiedLines[0]!, /later mint/, `same-at must prefer the later mint:\n${tied.stdout}`);
   assert.match(tiedLines[1]!, /earlier mint/, tied.stdout);
+
+  // Genuine tie: identical `at` AND identical minted millisecond. The comparator must
+  // return 0 so the stable sort keeps ledger order — that order is the prepend sequence,
+  // the real causal one. Sorting by the entropy token (`zzzzz` > `aaaaa`) would print
+  // "stored second" first and this would still be green.
+  const storedFirst: FactoryEvent = {
+    id: "evt_1000_zzzzz",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "stored first",
+  };
+  const storedSecond: FactoryEvent = {
+    id: "evt_1000_aaaaa",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "stored second",
+  };
+  const stable = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [storedFirst, storedSecond] })],
+    tmpdir(),
+  );
+  assert.equal(stable.code, 0, stable.out);
+  const stableLines = stable.stdout.split("\n").filter((l) => /^\d{4}-/.test(l));
+  assert.match(
+    stableLines[0]!,
+    /stored first/,
+    `a genuine tie must keep ledger order, not sort by entropy token:\n${stable.stdout}`,
+  );
+  assert.match(stableLines[1]!, /stored second/, stable.stdout);
 });
 
 test("events lists an unparseable at last, still printed, never as newest", () => {
