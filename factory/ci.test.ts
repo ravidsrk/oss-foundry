@@ -444,7 +444,8 @@ test("the published frontguard packet records the roster oracle, not a noop red-
  *
  * HONEST LIMITATION. A scheduled run cannot be failed on demand from this
  * repository, so this cannot prove a live red tick filed the issue. What it
- * can prove: the step's `if:` is `failure()`, the action is SHA-pinned, the
+ * can prove: the step's `if:` is `always() && !success()` (not `failure()`,
+ * which misses timeout-cancellation), the action is SHA-pinned, the
  * script body — driven against a fake octokit — creates on the first
  * failure, comments on a repeat, and reopens a closed alert rather than
  * opening a second issue, AND the workflow concurrency group serialises
@@ -456,8 +457,13 @@ test("the 6-hour clock files one alert issue on failure and comments on a repeat
   assert.ok(tick, "oss-tick.yml is missing");
   assert.match(
     tick.text,
-    /if:\s*\$\{\{\s*failure\(\)\s*\}\}/,
-    "oss-tick.yml has no if: failure() step — a red clock is silent (G-07)",
+    /- name: Alert on clock failure\s*\n\s+if:\s*\$\{\{\s*always\(\)\s*&&\s*!success\(\)\s*\}\}/,
+    "Alert on clock failure must use always() && !success() — failure() misses a timeout-cancelled hung clock, which is the outage nobody would otherwise notice",
+  );
+  assert.doesNotMatch(
+    tick.text,
+    /- name: Alert on clock failure\s*\n\s+if:\s*\$\{\{\s*failure\(\)\s*\}\}/,
+    "Alert on clock failure fell back to failure(), which does not run when timeout-minutes cancels the job",
   );
   assert.match(
     tick.text,

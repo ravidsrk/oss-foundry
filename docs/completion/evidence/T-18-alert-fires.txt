@@ -6,9 +6,22 @@ GitHub notification setting does not count: launch gate §6 requires a
 mechanism a stranger could inherit from the repo.
 
 Added step `Alert on clock failure`:
-  if: ${{ failure() }}
+  if: ${{ always() && !success() }}
   uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
   (same SHA pin as the existing packet-issue step; issues: write already granted)
+
+WHY NOT `failure()`. A job that hits `timeout-minutes: 20` is CANCELLED.
+`failure()` and `cancelled()` are distinct; `failure()` does not run on a
+cancelled job. A hung clock is the outage nobody would otherwise notice.
+`always()` makes GitHub still consider the step while tearing the job down;
+`!success()` drops the green path. TRADE: a human who cancels a run
+deliberately also gets an alert. For an unattended 6-hourly clock a
+spurious alert costs a glance; a missing one costs an unnoticed outage.
+
+The alert path is two or three REST calls. A timeout teardown does not
+give the step a fresh timeout-minutes budget; a step-level timeout can
+only shrink that window and is omitted. Concurrency serialises RUNS, not
+steps — the alert still executes inside the cancelled run.
 
 Idempotency has two halves:
 
@@ -17,25 +30,21 @@ Idempotency has two halves:
      create-on-every-red-run would turn one outage into ~40 issues a week.
   2. Workflow `concurrency: { group: oss-tick, cancel-in-progress: false }`.
      Search-then-create is not atomic: a schedule overlapping a
-     workflow_dispatch (the normal shape of someone retrying a failing
-     clock) can both pass the lookups and both create. The group is a
-     static name shared across events so they queue. cancel-in-progress
-     is false so a red run is not cancelled before its alert step.
-     GitHub still collapses pending runs to the newest; a tick that
-     never started has nothing to alert about.
+     workflow_dispatch can both pass the lookups and both create. The
+     group is a static name shared across events so they queue.
 
 HONEST LIMIT. A scheduled run cannot be failed on demand from this
 repository, so this cannot prove a live red tick filed the issue. What
 was proven:
 
-  1. The comment-stripped workflow contains `if: ${{ failure() }}`.
+  1. The comment-stripped workflow pins
+     `- name: Alert on clock failure` immediately followed by
+     `if: ${{ always() && !success() }}`.
   2. The script body, driven locally against a fake octokit:
        no existing issue  -> listForRepo open, listForRepo closed, create
-                             (title, run URL, job name, clock-alert label)
        open alert exists  -> createComment on it, create NOT called
        closed alert exists -> update state=open, createComment, create NOT called
-  3. concurrency group is the literal `oss-tick` (no ${{ interpolation }}),
-     cancel-in-progress: false.
+  3. concurrency group is the literal `oss-tick`, cancel-in-progress: false.
 
 Test: "the 6-hour clock files one alert issue on failure and comments on a repeat"
 
@@ -43,11 +52,9 @@ $ node --experimental-strip-types --test --test-name-pattern 'files one alert is
   ✔ the 6-hour clock files one alert issue on failure and comments on a repeat
   tests 1 / pass 1 / fail 0
 
---- NEGATIVE CONTROL: delete the concurrency block ---
+--- NEGATIVE CONTROL: if: ${{ failure() }} ---
 
   ✖ the 6-hour clock files one alert issue on failure and comments on a repeat
-  AssertionError: oss-tick.yml has no shared concurrency group — overlapping schedule+dispatch can each create an alert issue
-    actual: ''
-    expected: /^\s*group:\s*oss-tick\s*$/m
+  AssertionError: Alert on clock failure must use always() && !success() — failure() misses a timeout-cancelled hung clock, which is the outage nobody would otherwise notice
   EXIT:1
   restored

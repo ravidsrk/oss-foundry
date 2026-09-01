@@ -98,8 +98,27 @@ jobs:
       # repository, so the suite drives the script body against a fake octokit
       # (factory/ci.test.ts) rather than claiming a live red tick created the
       # issue.
+      #
+      # WHY `always() && !success()`, NOT `failure()`. A job that hits
+      # `timeout-minutes: 20` is CANCELLED, and `failure()` and `cancelled()`
+      # are distinct statuses — `failure()` does not run on a cancelled job.
+      # A hung clock is precisely the outage nobody would otherwise notice,
+      # so the condition must cover cancellation. `always()` is what makes
+      # GitHub still consider the step while tearing the job down;
+      # `!success()` drops the green path. TRADE: a human who cancels a run
+      # deliberately also gets an alert. For an unattended 6-hourly clock a
+      # spurious alert costs a glance; a missing one costs an unnoticed
+      # outage. Do not "simplify" this back to `failure()` — that is how
+      # the hung-clock case goes silent.
+      #
+      # The alert path is two or three REST calls on purpose. A timeout
+      # teardown does not give the step a fresh timeout-minutes budget, so
+      # a long sequence may not finish; a step-level timeout-minutes can
+      # only shrink that window and is omitted. Concurrency serialises
+      # RUNS, not steps: this step still executes inside the cancelled run
+      # and is not queued behind another run's alert.
       - name: Alert on clock failure
-        if: ${{ failure() }}
+        if: ${{ always() && !success() }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
