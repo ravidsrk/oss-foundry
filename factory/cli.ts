@@ -56,7 +56,7 @@ import { seedState } from "./seed.ts";
 import { backupFactoryState, loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { installTerminalBoundary } from "./terminal.ts";
-import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState, type ScorecardRow } from "./types.ts";
+import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryEvent, type FactoryState, type ScorecardRow } from "./types.ts";
 import {
   hostRunner,
   parseWitnessManifest,
@@ -378,14 +378,59 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
  * events into it would desync the published block. `status` is the snapshot of now — halt,
  * inflight, scorecard — and 80 event lines would bury the stuck-factory answers. This verb is
  * the audit-trail reader the events array never had (G-08).
+ *
+ * Newest-first is a sort on read, not the array's stored order. `appendEvent` prepends, so a
+ * live ledger usually already is newest-first — but the committed seed, a hand edit, or a
+ * migrated file need not be, and printing the array as-is while the header claimed newest-first
+ * would have the operator draw a causal conclusion from a 2026-07-16 event sitting above a
+ * newer 2026-08-26 one.
  */
+function eventAtMs(at: string): number | undefined {
+  // `isEvent` only checks `typeof === "string"`. `migrateV6` can leave the literal `"—"` on
+  // packet timestamps; a hand-edited event can carry the same, or garbage. `Date.parse("—")`
+  // is NaN. Sorting NaN as 0 floats undated events to 1970; sorting them as newest puts a
+  // broken timestamp at the top of a diagnostic. Neither is acceptable — callers send these
+  // last, still printed, so they cannot vanish and cannot look like "what just happened".
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function eventIdMs(id: string): number | undefined {
+  // mintLedgerId: `${kind}_${ms}_${token}`. Seed events and hand edits often do not match.
+  // `evt_halt` must be tried before `evt` or the prefix would not consume `_halt`.
+  const m = /^(?:evt_halt|evt|fu)_(\d+)_/.exec(id);
+  if (!m) return undefined;
+  const ms = Number(m[1]);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function eventsNewestFirst(events: readonly FactoryEvent[]): FactoryEvent[] {
+  return [...events].sort((a, b) => {
+    const aAt = eventAtMs(a.at);
+    const bAt = eventAtMs(b.at);
+    if (aAt !== undefined && bAt !== undefined && aAt !== bAt) return bAt - aAt;
+    if ((aAt === undefined) !== (bAt === undefined)) return aAt === undefined ? 1 : -1;
+    const aId = eventIdMs(a.id);
+    const bId = eventIdMs(b.id);
+    if (aId !== undefined && bId !== undefined && aId !== bId) return bId - aId;
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
+}
+
 function printEvents(state: FactoryState) {
+  const ordered = eventsNewestFirst(state.events);
+  const undated = ordered.filter((e) => eventAtMs(e.at) === undefined).length;
   console.log(`events: ${state.events.length} (newest first; ring cap 80)`);
+  if (undated) {
+    console.log(`  ${undated} with unparseable at — listed last, not treated as newest`);
+  }
   if (state.events.length === 0) {
     console.log("  (none)");
     return;
   }
-  for (const e of state.events) {
+  for (const e of ordered) {
     const pkt = e.packetId ?? "-";
     console.log(`${e.at}  ${e.kind}  ${pkt}  ${e.message}`);
   }

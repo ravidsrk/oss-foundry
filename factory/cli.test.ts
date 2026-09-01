@@ -15,7 +15,7 @@ import { buildPacket } from "./packet.ts";
 import { emptyScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { WAVE1_PACKET_ID, wave1Packet, withOpenSubmittedWave1 } from "./seed-fixtures.ts";
-import type { FactoryState } from "./types.ts";
+import type { FactoryEvent, FactoryState } from "./types.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLI = resolve(REPO_ROOT, "factory/cli.ts");
@@ -2596,15 +2596,123 @@ test("events reads the ledger event log from the CLI", () => {
     new RegExp(`${known.at}\\s+${known.kind}\\s+${known.packetId ?? "-"}\\s+${known.message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
     `the operator must see the ledger's own event, not a paraphrase:\n${run.stdout}`,
   );
-  // Newest first — appendEvent prepends, and the seed is stored that way. If this printed
-  // oldest-first the operator would read a six-month-old seed event as "what just happened".
+  // Presence, not order: the seed's stored array is *almost* newest-first (appendEvent prepends)
+  // but the last two seed events are swapped, which is exactly why order is a separate test.
   const firstEventLine = run.stdout.split("\n").find((l) => /^\d{4}-/.test(l));
-  assert.equal(firstEventLine?.startsWith(known.at), true, `newest event must be first:\n${run.stdout}`);
+  assert.ok(firstEventLine, `events printed no dated lines:\n${run.stdout}`);
 
   const empty = runCli(["events", "--state", writeState(emptyLedger())], tmpdir());
   assert.equal(empty.code, 0, empty.out);
   assert.match(empty.stdout, /^events: 0 /m, empty.stdout);
   assert.match(empty.stdout, /^\s+\(none\)$/m, empty.stdout);
+});
+
+test("events sorts on read, so a disordered ledger still prints newest first", () => {
+  // The finding: the verb labelled newest-first and then emitted stored order. `appendEvent`
+  // prepends, so a live ledger usually already is — the committed seed, a hand edit, and this
+  // fixture are not. Stored oldest-first; the header still has to be true.
+  const oldest: FactoryEvent = {
+    id: "evt_old",
+    at: "2026-07-16T00:00:00.000Z",
+    kind: "draft",
+    message: "oldest stored first",
+  };
+  const newest: FactoryEvent = {
+    id: "evt_new",
+    at: "2026-08-30T02:25:22.000Z",
+    kind: "follow-up",
+    packetId: "pkt_x",
+    message: "newest stored in the middle",
+  };
+  const middle: FactoryEvent = {
+    id: "evt_mid",
+    at: "2026-08-26T19:00:00.000Z",
+    kind: "gate",
+    message: "middle stored last",
+  };
+  const run = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [oldest, newest, middle] })],
+    tmpdir(),
+  );
+  assert.equal(run.code, 0, run.out);
+  const dated = run.stdout.split("\n").filter((l) => /^\d{4}-/.test(l));
+  assert.deepEqual(
+    dated.map((l) => l.slice(0, 20)),
+    ["2026-08-30T02:25:22.", "2026-08-26T19:00:00.", "2026-07-16T00:00:00."],
+    `stored order was oldest, newest, middle; printed order must be newest first:\n${run.stdout}`,
+  );
+  assert.match(dated[0]!, /newest stored in the middle/, dated[0]);
+  assert.match(dated[1]!, /middle stored last/, dated[1]);
+  assert.match(dated[2]!, /oldest stored first/, dated[2]);
+
+  // Same `at`: the millisecond minted into the id is the tiebreak. Without it, two events in
+  // one second would print in stored order while the header still said newest-first.
+  const earlierMint: FactoryEvent = {
+    id: "evt_1000_aaaaa",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "earlier mint",
+  };
+  const laterMint: FactoryEvent = {
+    id: "evt_2000_bbbbb",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "later mint",
+  };
+  const tied = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [earlierMint, laterMint] })],
+    tmpdir(),
+  );
+  assert.equal(tied.code, 0, tied.out);
+  const tiedLines = tied.stdout.split("\n").filter((l) => /^\d{4}-/.test(l));
+  assert.match(tiedLines[0]!, /later mint/, `same-at must prefer the later mint:\n${tied.stdout}`);
+  assert.match(tiedLines[1]!, /earlier mint/, tied.stdout);
+});
+
+test("events lists an unparseable at last, still printed, never as newest", () => {
+  // `isEvent` only checks typeof string; `migrateV6` can leave the literal "—" on timestamps.
+  // Date.parse("—") is NaN. Dropping the row loses the audit; treating NaN as newest puts a
+  // broken timestamp at the top of a diagnostic.
+  const dated: FactoryEvent = {
+    id: "evt_ok",
+    at: "2026-08-30T02:25:22.000Z",
+    kind: "tick",
+    message: "dated",
+  };
+  const dash: FactoryEvent = {
+    id: "evt_dash",
+    at: "—",
+    kind: "score",
+    message: "undated dash",
+  };
+  const garbage: FactoryEvent = {
+    id: "evt_garbage",
+    at: "not-a-date",
+    kind: "tick",
+    message: "garbage at",
+  };
+  const run = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [dash, dated, garbage] })],
+    tmpdir(),
+  );
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.stdout,
+    /2 with unparseable at — listed last, not treated as newest/,
+    run.stdout,
+  );
+  const body = run.stdout
+    .split("\n")
+    .filter((l) => /\bdated\b|undated dash|garbage at/.test(l));
+  assert.equal(body.length, 3, `an unparseable at must not vanish:\n${run.stdout}`);
+  assert.match(body[0]!, /\bdated\b/, `the parseable event is newest:\n${run.stdout}`);
+  assert.match(body[1]!, /garbage at|undated dash/, body[1]);
+  assert.match(body[2]!, /garbage at|undated dash/, body[2]);
+  assert.equal(
+    /^(?:—|not-a-date)/m.test(body[0]!),
+    false,
+    `an unparseable at must not float to the top:\n${run.stdout}`,
+  );
 });
 
 test("status prints reverts and reviewCommentsAvg on the scorecard line", () => {
