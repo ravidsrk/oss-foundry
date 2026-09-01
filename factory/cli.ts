@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ALLOWLIST, repoById } from "./allowlist.ts";
+import { ALLOWLIST, CAPS, repoById } from "./allowlist.ts";
 import { competitionAdvisories, readCompetition } from "./competition-read.ts";
 import {
   applyAdvance,
@@ -51,12 +51,12 @@ import {
 import { packetChecks, seedDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderEvidencePage, renderFreezeEvidence, renderPrBody } from "./packet.ts";
-import { health, scorecardRow } from "./scorecard.ts";
+import { health, mergeRate, scorecardRow, stopReasons, terminalCount } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { backupFactoryState, loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { installTerminalBoundary } from "./terminal.ts";
-import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
+import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryEvent, type FactoryState, type ScorecardRow } from "./types.ts";
 import {
   hostRunner,
   parseWitnessManifest,
@@ -286,12 +286,26 @@ function mustLoad() {
   return { state: loaded.state, source: loaded.source };
 }
 
+/**
+ * Why `health()` returned `stop`. `health()` is three independent predicates (banned tone,
+ * reverts > 0, merge rate under the cap) and the scorecard line used to print only the resulting
+ * word — so a repository frozen by a revert looked identical to one a maintainer banned, and the
+ * operator opened scorecard.ts at 2 a.m. to find out which (G-08). Named here, next to the print,
+ * because a helper in scorecard.ts that nobody calls is the same as no reason.
+ */
 function printStatus(state: FactoryState, source: "file" | "seed") {
   console.log(`state: ${STATE_FILE}${source === "seed" ? " (absent — committed seed)" : ""}`);
   // The clock verifies the committed seed, never this file (docs/08-operations.md). This is the
   // only place the operator is told the two have parted company.
   if (source === "file") {
     for (const d of seedDivergences(state, seedState())) console.log(`SEED DRIFT ${d}`);
+  }
+  // The halt used to reach the terminal only as a mustLoad side-effect on stderr, above the
+  // report and not part of it. status is the 2 a.m. diagnostic; a factory-wide stop that is not
+  // in the report is a stuck factory with no surfaced reason (G-08).
+  const halted = factoryHalt(state);
+  if (halted) {
+    console.log(`FACTORY HALTED ${halted.at}: ${halted.reason}`);
   }
   const inflight = state.packets.filter((p) => INFLIGHT_STATUSES.includes(p.status));
   console.log(`Foundry  packets=${state.packets.length} ticks=${state.ticksRun} attestedWave0=${foundryAttestedWave0Merges(state.packets)} inflight=${hasInflight(state.packets)}`);
@@ -302,8 +316,13 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
       const quiet = p.prMeta
         ? `  ${quietLabel(quietDaysOf(p.prMeta, new Date().toISOString()), QUIET_RELEASE_DAYS, p.prMeta)}`
         : "";
-      console.log(`  ${p.id}  ${p.status}  ${p.repoId}#${p.issueNumber}  ${p.prUrl ?? ""}${quiet}`);
+      // A gated packet is waiting on the freeze; the verdict is why. Omitting it left the
+      // operator reading `gated` with no idea whether the scanner allowed or denied.
+      const policy = p.status === "gated" ? `  policy=${p.policy.code}` : "";
+      console.log(`  ${p.id}  ${p.status}  ${p.repoId}#${p.issueNumber}  ${p.prUrl ?? ""}${quiet}${policy}`);
     }
+  } else if (halted) {
+    console.log("in flight: none — factory halted; tick is refused");
   } else {
     console.log("in flight: none — tick is allowed");
   }
@@ -330,7 +349,79 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
   console.log("scorecard:");
   for (const row of state.scorecard) {
     if (row.opened === 0 && row.merged === 0 && row.reverts === 0) continue;
-    console.log(`  ${row.repoId}  opened=${row.opened} merged=${row.merged} tone=${row.maintainerTone} health=${health(row)}`);
+    const h = health(row);
+    const why = h === "stop" ? stopReasons(row) : [];
+    const stop = why.length ? `  stop=${why.join(",")}` : "";
+    console.log(
+      `  ${row.repoId}  opened=${row.opened} merged=${row.merged} reverts=${row.reverts} reviewCommentsAvg=${row.reviewCommentsAvg} tone=${row.maintainerTone} health=${h}${stop}`,
+    );
+  }
+}
+
+/**
+ * The ledger's own event log, newest first. `ledger` is an export format (paste between the
+ * GENERATED markers in docs/12-ledger.md) and must stay byte-stable for that paste; stuffing
+ * events into it would desync the published block. `status` is the snapshot of now — halt,
+ * inflight, scorecard — and 80 event lines would bury the stuck-factory answers. This verb is
+ * the audit-trail reader the events array never had (G-08).
+ *
+ * Newest-first is a sort on read, not the array's stored order. `appendEvent` prepends, so a
+ * live ledger usually already is newest-first — but the committed seed, a hand edit, or a
+ * migrated file need not be, and printing the array as-is while the header claimed newest-first
+ * would have the operator draw a causal conclusion from a 2026-07-16 event sitting above a
+ * newer 2026-08-26 one.
+ */
+function eventAtMs(at: string): number | undefined {
+  // `isEvent` only checks `typeof === "string"`. `migrateV6` can leave the literal `"—"` on
+  // packet timestamps; a hand-edited event can carry the same, or garbage. `Date.parse("—")`
+  // is NaN. Sorting NaN as 0 floats undated events to 1970; sorting them as newest puts a
+  // broken timestamp at the top of a diagnostic. Neither is acceptable — callers send these
+  // last, still printed, so they cannot vanish and cannot look like "what just happened".
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function eventIdMs(id: string): number | undefined {
+  // mintLedgerId: `${kind}_${ms}_${token}`. Seed events and hand edits often do not match.
+  // `evt_halt` must be tried before `evt` or the prefix would not consume `_halt`.
+  const m = /^(?:evt_halt|evt|fu)_(\d+)_/.exec(id);
+  if (!m) return undefined;
+  const ms = Number(m[1]);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function eventsNewestFirst(events: readonly FactoryEvent[]): FactoryEvent[] {
+  return [...events].sort((a, b) => {
+    const aAt = eventAtMs(a.at);
+    const bAt = eventAtMs(b.at);
+    if (aAt !== undefined && bAt !== undefined && aAt !== bAt) return bAt - aAt;
+    if ((aAt === undefined) !== (bAt === undefined)) return aAt === undefined ? 1 : -1;
+    const aId = eventIdMs(a.id);
+    const bId = eventIdMs(b.id);
+    if (aId !== undefined && bId !== undefined && aId !== bId) return bId - aId;
+    // Genuine tie: same `at` (or both unparseable) and the same minted millisecond (or
+    // neither id carries one). Return 0 so the stable sort keeps ledger order.
+    // `appendEvent` prepends, so the array order IS the causal sequence at a single
+    // instant. Sorting by the base-36 entropy token would invent an order that never
+    // happened.
+    return 0;
+  });
+}
+
+function printEvents(state: FactoryState) {
+  const ordered = eventsNewestFirst(state.events);
+  const undated = ordered.filter((e) => eventAtMs(e.at) === undefined).length;
+  console.log(`events: ${state.events.length} (newest first; ring cap 80)`);
+  if (undated) {
+    console.log(`  ${undated} with unparseable at — listed last, not treated as newest`);
+  }
+  if (state.events.length === 0) {
+    console.log("  (none)");
+    return;
+  }
+  for (const e of ordered) {
+    const pkt = e.packetId ?? "-";
+    console.log(`${e.at}  ${e.kind}  ${pkt}  ${e.message}`);
   }
 }
 
@@ -465,6 +556,7 @@ function usage(): void {
   console.log(`Foundry operator loop
 
   status
+  events   (ledger event log, newest first — the audit trail; ledger is the published export, not this)
   tick
   approve <packetId> --note <text> [--by <name>]   (identity also via FOUNDRY_OPERATOR)
   reject <packetId> --reason <text>
@@ -501,6 +593,11 @@ async function main() {
 
   if (cmd === "status") {
     printStatus(state, source);
+    return;
+  }
+
+  if (cmd === "events") {
+    printEvents(state);
     return;
   }
 

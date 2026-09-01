@@ -4,9 +4,11 @@ import {
   applyReviewToScorecard,
   classifyRevert,
   emptyScorecard,
+  health,
   REVERT_WINDOW_DAYS,
   revertWindow,
   scorecardRow,
+  stopReasons,
 } from "./scorecard.ts";
 
 const MERGE = "36d0f23708adbdf911e4df050ed516821278a9fc";
@@ -53,4 +55,58 @@ test("a comments-only split is review activity, not noReview", () => {
   assert.equal(row.noReview, 0, "a human review comment is not zero activity");
   assert.equal(row.humanReviewedPrs, 1);
   assert.equal(row.humanReviewComments, 1);
+});
+
+/**
+ * `health` is DERIVED from `stopReasons`, not merely consistent with it, and this pins that.
+ *
+ * `status` used to carry its own copy of the three `stop` predicates so it could explain a frozen
+ * repository. Two independent implementations of one rule is the defect this repository keeps
+ * shipping, and a drifted copy here is worse than no explanation at all: the operator reads a
+ * reason, clears it, and the repository stays stopped for the reason that was not printed.
+ */
+test("health is stop exactly when stopReasons is non-empty, and names every reason", () => {
+  // `scorecardRow` is a finder over a list, not a constructor — take a real row from an empty
+  // scorecard so every field is the shape the loader validates.
+  const base = emptyScorecard()[0]!;
+
+  // Not stopped: no reasons.
+  assert.deepEqual(stopReasons(base), []);
+  assert.notEqual(health(base), "stop");
+
+  // Each predicate alone.
+  const banned = { ...base, maintainerTone: "banned" as const };
+  assert.deepEqual(stopReasons(banned), ["banned"]);
+  assert.equal(health(banned), "stop");
+
+  const reverted = { ...base, reverts: 2 };
+  assert.deepEqual(stopReasons(reverted), ["reverts=2"]);
+  assert.equal(health(reverted), "stop");
+
+  // ALL holding predicates, not the short-circuit winner. An operator who clears only the reason
+  // that happened to print first would otherwise be surprised a second time.
+  const both = { ...base, maintainerTone: "banned" as const, reverts: 1 };
+  assert.deepEqual(stopReasons(both), ["banned", "reverts=1"]);
+  assert.equal(health(both), "stop");
+
+  // The merge-rate predicate, and its message shape, which `status` prints verbatim.
+  const poor = { ...base, opened: 3, merged: 0, closedUnmerged: 3 };
+  const reasons = stopReasons(poor);
+  assert.equal(reasons.length, 1, `expected only the merge-rate reason, got ${JSON.stringify(reasons)}`);
+  assert.match(reasons[0]!, /^merge-rate 0\/3</);
+  assert.equal(health(poor), "stop");
+
+  // The invariant itself, over every combination: stop iff there is a reason.
+  for (const tone of ["warm", "neutral", "cold", "banned"] as const) {
+    for (const reverts of [0, 1]) {
+      for (const opened of [0, 3]) {
+        const row = { ...base, maintainerTone: tone, reverts, opened, merged: 0, closedUnmerged: opened };
+        assert.equal(
+          health(row) === "stop",
+          stopReasons(row).length > 0,
+          `health and stopReasons disagree for tone=${tone} reverts=${reverts} opened=${opened} — they have drifted, which is exactly what deriving one from the other exists to prevent`,
+        );
+      }
+    }
+  }
 });

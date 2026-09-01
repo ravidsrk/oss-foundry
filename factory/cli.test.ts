@@ -15,7 +15,7 @@ import { buildPacket } from "./packet.ts";
 import { emptyScorecard } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { WAVE1_PACKET_ID, wave1Packet, withOpenSubmittedWave1 } from "./seed-fixtures.ts";
-import type { FactoryState } from "./types.ts";
+import type { FactoryEvent, FactoryState } from "./types.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLI = resolve(REPO_ROOT, "factory/cli.ts");
@@ -1472,6 +1472,7 @@ test("no byte a terminal acts on reaches the operator, whatever the verb and wha
     ["evidence-page", id],
     ["status"],
     ["ledger"],
+    ["events"],
   ]) {
     const stub = githubStub("record");
     const run = runCli([...args, "--state", path], tmpdir(), { preload: stub.preload });
@@ -1621,7 +1622,7 @@ test("reconcile re-checks merged packets for a revert of our merge commit and re
   assert.equal(status.code, 0, status.out);
   assert.match(
     status.stdout,
-    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    new RegExp(`${repoId}[^\\n]*health=stop`),
     `a recorded revert must show as a stop:\n${status.stdout}`,
   );
 
@@ -1716,7 +1717,7 @@ test("the revert verb records a maintainer-stated rollback, halts the repo, and 
   const status = runCli(["status", "--state", path], tmpdir());
   assert.match(
     status.stdout,
-    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    new RegExp(`${repoId}[^\\n]*health=stop`),
     `a recorded revert must show as a stop:\n${status.stdout}`,
   );
 
@@ -1775,7 +1776,7 @@ test("the revert verb refuses a rollback past the 30-day window and writes nothi
   const status = runCli(["status", "--state", path], tmpdir());
   assert.doesNotMatch(
     status.stdout,
-    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    new RegExp(`${repoId}[^\\n]*health=stop`),
     `an out-of-window revert must not stop the repo:\n${status.stdout}`,
   );
 });
@@ -1834,7 +1835,7 @@ test("revert dates the window from the rollback the operator names, not from whe
   const status = runCli(["status", "--state", datedPath], tmpdir());
   assert.match(
     status.stdout,
-    new RegExp(`${repoId}\\s+opened=\\d+ merged=\\d+ tone=\\w+ health=stop`),
+    new RegExp(`${repoId}[^\\n]*health=stop`),
     status.stdout,
   );
 
@@ -2563,4 +2564,274 @@ test("reconcile and sync advise when the competing-work re-check hits its page c
   assert.equal(synced.code, 0, synced.out);
   assert.match(synced.out, /^ADVISORY .*page cap/m, synced.out);
   assert.match(synced.out, /no competing pull request/, synced.out);
+});
+
+/**
+ * G-08 / T-19 — the audit trail has a reader, and status can explain a stuck factory.
+ *
+ * Three surfaces were missing, and each is the reason an operator at 2 a.m. would open the
+ * gitignored JSON by hand:
+ *   1. `events` is written on every mutation and no command read them back.
+ *   2. `reverts` and `reviewCommentsAvg` were computed, stored, and printed by nothing —
+ *      while `reverts > 0` forces `health=stop`.
+ *   3. A factory halt reached the terminal only as a `mustLoad` stderr side-effect, above the
+ *      report and not part of it; a `health=stop` row named the word and not the predicate.
+ *
+ * Driven through the spawned CLI: a helper that printed the right string while `main()` never
+ * called it would keep this file green and the operator blind.
+ */
+
+test("events reads the ledger event log from the CLI", () => {
+  // `ledger` is the paste-between-GENERATED-markers export and must stay an export. A flag on
+  // `status` would bury 80 lines under the stuck-factory answers. This is its own verb so
+  // `--help` can list it and an operator can type it.
+  const seed = seedState();
+  const known = seed.events[0];
+  assert.ok(known, "the seed must carry at least one event or this proves nothing");
+  const run = runCli(["events", "--state", writeState(seed)], tmpdir());
+  assert.equal(run.code, 0, run.out);
+  assert.match(run.stdout, /^events: \d+ \(newest first; ring cap 80\)/m, run.stdout);
+  assert.match(
+    run.stdout,
+    new RegExp(`${known.at}\\s+${known.kind}\\s+${known.packetId ?? "-"}\\s+${known.message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    `the operator must see the ledger's own event, not a paraphrase:\n${run.stdout}`,
+  );
+  // Presence, not order: the seed's stored array is *almost* newest-first (appendEvent prepends)
+  // but the last two seed events are swapped, which is exactly why order is a separate test.
+  const firstEventLine = run.stdout.split("\n").find((l) => /^\d{4}-/.test(l));
+  assert.ok(firstEventLine, `events printed no dated lines:\n${run.stdout}`);
+
+  const empty = runCli(["events", "--state", writeState(emptyLedger())], tmpdir());
+  assert.equal(empty.code, 0, empty.out);
+  assert.match(empty.stdout, /^events: 0 /m, empty.stdout);
+  assert.match(empty.stdout, /^\s+\(none\)$/m, empty.stdout);
+});
+
+test("events sorts on read, so a disordered ledger still prints newest first", () => {
+  // The finding: the verb labelled newest-first and then emitted stored order. `appendEvent`
+  // prepends, so a live ledger usually already is — the committed seed, a hand edit, and this
+  // fixture are not. Stored oldest-first; the header still has to be true.
+  const oldest: FactoryEvent = {
+    id: "evt_old",
+    at: "2026-07-16T00:00:00.000Z",
+    kind: "draft",
+    message: "oldest stored first",
+  };
+  const newest: FactoryEvent = {
+    id: "evt_new",
+    at: "2026-08-30T02:25:22.000Z",
+    kind: "follow-up",
+    packetId: "pkt_x",
+    message: "newest stored in the middle",
+  };
+  const middle: FactoryEvent = {
+    id: "evt_mid",
+    at: "2026-08-26T19:00:00.000Z",
+    kind: "gate",
+    message: "middle stored last",
+  };
+  const run = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [oldest, newest, middle] })],
+    tmpdir(),
+  );
+  assert.equal(run.code, 0, run.out);
+  const dated = run.stdout.split("\n").filter((l) => /^\d{4}-/.test(l));
+  assert.deepEqual(
+    dated.map((l) => l.slice(0, 20)),
+    ["2026-08-30T02:25:22.", "2026-08-26T19:00:00.", "2026-07-16T00:00:00."],
+    `stored order was oldest, newest, middle; printed order must be newest first:\n${run.stdout}`,
+  );
+  assert.match(dated[0]!, /newest stored in the middle/, dated[0]);
+  assert.match(dated[1]!, /middle stored last/, dated[1]);
+  assert.match(dated[2]!, /oldest stored first/, dated[2]);
+
+  // Same `at`: the millisecond minted into the id is the tiebreak. Without it, two events in
+  // one second would print in stored order while the header still said newest-first.
+  const earlierMint: FactoryEvent = {
+    id: "evt_1000_aaaaa",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "earlier mint",
+  };
+  const laterMint: FactoryEvent = {
+    id: "evt_2000_bbbbb",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "later mint",
+  };
+  const tied = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [earlierMint, laterMint] })],
+    tmpdir(),
+  );
+  assert.equal(tied.code, 0, tied.out);
+  const tiedLines = tied.stdout.split("\n").filter((l) => /^\d{4}-/.test(l));
+  assert.match(tiedLines[0]!, /later mint/, `same-at must prefer the later mint:\n${tied.stdout}`);
+  assert.match(tiedLines[1]!, /earlier mint/, tied.stdout);
+
+  // Genuine tie: identical `at` AND identical minted millisecond. The comparator must
+  // return 0 so the stable sort keeps ledger order — that order is the prepend sequence,
+  // the real causal one. Sorting by the entropy token (`zzzzz` > `aaaaa`) would print
+  // "stored second" first and this would still be green.
+  const storedFirst: FactoryEvent = {
+    id: "evt_1000_zzzzz",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "stored first",
+  };
+  const storedSecond: FactoryEvent = {
+    id: "evt_1000_aaaaa",
+    at: "2026-08-30T00:00:00.000Z",
+    kind: "tick",
+    message: "stored second",
+  };
+  const stable = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [storedFirst, storedSecond] })],
+    tmpdir(),
+  );
+  assert.equal(stable.code, 0, stable.out);
+  const stableLines = stable.stdout.split("\n").filter((l) => /^\d{4}-/.test(l));
+  assert.match(
+    stableLines[0]!,
+    /stored first/,
+    `a genuine tie must keep ledger order, not sort by entropy token:\n${stable.stdout}`,
+  );
+  assert.match(stableLines[1]!, /stored second/, stable.stdout);
+});
+
+test("events lists an unparseable at last, still printed, never as newest", () => {
+  // `isEvent` only checks typeof string; `migrateV6` can leave the literal "—" on timestamps.
+  // Date.parse("—") is NaN. Dropping the row loses the audit; treating NaN as newest puts a
+  // broken timestamp at the top of a diagnostic.
+  const dated: FactoryEvent = {
+    id: "evt_ok",
+    at: "2026-08-30T02:25:22.000Z",
+    kind: "tick",
+    message: "dated",
+  };
+  const dash: FactoryEvent = {
+    id: "evt_dash",
+    at: "—",
+    kind: "score",
+    message: "undated dash",
+  };
+  const garbage: FactoryEvent = {
+    id: "evt_garbage",
+    at: "not-a-date",
+    kind: "tick",
+    message: "garbage at",
+  };
+  const run = runCli(
+    ["events", "--state", writeState({ ...emptyLedger(), events: [dash, dated, garbage] })],
+    tmpdir(),
+  );
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.stdout,
+    /2 with unparseable at — listed last, not treated as newest/,
+    run.stdout,
+  );
+  const body = run.stdout
+    .split("\n")
+    .filter((l) => /\bdated\b|undated dash|garbage at/.test(l));
+  assert.equal(body.length, 3, `an unparseable at must not vanish:\n${run.stdout}`);
+  assert.match(body[0]!, /\bdated\b/, `the parseable event is newest:\n${run.stdout}`);
+  assert.match(body[1]!, /garbage at|undated dash/, body[1]);
+  assert.match(body[2]!, /garbage at|undated dash/, body[2]);
+  assert.equal(
+    /^(?:—|not-a-date)/m.test(body[0]!),
+    false,
+    `an unparseable at must not float to the top:\n${run.stdout}`,
+  );
+});
+
+test("status prints reverts and reviewCommentsAvg on the scorecard line", () => {
+  const seed = seedState();
+  const row = seed.scorecard.find((r) => r.repoId === "ravidsrk/orca-fleet")!;
+  assert.equal(row.reviewCommentsAvg, 1, "the seed's orca-fleet row is the named 90-day KPI fixture");
+  assert.equal(row.reverts, 0);
+  const run = runCli(["status", "--state", writeState(seed)], tmpdir());
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.stdout,
+    /ravidsrk\/orca-fleet\s+opened=2 merged=2 reverts=0 reviewCommentsAvg=1 tone=warm health=good/,
+    `both KPIs must sit on the scorecard line an operator already reads:\n${run.stdout}`,
+  );
+});
+
+test("status explains a halted factory as part of the report, not only on stderr", () => {
+  // mustLoad still prints FACTORY HALTED to stderr for every verb. That is not the report.
+  // Asserting against stdout is the whole test: a banner that only lives on stderr keeps this
+  // green while status still cannot explain a stuck factory.
+  const halted = applySecondaryLimitHalt(seedState(), {
+    repoId: DRAFT_READY_REPO,
+    at: "2026-08-29T09:00:00.000Z",
+  });
+  const run = runCli(["status", "--state", writeState(halted)], tmpdir());
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.stdout,
+    /^FACTORY HALTED 2026-08-29T09:00:00\.000Z: /m,
+    `the halt must be on stdout, in the report:\nstdout=${run.stdout}\nstderr-and-out=${run.out}`,
+  );
+  assert.match(run.stdout, /secondary rate limit/, run.stdout);
+  assert.match(
+    run.stdout,
+    /in flight: none — factory halted; tick is refused/,
+    `an empty slot under a halt is not "tick is allowed":\n${run.stdout}`,
+  );
+});
+
+test("status names why a repo is health=stop", () => {
+  const seed = seedState();
+  const reverted: FactoryState = {
+    ...seed,
+    scorecard: seed.scorecard.map((r) =>
+      r.repoId === "ravidsrk/orca-fleet" ? { ...r, reverts: 1 } : r,
+    ),
+  };
+  const run = runCli(["status", "--state", writeState(reverted)], tmpdir());
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.stdout,
+    /ravidsrk\/orca-fleet\s+opened=2 merged=2 reverts=1 reviewCommentsAvg=1 tone=warm health=stop\s+stop=reverts=1/,
+    `reverts>0 is the SPEC.md §7 stop; the line must say so, not only health=stop:\n${run.stdout}`,
+  );
+
+  const banned: FactoryState = {
+    ...seed,
+    scorecard: seed.scorecard.map((r) =>
+      r.repoId === "ravidsrk/frontguard" ? { ...r, maintainerTone: "banned" as const } : r,
+    ),
+  };
+  const bannedRun = runCli(["status", "--state", writeState(banned)], tmpdir());
+  assert.match(
+    bannedRun.stdout,
+    /ravidsrk\/frontguard\s+opened=1 merged=1 reverts=0 reviewCommentsAvg=0 tone=banned health=stop\s+stop=banned/,
+    `a maintainer ban is a different stop from a revert; the line must not collapse them:\n${bannedRun.stdout}`,
+  );
+
+  const rate: FactoryState = {
+    ...seed,
+    scorecard: seed.scorecard.map((r) =>
+      r.repoId === "ColeMurray/background-agents"
+        ? { ...r, opened: 3, merged: 0, closedUnmerged: 3, maintainerTone: "neutral" as const }
+        : r,
+    ),
+  };
+  const rateRun = runCli(["status", "--state", writeState(rate)], tmpdir());
+  assert.match(
+    rateRun.stdout,
+    /ColeMurray\/background-agents\s+opened=3 merged=0 reverts=0 reviewCommentsAvg=0 tone=neutral health=stop\s+stop=merge-rate 0\/3<0\.4/,
+    `a merge-rate stop has to name the fraction, or the operator still has to open scorecard.ts:\n${rateRun.stdout}`,
+  );
+});
+
+test("status shows the policy verdict of a gated packet", () => {
+  const run = runCli(["status", "--state", writeState(gatedOn71())], tmpdir());
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.stdout,
+    /pkt_ravidsrk_orca-fleet_71\s+gated\s+ravidsrk\/orca-fleet#71\s+.*policy=ALLOW/,
+    `a gated packet with no verdict is a freeze the operator cannot judge:\n${run.stdout}`,
+  );
 });

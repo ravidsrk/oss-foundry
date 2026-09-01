@@ -38,15 +38,39 @@ export function mergeRate(row: ScorecardRow): number {
   return row.merged / terminal;
 }
 
-export function health(row: ScorecardRow): "good" | "watch" | "stop" {
-  if (row.maintainerTone === "banned" || row.reverts > 0) return "stop";
+/**
+ * Every reason this repository is unselectable, in the operator's words. Empty means it is not.
+ *
+ * This is the single source of the `stop` predicates, and `health` below is DERIVED from it rather
+ * than merely agreeing with it — `stop` iff this returns something. That inversion is the point:
+ * `status` used to carry its own copy of these three conditions so it could explain a frozen
+ * repository, and two independent implementations of one rule is the defect this repository keeps
+ * shipping (`fixture-counts.ts` and `competition-read.ts` both carry comments about it; the audit
+ * found the competing-work read hand-copied five times, already drifted). A drifted copy here is
+ * worse than no explanation at all: the operator reads a reason, fixes it, and the repository stays
+ * stopped for the reason that was not printed.
+ *
+ * ALL holding predicates, not the first one. A repository that is both banned and reverted names
+ * both, because an operator who clears only the reason that happened to print first would be
+ * surprised a second time.
+ */
+export function stopReasons(row: ScorecardRow): string[] {
+  const reasons: string[] = [];
+  if (row.maintainerTone === "banned") reasons.push("banned");
+  if (row.reverts > 0) reasons.push(`reverts=${row.reverts}`);
   if (
     row.opened >= CAPS.halt_after_opens &&
     terminalCount(row) > 0 &&
     mergeRate(row) < CAPS.halt_merge_rate
   ) {
-    return "stop";
+    reasons.push(`merge-rate ${row.merged}/${terminalCount(row)}<${CAPS.halt_merge_rate}`);
   }
+  return reasons;
+}
+
+export function health(row: ScorecardRow): "good" | "watch" | "stop" {
+  // Derived, not duplicated: see `stopReasons`.
+  if (stopReasons(row).length > 0) return "stop";
   if (row.maintainerTone === "cold") return "watch";
   if (row.opened >= 2 && mergeRate(row) < 0.6) return "watch";
   return "good";
