@@ -10,13 +10,13 @@
     "evidence": "evidence/p0-coldstart-2-build-test-run.txt",
     "note": "npm ci fails (no lockfile); zero declared deps so install is a no-op; 379/379 green from a fresh clone"
   },
-  "current_commit": "74af0b27f17ac39cda9779cbc6c73e7ed265e7df",
-  "resume_pointer": "P1/T-01",
+  "current_commit": "ba59027",
+  "resume_pointer": "CONDITIONAL_GO/H-03",
   "definition_frozen_at": "a708920",
-  "completion_pct": 68,
+  "completion_pct": 86,
   "gate": {
-    "status": "NOT_EVALUATED",
-    "reason": "definition frozen; execution begins at P1/T-01. Max reachable by agent alone is CONDITIONAL_GO (H-01, H-03 gate launch)"
+    "status": "CONDITIONAL_GO",
+    "reason": "Every agent-side gate condition met. Outstanding: launch-gate \u00a72 evidence for CF-01..CF-05, all blocked on H-03 (one roster row) and H-01 (machine account). \u00a76 met in mechanism and unit-proven; a live scheduled-run failure cannot be produced from this repository."
   },
   "angles": [
     {
@@ -59,8 +59,8 @@
     {
       "id": 3,
       "name": "code_quality",
-      "score": 2,
-      "rag": "A",
+      "score": 3,
+      "rag": "G",
       "na_reason": null,
       "findings": [
         "F-3-01",
@@ -76,7 +76,7 @@
     {
       "id": 4,
       "name": "testing",
-      "score": 3,
+      "score": 4,
       "rag": "G",
       "na_reason": null,
       "findings": [
@@ -95,7 +95,7 @@
     {
       "id": 5,
       "name": "security",
-      "score": 3,
+      "score": 4,
       "rag": "G",
       "na_reason": null,
       "findings": [
@@ -112,8 +112,8 @@
     {
       "id": 6,
       "name": "data",
-      "score": 2,
-      "rag": "A",
+      "score": 3,
+      "rag": "G",
       "na_reason": null,
       "findings": [
         "F-6-03",
@@ -130,8 +130,8 @@
     {
       "id": 7,
       "name": "infra_deploy",
-      "score": 2,
-      "rag": "A",
+      "score": 3,
+      "rag": "G",
       "na_reason": null,
       "findings": [
         "F-7-01",
@@ -147,7 +147,7 @@
     {
       "id": 8,
       "name": "reliability",
-      "score": 3,
+      "score": 4,
       "rag": "G",
       "na_reason": null,
       "findings": [
@@ -168,8 +168,8 @@
     {
       "id": 9,
       "name": "observability",
-      "score": 2,
-      "rag": "A",
+      "score": 3,
+      "rag": "G",
       "na_reason": null,
       "findings": [
         "F-9-04",
@@ -201,8 +201,8 @@
     {
       "id": 11,
       "name": "integrations",
-      "score": 2,
-      "rag": "A",
+      "score": 3,
+      "rag": "G",
       "na_reason": null,
       "findings": [
         "F-11-01",
@@ -230,7 +230,7 @@
     {
       "id": 13,
       "name": "ux",
-      "score": 3,
+      "score": 4,
       "rag": "G",
       "na_reason": null,
       "findings": [
@@ -247,7 +247,7 @@
     {
       "id": 14,
       "name": "documentation",
-      "score": 3,
+      "score": 4,
       "rag": "G",
       "na_reason": null,
       "findings": [
@@ -280,8 +280,8 @@
     {
       "id": 16,
       "name": "gtm",
-      "score": 2,
-      "rag": "A",
+      "score": 3,
+      "rag": "G",
       "na_reason": null,
       "findings": [
         "F-16-01",
@@ -296,8 +296,8 @@
     {
       "id": 17,
       "name": "ownership_ops",
-      "score": 1,
-      "rag": "R",
+      "score": 2,
+      "rag": "A",
       "na_reason": null,
       "findings": [
         "F-17-01",
@@ -321,7 +321,7 @@
       "status": "partial",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": "F-1-01: idle on the committed roster"
+      "note": "tick returns idle on the exhausted roster \u2014 blocked on H-03"
     },
     {
       "id": "CF-02",
@@ -332,7 +332,7 @@
       "status": "works",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": ""
+      "note": "coded and gated; no happy-path evidence until a packet exists \u2014 blocked on H-03"
     },
     {
       "id": "CF-03",
@@ -343,7 +343,7 @@
       "status": "partial",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": "F-1-02: zero machine witnesses ever"
+      "note": "no machine witness ever produced; reachable at Wave 0 once a packet exists \u2014 blocked on H-03"
     },
     {
       "id": "CF-04",
@@ -354,7 +354,7 @@
       "status": "partial",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": "F-1-04: never fired; #1652 was a browser session"
+      "note": "never fired \u2014 blocked on H-01 (machine account + PAT)"
     },
     {
       "id": "CF-05",
@@ -365,7 +365,7 @@
       "status": "works",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": ""
+      "note": "the path actually used for the one external PR; no captured happy-path run"
     },
     {
       "id": "CF-06",
@@ -374,9 +374,9 @@
       "money": false,
       "irreversible": false,
       "status": "verified",
-      "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "real terminal transition absorbed 2026-08-31"
+      "happy_evidence": "evidence/CF-06-sync-reconcile.txt",
+      "failure_evidence": "evidence/CF-06-sync-reconcile.txt",
+      "note": "happy: live reconcile absorbs a terminal outcome. failure: 1ms deadline, error names repo+operation, ledger sha256 unchanged"
     },
     {
       "id": "CF-07",
@@ -384,10 +384,10 @@
       "entry": "foundry halt | revert | clear-halt",
       "money": false,
       "irreversible": false,
-      "status": "partial",
-      "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "F-8-23: coded and tested, never fired"
+      "status": "verified",
+      "happy_evidence": "evidence/CF-07-halt-and-clear.txt",
+      "failure_evidence": "evidence/CF-07-halt-and-clear.txt",
+      "note": "happy: halt reaches health=stop, clear-halt lifts the factory halt. failure: clear-halt does NOT lift a per-repo banned tone"
     }
   ],
   "gaps": [
@@ -396,7 +396,7 @@
       "angle": null,
       "severity": "S0",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-05",
         "T-06",
@@ -411,7 +411,7 @@
       "angle": null,
       "severity": "S0",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-08"
       ],
@@ -424,7 +424,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-25"
       ],
@@ -437,7 +437,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-09"
       ],
@@ -450,7 +450,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-02"
       ],
@@ -463,7 +463,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-01"
       ],
@@ -476,7 +476,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-18"
       ],
@@ -489,7 +489,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-19"
       ],
@@ -502,7 +502,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-20"
       ],
@@ -515,7 +515,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-21"
       ],
@@ -528,7 +528,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-22"
       ],
@@ -541,7 +541,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-12"
       ],
@@ -554,7 +554,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-13"
       ],
@@ -567,7 +567,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-10"
       ],
@@ -580,7 +580,7 @@
       "angle": null,
       "severity": "S1",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-23"
       ],
@@ -626,7 +626,7 @@
       "angle": null,
       "severity": "S2",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-11"
       ],
@@ -639,7 +639,7 @@
       "angle": null,
       "severity": "S2",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-04"
       ],
@@ -652,7 +652,7 @@
       "angle": null,
       "severity": "S2",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-14"
       ],
@@ -665,7 +665,7 @@
       "angle": null,
       "severity": "S2",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-24"
       ],
@@ -678,7 +678,7 @@
       "angle": null,
       "severity": "S2",
       "decision": "FINISH",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-03"
       ],
@@ -691,7 +691,7 @@
       "angle": null,
       "severity": "S2",
       "decision": "CUT",
-      "status": "open",
+      "status": "closed",
       "tasks": [
         "T-15"
       ],
@@ -970,6 +970,90 @@
           "evidence": "HUMAN_ACTIONS.md"
         }
       ]
+    },
+    {
+      "id": "P1x",
+      "name": "Green baseline",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "type gate green, real floor executed in CI",
+          "met": true,
+          "evidence": "evidence/T-01-version-floor.txt"
+        }
+      ]
+    },
+    {
+      "id": "P2x",
+      "name": "Safety & kill switches",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "both S0 closed; kill-proof ledger; env allowlist",
+          "met": true,
+          "evidence": "evidence/T-05-T-06"
+        }
+      ]
+    },
+    {
+      "id": "P3x",
+      "name": "Critical flows",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "gate matches doctrine; CF-06/CF-07 evidenced",
+          "met": true,
+          "evidence": "evidence/CF-06-sync-reconcile.txt"
+        }
+      ]
+    },
+    {
+      "id": "P4x",
+      "name": "Operability",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "alert job, audit reader, runbooks",
+          "met": true,
+          "evidence": "evidence/T-18-alert-fires.txt"
+        }
+      ]
+    },
+    {
+      "id": "P5x",
+      "name": "Doc truthfulness",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "no doc asserts behaviour the code lacks",
+          "met": true,
+          "evidence": "evidence/T-23-doc-truth.txt"
+        }
+      ]
+    },
+    {
+      "id": "P6x",
+      "name": "Launch surfaces",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "Stranger Test 19.7s against a 15-minute target",
+          "met": true,
+          "evidence": "evidence/T-25-readme.txt"
+        }
+      ]
+    },
+    {
+      "id": "P7x",
+      "name": "Launch rehearsal",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "rollback rehearsed; gate evaluated",
+          "met": true,
+          "evidence": "evidence/T-27-rollback.txt"
+        }
+      ]
     }
   ],
   "tasks": [
@@ -979,12 +1063,12 @@
       "size": "S",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -996,12 +1080,12 @@
         "T-01"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1011,12 +1095,12 @@
       "size": "S",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1026,12 +1110,12 @@
       "size": "S",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1043,12 +1127,12 @@
         "T-02"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1060,12 +1144,12 @@
         "T-05"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1077,12 +1161,12 @@
         "T-05"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1092,12 +1176,12 @@
       "size": "M",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1107,12 +1191,12 @@
       "size": "S",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1122,12 +1206,12 @@
       "size": "S",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1139,12 +1223,12 @@
         "T-05"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1154,12 +1238,12 @@
       "size": "M",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1169,12 +1253,12 @@
       "size": "S",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1186,12 +1270,12 @@
         "T-09"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1203,12 +1287,12 @@
         "T-02"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1220,12 +1304,12 @@
         "T-05"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1237,12 +1321,12 @@
         "T-05"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1252,12 +1336,12 @@
       "size": "M",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1267,12 +1351,12 @@
       "size": "M",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1284,12 +1368,12 @@
         "T-05"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1301,12 +1385,12 @@
         "T-09"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1318,12 +1402,12 @@
         "T-07"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1333,12 +1417,12 @@
       "size": "M",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1350,12 +1434,12 @@
         "T-23"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1368,12 +1452,12 @@
         "T-24"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1385,12 +1469,12 @@
         "T-25"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1400,12 +1484,12 @@
       "size": "S",
       "depends_on": [],
       "owner": "agent",
-      "status": "todo",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     },
@@ -1443,12 +1527,12 @@
         "T-27"
       ],
       "owner": "agent",
-      "status": "todo",
+      "status": "active",
       "branch": null,
       "pr": null,
       "commit": null,
       "evidence": [],
-      "review": null,
+      "review": "greptile",
       "attempts": 0,
       "block_signature": null
     }
@@ -1621,6 +1705,12 @@
       "commit": "74af0b2",
       "completion_pct": 68,
       "gate": "NOT_EVALUATED"
+    },
+    {
+      "run_id": "20260901-1143",
+      "commit": "ba59027",
+      "completion_pct": 86,
+      "gate": "CONDITIONAL_GO"
     }
   ]
 }

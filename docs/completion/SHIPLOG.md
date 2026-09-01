@@ -3,7 +3,7 @@
 Append-only. A session with zero context reads this file and continues from the resume pointer.
 
 ```
-RESUME POINTER: P1/T-01
+RESUME POINTER: CONDITIONAL_GO/H-03
 ```
 
 ---
@@ -141,3 +141,58 @@ Both fixed by deriving from the register rather than retyping: `S0 2 · S1 16 ·
 
 **The rule this establishes:** no count in a prose artifact is written by hand. `status.json` is the register; every subtotal in `STATUS.md`, `PLAN.md`, `GAPS.md` and this log is computed from it. Three of the seven findings across this pass were arithmetic drift between a hand-typed prose number and the machine-readable state, and that class is fully preventable.
 
+
+---
+
+## PHASES 1–7 — EXECUTED · 27/28 tasks · **CONDITIONAL GO**
+
+`main` at `ba59027`. **418 tests** (from 379), type check **0 errors**, validator green, zero open PRs, zero `ravidsrk/*` branches.
+
+**Completion 68% → 86%.** Twelve of sixteen scored angles moved, and **every angle now meets the frozen Definition's required minimum** — the five that had to move (3, 6, 7, 9, 17) all did.
+
+### The two S0 gaps are closed
+
+**G-01, the ledger.** It was one `writeFileSync` — a truncating write in place, so a crash left a prefix of valid JSON, the loader correctly refused it, and that took out `status` too: the one command an operator would reach for. Now temp-file + `flush: true` + `renameSync` + a directory fsync, with a one-generation backup and a rehearsed restore. Proven by a concurrent reader rather than a kill loop, because the kill loop was measured at a 1-in-12 tear rate and would have been a flake: **old 29 partial reads of 187, new 0 of 186.**
+
+**G-02, the witness environment.** Four secret names were stripped and everything else passed into a third-party repo's `npm ci` lifecycle scripts. Now an explicit allowlist — widened after review to admit proxy/CA/version-manager settings, with proxy userinfo stripped so credentials cannot ride in a URL.
+
+### What the phases produced
+
+| phase | outcome |
+|---|---|
+| **P1** | Real Node floor **executed** in CI, not asserted. A type-check gate where nothing had ever read the types — it found six real problems in non-test source on its first run. |
+| **P2** | Both S0s. API version pinned. Every child process bounded. Packet ids can no longer escape the log directory. |
+| **P3** | The promotion gate now matches the doctrine it enforces. The published ledger no longer claims a negative control it could not have performed. Six dead exports gone. Event loss counted instead of silent. |
+| **P4** | The clock can now tell a human it failed. The audit trail has a reader. `status` can explain a stuck factory. |
+| **P5** | No doc asserts behaviour the code lacks — including a false security headline that had survived since the file was written. |
+| **P6** | The front door opens: fresh clone to first command in **19.7s** against a 15-minute target. |
+| **P7** | Rollback rehearsed and closed unmerged. Gate evaluated. |
+
+### The review loop did real work
+
+**23 findings across 13 review rounds, 21 fixed and 2 rebutted with evidence.** Not one was cosmetic. The ones worth naming:
+
+- **The Node floor was wrong twice.** `>=22` claimed versions where Node aborts on the flag; my correction to `>=22.6.0` was still wrong because the binding constraint is `node:test`'s per-file `test:summary`, which the suite's own oracle needs. Bisected against real runtimes: **22.9.0 refuses, 22.10.0 green.** Neither mistake was reportable from inside the process — below 22.6.0 nothing runs, and between 22.6.0 and 22.9.0 the failure *is* the oracle that would have reported it. That is the argument for executing a floor rather than declaring one, and it took two wrong answers to make it concrete.
+- **A fake green.** The type gate's first "0 errors" came from `npx tsc` resolving to a squatter package that prints *"This is not the tsc command you are looking for"*. The negative controls caught it. A gate reporting zero because it checked nothing is worse than no gate.
+- **`always()` does not survive a job timeout.** Two rounds were spent on an alert that would have been silent in exactly the outage it exists for. The fix is a sibling job.
+- **A doc error of mine, one phase old.** I wrote that the in-flight cap is not consumed at `draft-ready`. It is. Corrected the same day, in the phase that exists to remove exactly that.
+
+### What is NOT done, stated plainly
+
+**Five of seven critical flows still have no happy-path evidence** — CF-01 through CF-05 — and all five are blocked on the same two Human Actions. That is why the verdict is CONDITIONAL GO and not GO. No amount of further agent work changes it.
+
+Gate §6 (one alert proven to fire) is met in mechanism and unit-proven against a fake octokit, but a real scheduled-run failure cannot be produced from this repository. Recorded as a limit rather than claimed as a pass.
+
+16 gaps remain DEFERred below the cut line, unchanged and still filed — including `G-25`, the five hand-copied competing-work reads, which is deferred reluctantly and says so.
+
+### A last finding, on the verdict itself
+
+The header claimed **3 verified** flows and **ten** moved angles. Both were wrong:  still carried the original flow statuses because I updated the scores and forgot the flows, and the true angle count is **twelve**. Caught by review on the gate-verdict PR — the artifact whose entire job is to state the position accurately.
+
+Corrected to **2 verified · 2 works · 3 partial**, and  now records per-flow evidence paths for CF-06 and CF-07 and the blocking Human Action for the other five. Worth recording because it is the third arithmetic error of this run in a hand-written summary, against zero in anything computed from the register — the rule the ship log already states, broken by me again in the act of restating it.
+
+### Second look — one change
+
+I nearly recorded a false regression: re-measuring the atomic write after adding the directory fsync showed 13 partial reads, which would have looked like the fsync breaking atomicity. The probe was still pointed at the previous worktree, whose patch I had reverted. Re-pointed: **0 partial**. The lesson is the same one the fake-green produced — a measurement you did not verify the setup of is not a measurement.
+
+→ **Next: `H-03`.** One line in `allowlist.yaml` unblocks three of the five remaining flows.
