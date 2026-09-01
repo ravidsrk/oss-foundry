@@ -72,12 +72,12 @@ The factory does not merge. Maintainers own the merge.
         ▼
  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
  │ 1 Scout     │ → │ 2 Policy    │ → │ 3 Freeze    │ → │ 4 Implement │
- │ heuristic   │   │ AGENTS.md   │   │ human only  │   │ sandboxed   │
+ │ roster order│   │ AGENTS.md   │   │ human only  │   │ dry-run     │
  └─────────────┘   └─────────────┘   └─────────────┘   └──────┬──────┘
                                                               │
                        ┌─────────────┐   ┌─────────────┐      │
-                       │ 7 Scorecard │ ← │ 6 Draft PR  │ ←  5 Review (blind)
-                       │ halt rules  │   │ never merge │      │
+                       │ 7 Scorecard │ ← │ 6 Draft PR  │ ←  5 Review
+                       │ halt rules  │   │ never merge │   evidence gate
                        └─────────────┘   └─────────────┘      │
 ```
 
@@ -108,11 +108,11 @@ There is **no** TanStack operator console in this repository. The freeze/tick/dr
 
 | # | Station | Does |
 |---|---|---|
-| 1 | Scout | Allowlist issues only. Drop denylist, RFC/meta, issues with an in-flight maintainer PR. Heuristic rank. Clock / CLI never invent issue numbers |
+| 1 | Scout | Allowlist issues only. Drop denylist, RFC/meta, issues with an in-flight maintainer PR. Next candidate is roster order (`pickCandidate` in `factory/engine.ts`), not heuristic rank — `rankIssues` (`factory/scout.ts`) has one caller, unwired `github-scout.ts`. Clock / CLI never invent issue numbers |
 | 2 | Policy | Deterministic. Grok has no vote |
 | 3 | Freeze | Operator `approve` (attest) or `reject` (park). Denied / halted packets cannot be approved. `merged` packets cannot be rejected — terminal, and a late reject desyncs the promotion-gate counters. Rejecting a `submitted` packet is the halt-everything path, but it never closes the PR: the CLI names the one left open |
-| 4 | Implement | One playbook pack. Failing-first. Wave 0 host / Wave 1+ E2B. Console/CLI dry-run does not fake a green harvest |
-| 5 | Review | Independent, lit. Negative control: revert goes red. Evidence attached by the operator, not invented |
+| 4 | Implement | Not a working gate. `applyAdvance` on `approved` stores a dry-run sandbox plan (`factory/engine.ts`) and bumps status to `implementing`. No playbook pack runs here. Wave 0 host / Wave 1+ E2B belong to a worker host that is not in this tree. CLI dry-run does not fake a green harvest |
+| 5 | Review | Not a working gate. `applyAdvance` on `implementing` is a bare status bump to `reviewing`. `lighting` is the constant `"lit"` (`factory/types.ts`) — no reviewer identity exists. The only real gate on this arc is `applyAttachEvidence` / `evidenceIsReady` (negative control, witnessed exits, provenance) before `reviewing` → `draft-ready` |
 | 6 | Draft | Fork → upstream draft. Body from `renderPrBody`. Create helper sets `draft: true` |
 | 7 | Follow-up | Sync live PR. Answer threads. Mark quiet. **Never merge.** Scorecard on merged / closed-unmerged |
 
