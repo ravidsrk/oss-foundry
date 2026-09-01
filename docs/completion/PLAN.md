@@ -2,7 +2,7 @@
 
 Dependency-ordered. `TARGET_DATE` unset, so this is ordered by dependency, not calendar — no dates are invented.
 
-**26 tasks · 23 FINISH gaps + 1 CUT · 0 L-sized.** Longest dependency chain: 5 (T-01 → T-02 → T-05 → T-15 → T-25). Human Actions gating launch: **3**.
+**28 tasks · 23 FINISH gaps + 1 CUT · 0 L-sized.** Longest dependency chain: **6** — `T-01 → T-02 → T-05 → T-07 → T-22 → T-28`. Human Actions filed: **3**, of which **2 gate launch** (`H-01`, `H-03`; `H-02` does not).
 
 ## Phase entry/exit
 
@@ -101,12 +101,12 @@ Three flows cannot be evidenced by the agent. Each is a real external dependency
 |---|---|---|---|
 | P1 | 4 | 3 | 1 |
 | P2 | 7 | 4 | 3 |
-| P3 | 6 | 3 | 3 |
+| P3 | 6 | 4 | 2 |
 | P4 | 5 | 1 | 4 |
 | P5 | 2 | 0 | 2 |
 | P6 | 1 | 0 | 1 |
 | P7 | 3 | 2 | 1 |
-| **total** | **28** | **13** | **15** |
+| **total** | **28** | **14** | **14** |
 
 Zero L-sized tasks. Severity coverage: both S0 gaps land in P2; all 16 S1 gaps are mapped; the 5 FINISH S2 gaps are mapped; `G-24` is the single CUT.
 

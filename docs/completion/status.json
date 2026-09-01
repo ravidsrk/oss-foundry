@@ -606,7 +606,7 @@
       "decision": "FINISH",
       "status": "open",
       "tasks": [],
-      "owner": "human:H-02",
+      "owner": "human:H-03",
       "accept_expiry": null,
       "issue_url": null
     },
@@ -1413,7 +1413,35 @@
       "id": "T-28",
       "phase": "P7",
       "size": "S",
-      "depends_on": [],
+      "depends_on": [
+        "T-01",
+        "T-02",
+        "T-03",
+        "T-04",
+        "T-05",
+        "T-06",
+        "T-07",
+        "T-08",
+        "T-09",
+        "T-10",
+        "T-11",
+        "T-12",
+        "T-13",
+        "T-14",
+        "T-15",
+        "T-16",
+        "T-17",
+        "T-18",
+        "T-19",
+        "T-20",
+        "T-21",
+        "T-22",
+        "T-23",
+        "T-24",
+        "T-25",
+        "T-26",
+        "T-27"
+      ],
       "owner": "agent",
       "status": "todo",
       "branch": null,
@@ -1441,11 +1469,12 @@
       "id": "H-02",
       "instruction": "Decide the E2B / worker-host question; recommendation (a) demonstrate CF-03 at Wave 0 now and defer E2B",
       "unblocks": [
-        "wave 1+ packets"
+        "wave 1+ packets only"
       ],
       "gates_launch": false,
       "verification": "capture a real Wave 0 witness with two distinct log sha256s",
-      "status": "open"
+      "status": "open",
+      "note": "does NOT gate launch: CF-03 is reachable via Wave 0 host witnessing (witness.ts:400-401) on orca-fleet/frontguard"
     },
     {
       "id": "H-03",
@@ -1515,6 +1544,11 @@
       "id": "A-11",
       "phase": "P4",
       "decision": "Type-check gate runs via a pinned npx typescript in CI only: no dependencies, no devDependencies, no lockfile. typescript 7.x now ships platform-specific native optional deps, so a devDependency would import a real supply chain and a platform-sensitive lockfile into a repo whose zero-dependency property is explicit and CI-documented. Runtime supply chain stays at exactly zero; the gate still exists and CI still enforces it."
+    },
+    {
+      "id": "A-12",
+      "phase": "P4",
+      "decision": "Review round 1 found four defects in my own planning surface and all four were fixed rather than rebutted: G-17 named the wrong blocker (H-02 instead of H-03), T-28 carried no dependencies in the machine-readable graph while PLAN.md said it depended on all preceding work, the task count read 26 against an actual 28, and the P3 size split and the totals were wrong. A planning artifact whose own arithmetic is wrong cannot be trusted to gate anything."
     }
   ],
   "research": [
