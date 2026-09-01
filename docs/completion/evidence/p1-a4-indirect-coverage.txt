@@ -1,0 +1,33 @@
+### all test files
+  ci.test.ts
+  cli-entry.test.ts
+  cli.test.ts
+  competition-read.test.ts
+  engine.test.ts
+  github-pr.test.ts
+  halt.test.ts
+  ids.test.ts
+  ledger-check.test.ts
+  load-allowlist.test.ts
+  packet.test.ts
+  policy.test.ts
+  sandbox.test.ts
+  scorecard.test.ts
+  state.test.ts
+  status.test.ts
+  terminal.test.ts
+  tmp-dir.test.ts
+  witness-host.test.ts
+
+### are the 11 sibling-less modules imported by ANY test?
+  allowlist            imported by 4 test file(s)  cli.test.ts engine.test.ts load-allowlist.test.ts packet.test.ts 
+  github-scout         imported by 1 test file(s)  engine.test.ts 
+  neighbor             imported by 4 test file(s)  cli.test.ts engine.test.ts ledger-check.test.ts packet.test.ts 
+  policy-records       imported by 1 test file(s)  policy.test.ts 
+  scout                imported by 0 test file(s)  
+  seed-fixtures        imported by 6 test file(s)  cli.test.ts competition-read.test.ts engine.test.ts ledger-check.test.ts packet.test.ts state.test.ts 
+  seed                 imported by 7 test file(s)  cli.test.ts engine.test.ts halt.test.ts ledger-check.test.ts packet.test.ts state.test.ts status.test.ts 
+  types                imported by 3 test file(s)  cli.test.ts engine.test.ts ledger-check.test.ts 
+  validate-allowlist   imported by 0 test file(s)  
+  verify-ledger        imported by 0 test file(s)  
+  witness              imported by 3 test file(s)  engine.test.ts sandbox.test.ts witness-host.test.ts 

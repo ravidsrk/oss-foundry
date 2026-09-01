@@ -1,0 +1,19 @@
+### COLD START — 2026-09-01T11:42:39Z
+
+$ git clone git@github.com:ravidsrk/oss-foundry.git .
+exit=0
+HEAD=74af0b27f17ac39cda9779cbc6c73e7ed265e7df
+
+$ ls package-lock.json pnpm-lock.yaml yarn.lock 2>&1
+ls: cannot access 'package-lock.json': No such file or directory
+ls: cannot access 'pnpm-lock.yaml': No such file or directory
+ls: cannot access 'yarn.lock': No such file or directory
+exit=2
+
+$ npm ci
+npm error
+npm error aliases: clean-install, ic, install-clean, isntall-clean
+npm error
+npm error Run "npm help ci" for more info
+npm error A complete log of this run can be found in: /Users/ravindra/.npm/_logs/2026-09-01T11_42_44_406Z-debug-0.log
+exit=1

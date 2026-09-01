@@ -1,0 +1,32 @@
+### ANGLE 12 — AI/LLM layer
+--- LLM provider SDKs / endpoints in non-test source ---
+factory/neighbor.ts:64:export const AGENT_NAME_RE = /foundry|claude|copilot|cursor|devin|codex|gpt|openai|anthropic|\bbot\b/i;
+factory/policy.ts:12:const SUBJECT = String.raw`(?:\bai\b|\ba\.i\.|\bllms?\b|\bautonomous\b|\bmachine[- ]generated\b|\bbots?\b|\bagents?\b|\bcopilot\b|\bgenerative\b|\bchatgpt\b|\bclaude\b|\bgemini\b|\bcursor\b|\bdevin\b|\bopenai\b)`;
+factory/policy.ts:33:  /no\s+(?:chatgpt|claude|gemini|cursor|devin|copilot|openai)\s+(?:output|code|prs?|pull[- ]requests?|contributions?|content|patches?)/i,
+factory/policy.ts:35:  /keep\s+(?:your\s+)?(?:ai|llms?|bots?|agents?|chatgpt|claude)\s+at\s+home/i,
+  (empty above = no LLM calls)
+--- any prompt/model/eval artefacts ---
+
+### ANGLE 10 — performance & cost
+suite wall time: 8.05s / 8.08s (2 runs, above)
+--- outbound call sites (cost/rate-limit surface) ---
+  total exec/fetch call sites: 5
+--- documented rate limits / capacity numbers ---
+docs/06-v2.md:7:`factory/github-scout.ts` — user-initiated fetch of open issues on Wave 0–1 allowlisted repos. Public GitHub API; `GITHUB_TOKEN` / `GH_TOKEN` on the operator host raises the rate limit. Never on page load.
+docs/07-github-app.md:46:- one create per CLI run; a secondary-rate-limit response is a **durable factory halt**, never a
+docs/08-operations.md:80:**1. Factory halt (durable, automatic, factory-wide).** A GitHub **secondary rate limit** during
+docs/08-operations.md:86:stop. Nothing sets this halt by hand; only the rate-limit path writes it.
+docs/10-schemas.md:87:halt?        { at, reason, source: "secondary-rate-limit", repoId? }
+docs/PRODUCT.md:305:A human browser session opened #1652 — the last one. Future Wave 1 drafts on stranger repos go through `open-draft` with the machine account's classic `public_repo` PAT (`FOUNDRY_PAT`; see docs/07): draft hard-coded, disclosure enforced, competing-work re-checked, secondary-rate-limit = halt. Should a browser session ever be needed again, `attach-draft` now refuses a body without the verbatim block as well (issue #38) — the refusal lives in `applyAttachDraft`, so every path that binds a PR runs it.
+docs/SPEC.md:61:  platform secondary rate limit MUST halt the factory, never retry.
+
+### ANGLE 13 — UX (CLI)
+--- does every command have help text? ---
+  help lines: 15
+--- error message quality sample: unknown command ---
+> foundry
+> node --experimental-strip-types factory/cli.ts bogus-command
+
+no state file at /private/tmp/pcd-wt/.foundry-state.json — showing the committed seed ledger, not live state. Mutating commands will create it.
+unknown command bogus-command
+exit=0

@@ -1,0 +1,1621 @@
+{
+  "product": "Foundry \u2014 operator-gated OSS contribution control plane",
+  "repo_path": "/Users/ravindra/projects/oss-foundry",
+  "run_id": "20260901-1143",
+  "mode": "drive",
+  "baseline": {
+    "commit": "74af0b27f17ac39cda9779cbc6c73e7ed265e7df",
+    "date": "2026-09-01T11:42:39Z",
+    "cold_start": "pass",
+    "evidence": "evidence/p0-coldstart-2-build-test-run.txt",
+    "note": "npm ci fails (no lockfile); zero declared deps so install is a no-op; 379/379 green from a fresh clone"
+  },
+  "current_commit": "74af0b27f17ac39cda9779cbc6c73e7ed265e7df",
+  "resume_pointer": "P1/T-01",
+  "definition_frozen_at": "a708920",
+  "completion_pct": 68,
+  "gate": {
+    "status": "NOT_EVALUATED",
+    "reason": "definition frozen; execution begins at P1/T-01. Max reachable by agent alone is CONDITIONAL_GO (H-01, H-03 gate launch)"
+  },
+  "angles": [
+    {
+      "id": 1,
+      "name": "product",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-1-01",
+        "F-1-02",
+        "F-1-04",
+        "F-1-05",
+        "F-1-06",
+        "F-1-07",
+        "F-1-09",
+        "F-1-10",
+        "F-1-11"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 2,
+      "name": "functional",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-2-01",
+        "F-2-03",
+        "F-2-06",
+        "F-2-08",
+        "F-2-09",
+        "F-2-12",
+        "F-2-13",
+        "F-2-14"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 3,
+      "name": "code_quality",
+      "score": 2,
+      "rag": "A",
+      "na_reason": null,
+      "findings": [
+        "F-3-01",
+        "F-3-03",
+        "F-3-06",
+        "F-3-07",
+        "F-3-08",
+        "F-3-09",
+        "F-3-11"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 4,
+      "name": "testing",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-4-01",
+        "F-4-02",
+        "F-4-03",
+        "F-4-04",
+        "F-4-05"
+      ],
+      "evidence": [
+        "evidence/p1-a4-suite-twice.txt",
+        "evidence/p1-a4-coverage-map.txt",
+        "evidence/p1-a4-indirect-coverage.txt"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "security",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-5-06",
+        "F-5-08",
+        "F-5-10",
+        "F-5-12",
+        "F-5-14",
+        "F-5-22",
+        "F-5-30"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 6,
+      "name": "data",
+      "score": 2,
+      "rag": "A",
+      "na_reason": null,
+      "findings": [
+        "F-6-03",
+        "F-6-05",
+        "F-6-10",
+        "F-6-13",
+        "F-6-17",
+        "F-6-21",
+        "F-6-22",
+        "F-6-23"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 7,
+      "name": "infra_deploy",
+      "score": 2,
+      "rag": "A",
+      "na_reason": null,
+      "findings": [
+        "F-7-01",
+        "F-7-02",
+        "F-7-03",
+        "F-7-04",
+        "F-7-05"
+      ],
+      "evidence": [
+        "evidence/p1-a7-infra.txt"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "reliability",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-8-11",
+        "F-8-12",
+        "F-8-13",
+        "F-8-15",
+        "F-8-17",
+        "F-8-18",
+        "F-8-19",
+        "F-8-23",
+        "F-8-26",
+        "F-8-28",
+        "F-8-29"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 9,
+      "name": "observability",
+      "score": 2,
+      "rag": "A",
+      "na_reason": null,
+      "findings": [
+        "F-9-04",
+        "F-9-06",
+        "F-9-07",
+        "F-9-10",
+        "F-9-13",
+        "F-9-15",
+        "F-9-18"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 10,
+      "name": "performance_cost",
+      "score": 2,
+      "rag": "A",
+      "na_reason": null,
+      "findings": [
+        "F-10-01",
+        "F-10-02",
+        "F-10-03",
+        "F-10-04"
+      ],
+      "evidence": [
+        "evidence/p1-a10-a12-a13.txt"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "integrations",
+      "score": 2,
+      "rag": "A",
+      "na_reason": null,
+      "findings": [
+        "F-11-01",
+        "F-11-12",
+        "F-11-14",
+        "F-11-15",
+        "F-11-19",
+        "F-11-26",
+        "F-11-27",
+        "F-11-28"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 12,
+      "name": "ai_llm",
+      "score": null,
+      "rag": null,
+      "na_reason": "no LLM call anywhere: grep for openai|anthropic|claude|gpt-|@ai-sdk|langchain|ollama|bedrock over non-test source returns only detector regexes in factory/policy.ts:12,33,35 and factory/neighbor.ts:64; no model client, no prompts dir, no eval set, no model output shipped",
+      "findings": [],
+      "evidence": [
+        "evidence/p1-a10-a12-a13.txt"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "ux",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-13-01",
+        "F-13-02",
+        "F-13-03",
+        "F-13-04",
+        "F-13-05"
+      ],
+      "evidence": [
+        "evidence/p1-a13-exit-codes.txt"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "documentation",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-14-01",
+        "F-14-04",
+        "F-14-05",
+        "F-14-07",
+        "F-14-10",
+        "F-14-12"
+      ],
+      "evidence": []
+    },
+    {
+      "id": 15,
+      "name": "legal_compliance",
+      "score": 3,
+      "rag": "G",
+      "na_reason": null,
+      "findings": [
+        "F-15-01",
+        "F-15-02",
+        "F-15-03",
+        "F-15-04",
+        "F-15-05"
+      ],
+      "evidence": [
+        "evidence/p1-a15-a16-a17.txt"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "gtm",
+      "score": 2,
+      "rag": "A",
+      "na_reason": null,
+      "findings": [
+        "F-16-01",
+        "F-16-02",
+        "F-16-03",
+        "F-16-04"
+      ],
+      "evidence": [
+        "evidence/p1-a15-a16-a17.txt"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "ownership_ops",
+      "score": 1,
+      "rag": "R",
+      "na_reason": null,
+      "findings": [
+        "F-17-01",
+        "F-17-02",
+        "F-17-03",
+        "F-17-04",
+        "F-17-05"
+      ],
+      "evidence": [
+        "evidence/p1-a15-a16-a17.txt"
+      ]
+    }
+  ],
+  "critical_flows": [
+    {
+      "id": "CF-01",
+      "name": "Select the next packet (scout to policy gate)",
+      "entry": "foundry tick",
+      "money": false,
+      "irreversible": false,
+      "status": "partial",
+      "happy_evidence": null,
+      "failure_evidence": null,
+      "note": "F-1-01: idle on the committed roster"
+    },
+    {
+      "id": "CF-02",
+      "name": "Human freeze / attest",
+      "entry": "foundry approve",
+      "money": false,
+      "irreversible": false,
+      "status": "works",
+      "happy_evidence": null,
+      "failure_evidence": null,
+      "note": ""
+    },
+    {
+      "id": "CF-03",
+      "name": "Produce witnessed evidence to draft-ready",
+      "entry": "foundry evidence | attach-witness",
+      "money": false,
+      "irreversible": false,
+      "status": "partial",
+      "happy_evidence": null,
+      "failure_evidence": null,
+      "note": "F-1-02: zero machine witnesses ever"
+    },
+    {
+      "id": "CF-04",
+      "name": "Open the draft PR upstream",
+      "entry": "foundry open-draft",
+      "money": false,
+      "irreversible": true,
+      "status": "partial",
+      "happy_evidence": null,
+      "failure_evidence": null,
+      "note": "F-1-04: never fired; #1652 was a browser session"
+    },
+    {
+      "id": "CF-05",
+      "name": "Bind an out-of-band PR",
+      "entry": "foundry attach-draft",
+      "money": false,
+      "irreversible": true,
+      "status": "works",
+      "happy_evidence": null,
+      "failure_evidence": null,
+      "note": ""
+    },
+    {
+      "id": "CF-06",
+      "name": "Follow up, release slot, score the repo",
+      "entry": "foundry sync | reconcile",
+      "money": false,
+      "irreversible": false,
+      "status": "verified",
+      "happy_evidence": null,
+      "failure_evidence": null,
+      "note": "real terminal transition absorbed 2026-08-31"
+    },
+    {
+      "id": "CF-07",
+      "name": "Stop the factory",
+      "entry": "foundry halt | revert | clear-halt",
+      "money": false,
+      "irreversible": false,
+      "status": "partial",
+      "happy_evidence": null,
+      "failure_evidence": null,
+      "note": "F-8-23: coded and tested, never fired"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "G-01",
+      "angle": null,
+      "severity": "S0",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-05",
+        "T-06",
+        "T-07"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-02",
+      "angle": null,
+      "severity": "S0",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-08"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-03",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-25"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-04",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-09"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-05",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-02"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-06",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-01"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-07",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-18"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-08",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-19"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-09",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-20"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-10",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-21"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-11",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-22"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-12",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-12"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-13",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-13"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-14",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-10"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-15",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-23"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-16",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [],
+      "owner": "human:H-01",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-17",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [],
+      "owner": "human:H-03",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-18",
+      "angle": null,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [],
+      "owner": "human:H-03",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-19",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-11"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-20",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-04"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-21",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-14"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-22",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-24"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-23",
+      "angle": null,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "open",
+      "tasks": [
+        "T-03"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-24",
+      "angle": null,
+      "severity": "S2",
+      "decision": "CUT",
+      "status": "open",
+      "tasks": [
+        "T-15"
+      ],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-25",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-26",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-27",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-28",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-29",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-30",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-31",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-32",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-33",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-34",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-35",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-36",
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-37",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-38",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-39",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    },
+    {
+      "id": "G-40",
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null
+    }
+  ],
+  "phases": [
+    {
+      "id": "P0",
+      "name": "Baseline freeze",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "baseline recorded",
+          "met": true,
+          "evidence": "STATUS.md"
+        },
+        {
+          "text": "cold start captured",
+          "met": true,
+          "evidence": "evidence/p0-coldstart-2-build-test-run.txt"
+        }
+      ]
+    },
+    {
+      "id": "P1-audit",
+      "name": "360 audit",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "no angle unscored",
+          "met": true,
+          "evidence": "STATUS.md"
+        },
+        {
+          "text": "every score >=3 has evidence",
+          "met": true,
+          "evidence": "evidence/"
+        },
+        {
+          "text": "second look logged",
+          "met": true,
+          "evidence": "STATUS.md#second-look"
+        }
+      ]
+    },
+    {
+      "id": "P2",
+      "name": "Deep research",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "RESEARCH.md complete with sources",
+          "met": true,
+          "evidence": "RESEARCH.md"
+        },
+        {
+          "text": "every Track B item has an explicit plan effect",
+          "met": true,
+          "evidence": "RESEARCH.md"
+        },
+        {
+          "text": "confidentiality firewall log present",
+          "met": true,
+          "evidence": "RESEARCH.md#firewall"
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "name": "Definition and gap register",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "DEFINITION.md frozen",
+          "met": true,
+          "evidence": "DEFINITION.md"
+        },
+        {
+          "text": "every gap decided",
+          "met": true,
+          "evidence": "GAPS.md"
+        },
+        {
+          "text": "cut line drawn",
+          "met": true,
+          "evidence": "GAPS.md#cut-line"
+        }
+      ]
+    },
+    {
+      "id": "P4",
+      "name": "Phased plan",
+      "status": "complete",
+      "exit_criteria": [
+        {
+          "text": "every above-line gap maps to >=1 task",
+          "met": true,
+          "evidence": "PLAN.md"
+        },
+        {
+          "text": "every task has acceptance evidence defined",
+          "met": true,
+          "evidence": "PLAN.md"
+        },
+        {
+          "text": "no L-sized tasks",
+          "met": true,
+          "evidence": "PLAN.md#task-counts"
+        },
+        {
+          "text": "human actions filed",
+          "met": true,
+          "evidence": "HUMAN_ACTIONS.md"
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-01",
+      "phase": "P1",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-02",
+      "phase": "P1",
+      "size": "M",
+      "depends_on": [
+        "T-01"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-03",
+      "phase": "P1",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-04",
+      "phase": "P1",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-05",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [
+        "T-02"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-06",
+      "phase": "P2",
+      "size": "M",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-07",
+      "phase": "P2",
+      "size": "M",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-08",
+      "phase": "P2",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-09",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-10",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-11",
+      "phase": "P2",
+      "size": "S",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-12",
+      "phase": "P3",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-13",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-14",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [
+        "T-09"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-15",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [
+        "T-02"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-16",
+      "phase": "P3",
+      "size": "M",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-17",
+      "phase": "P3",
+      "size": "S",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-18",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-19",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-20",
+      "phase": "P4",
+      "size": "S",
+      "depends_on": [
+        "T-05"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-21",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [
+        "T-09"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-22",
+      "phase": "P4",
+      "size": "M",
+      "depends_on": [
+        "T-07"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-23",
+      "phase": "P5",
+      "size": "M",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-24",
+      "phase": "P5",
+      "size": "M",
+      "depends_on": [
+        "T-23"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-25",
+      "phase": "P6",
+      "size": "M",
+      "depends_on": [
+        "T-01",
+        "T-24"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-26",
+      "phase": "P7",
+      "size": "M",
+      "depends_on": [
+        "T-25"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-27",
+      "phase": "P7",
+      "size": "S",
+      "depends_on": [],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    },
+    {
+      "id": "T-28",
+      "phase": "P7",
+      "size": "S",
+      "depends_on": [
+        "T-01",
+        "T-02",
+        "T-03",
+        "T-04",
+        "T-05",
+        "T-06",
+        "T-07",
+        "T-08",
+        "T-09",
+        "T-10",
+        "T-11",
+        "T-12",
+        "T-13",
+        "T-14",
+        "T-15",
+        "T-16",
+        "T-17",
+        "T-18",
+        "T-19",
+        "T-20",
+        "T-21",
+        "T-22",
+        "T-23",
+        "T-24",
+        "T-25",
+        "T-26",
+        "T-27"
+      ],
+      "owner": "agent",
+      "status": "todo",
+      "branch": null,
+      "pr": null,
+      "commit": null,
+      "evidence": [],
+      "review": null,
+      "attempts": 0,
+      "block_signature": null
+    }
+  ],
+  "human_actions": [
+    {
+      "id": "H-01",
+      "instruction": "Create the machine account and mint a classic public_repo PAT via scripts/machine-account-wizard.sh",
+      "unblocks": [
+        "CF-04",
+        "CF-05"
+      ],
+      "gates_launch": true,
+      "verification": "witness-check, then drive open-draft end to end and capture the draft PR URL",
+      "status": "open"
+    },
+    {
+      "id": "H-02",
+      "instruction": "Decide the E2B / worker-host question; recommendation (a) demonstrate CF-03 at Wave 0 now and defer E2B",
+      "unblocks": [
+        "wave 1+ packets only"
+      ],
+      "gates_launch": false,
+      "verification": "capture a real Wave 0 witness with two distinct log sha256s",
+      "status": "open",
+      "note": "does NOT gate launch: CF-03 is reachable via Wave 0 host witnessing (witness.ts:400-401) on orca-fleet/frontguard"
+    },
+    {
+      "id": "H-03",
+      "instruction": "Add one firstIssues row to allowlist.yaml on a Wave 0 repo (orca-fleet or frontguard)",
+      "unblocks": [
+        "CF-01",
+        "CF-02",
+        "CF-03"
+      ],
+      "gates_launch": true,
+      "verification": "npm run validate, then tick -> gated ALLOW packet, approve, evidence",
+      "status": "open"
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "A-01",
+      "phase": 0,
+      "decision": "Treated the pasted prompt as an invocation; the command file already existed"
+    },
+    {
+      "id": "A-02",
+      "phase": 0,
+      "decision": "REPO_PATH=cwd, MODE=drive, PRODUCT inferred"
+    },
+    {
+      "id": "A-03",
+      "phase": 0,
+      "decision": "DOMAIN_HINTS=oss-contribution-tooling, not fintech/crypto"
+    },
+    {
+      "id": "A-04",
+      "phase": 1,
+      "decision": "Angle 12 N/A with a grep-checkable reason; weight redistributed"
+    },
+    {
+      "id": "A-05",
+      "phase": 1,
+      "decision": "Angle 16 re-framed against non-commercial launch surfaces"
+    },
+    {
+      "id": "A-06",
+      "phase": 1,
+      "decision": "Angle 17 scored 1/4: two of three recovery scenarios undocumented"
+    },
+    {
+      "id": "A-07",
+      "phase": 1,
+      "decision": "Left 9 pre-existing worktrees untouched; recorded as F-17-05"
+    },
+    {
+      "id": "A-08",
+      "phase": 0,
+      "decision": "Audit runs on branch ravidsrk/p0-completion-audit in a worktree"
+    },
+    {
+      "id": "A-09",
+      "phase": 1,
+      "decision": "Scout's 105 failures resolved as a sandbox artifact against my own 2x379 runs"
+    },
+    {
+      "id": "A-10",
+      "phase": 1,
+      "decision": "Angle 4 scored 3/4 despite no coverage instrument"
+    },
+    {
+      "id": "A-11",
+      "phase": "P4",
+      "decision": "Type-check gate runs via a pinned npx typescript in CI only: no dependencies, no devDependencies, no lockfile. typescript 7.x now ships platform-specific native optional deps, so a devDependency would import a real supply chain and a platform-sensitive lockfile into a repo whose zero-dependency property is explicit and CI-documented. Runtime supply chain stays at exactly zero; the gate still exists and CI still enforces it."
+    },
+    {
+      "id": "A-12",
+      "phase": "P4",
+      "decision": "Review round 1 found four defects in my own planning surface and all four were fixed rather than rebutted: G-17 named the wrong blocker (H-02 instead of H-03), T-28 carried no dependencies in the machine-readable graph while PLAN.md said it depended on all preceding work, the task count read 26 against an actual 28, and the P3 size split and the totals were wrong. A planning artifact whose own arithmetic is wrong cannot be trusted to gate anything."
+    }
+  ],
+  "research": [
+    {
+      "id": "R-01",
+      "track": "B",
+      "query_category": "Node.js type stripping lifecycle and stability",
+      "url": "https://nodejs.org/api/typescript.html",
+      "fetched": "2026-09-01",
+      "effect": "confirms:G-05"
+    },
+    {
+      "id": "R-02",
+      "track": "B",
+      "query_category": "Node.js 22/24 LTS support windows",
+      "url": "https://github.com/nodejs/Release/blob/main/schedule.json",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-06"
+    },
+    {
+      "id": "R-03",
+      "track": "B",
+      "query_category": "npm engines enforcement and engine-strict default",
+      "url": "https://docs.npmjs.com/cli/v11/using-npm/config",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-06"
+    },
+    {
+      "id": "R-04",
+      "track": "B",
+      "query_category": "GitHub REST API deprecations and API versions",
+      "url": "https://docs.github.com/en/rest/about-the-rest-api/breaking-changes",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-04"
+    },
+    {
+      "id": "R-05",
+      "track": "B",
+      "query_category": "GitHub REST rate limits and recommended handling",
+      "url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "fetched": "2026-09-01",
+      "effect": "confirms:G-10"
+    },
+    {
+      "id": "R-06",
+      "track": "B",
+      "query_category": "atomic file replacement in Node.js POSIX and Windows",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-01"
+    },
+    {
+      "id": "R-07",
+      "track": "A",
+      "query_category": "internal: velocity, abandoned branches, intent drift",
+      "url": "evidence/p2-a1-velocity.txt",
+      "fetched": "2026-09-01",
+      "effect": "new_gap:G-29"
+    }
+  ],
+  "breakers_tripped": [],
+  "history": [
+    {
+      "run_id": "20260901-1143",
+      "commit": "74af0b2",
+      "completion_pct": 68,
+      "gate": "NOT_EVALUATED"
+    }
+  ]
+}

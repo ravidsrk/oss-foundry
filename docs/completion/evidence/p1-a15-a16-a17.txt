@@ -1,0 +1,45 @@
+### ANGLE 15 — legal & compliance
+LICENSE: 
+package.json private: "private": true  <-- repo is PUBLIC + MIT
+--- legal-surface docs ---
+  docs/09-ethics.md (25 lines)
+  CONTRIBUTING.md (14 lines)
+  docs/02-good-neighbor.md (45 lines)
+--- CLA/DCO handling (the product's own legal domain) ---
+--- does it collect/store personal data? ---
+  (above = any PII touchpoints in code)
+
+### ANGLE 16 — GTM readiness
+--- README positioning (first 12 lines) ---
+  # Foundry
+  
+  Always-on, etiquette-correct open source contributions. **Never slop.**
+  
+  Foundry is the control plane in front of [orca-fleet `oss-contribute`](https://github.com/ravidsrk/orca-fleet). It does not replace Orca. It decides *whether* a packet may exist. Orca decides *how* the patch is built.
+  
+  **Takeover / full product:** [`docs/PRODUCT.md`](docs/PRODUCT.md)
+  
+  | | |
+  |---|---|
+  | Operator loop | `node --experimental-strip-types factory/cli.ts` |
+  | Protocol | [`docs/`](docs/) |
+--- billing/pricing/analytics/landing refs ---
+  (empty = none)
+
+### ANGLE 17 — ownership & ops
+--- accounts/keys referenced ---
+     32 FOUNDRY_PAT
+     17 E2B_API_KEY
+     13 GITHUB_TOKEN
+     12 FOUNDRY_GITHUB_TIMEOUT_MS
+     10 FOUNDRY_LIVE
+      8 GH_TOKEN
+      6 FOUNDRY_REPO_URL
+      6 FOUNDRY_OPERATOR
+      1 FOUNDRY_WITNESS_SAW_LOGIN_SHELL
+      1 FOUNDRY_INSTALLATION_ID
+      1 FOUNDRY_APP_PRIVATE_KEY
+      1 FOUNDRY_APP_ID
+--- recovery / incident docs ---
+docs/08-operations.md:93:lifts a `banned` tone. Denylist the repo in `allowlist.yaml` the same hour, per the incident drill
+docs/08-operations.md:225:## Incident: slop accusation

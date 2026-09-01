@@ -1,0 +1,35 @@
+### ANGLE 4 — test-to-source mapping
+
+non-test source modules: 27
+test files:              19
+
+UNTESTED (no sibling .test.ts):
+  factory/allowlist.ts  (69 lines)
+  factory/github-scout.ts  (78 lines)
+  factory/neighbor.ts  (81 lines)
+  factory/policy-records.ts  (98 lines)
+  factory/scout.ts  (42 lines)
+  factory/seed-fixtures.ts  (40 lines)
+  factory/seed.ts  (455 lines)
+  factory/types.ts  (366 lines)
+  factory/validate-allowlist.ts  (28 lines)
+  factory/verify-ledger.ts  (83 lines)
+  factory/witness.ts  (676 lines)
+
+TESTED:
+  cli                              src  1421  test  2566
+  competition-read                 src    70  test    84
+  engine                           src  1446  test  5717
+  github-pr                        src   800  test  1075
+  halt                             src    70  test   121
+  ids                              src    25  test    50
+  ledger-check                     src   349  test   675
+  load-allowlist                   src   353  test   185
+  packet                           src   337  test   386
+  policy                           src   732  test  1041
+  sandbox                          src    53  test   242
+  scorecard                        src   253  test    56
+  state                            src   456  test   444
+  status                           src    97  test    83
+  terminal                         src   170  test   502
+  tmp-dir                          src    69  test   132

@@ -1,0 +1,49 @@
+
+$ npm install   # (no deps declared)
+
+up to date in 86ms
+exit=0
+
+$ npm test
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7826.238334
+
+suite ok — 379 tests across 19 files, every file accounted for
+exit=0
+
+$ npm run validate
+version 2 repos=8 denylist=4
+denylist: matplotlib/matplotlib, curl/curl, pydantic/pydantic, stablyai/orca
+repos: ravidsrk/orca-fleet, ravidsrk/frontguard, ColeMurray/background-agents, github/awesome-copilot, e2b-dev/e2b-cookbook, mcp-use/mcp-use, mastra-ai/mastra, OpenHands/OpenHands
+policy records ok: 8 records
+exit=0
+
+$ npm run foundry -- --help
+  reject <packetId> --reason <text>
+  halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
+  revert <packetId> --reason <text> [--at <iso>]   (a maintainer-stated rollback naming the PR — SPEC.md §7 stop; an explicit git revert of our merge commit is found by reconcile on its own. --at is WHEN THE ROLLBACK HAPPENED, which is what the 30-day window is measured from; it defaults to now)
+  advance <packetId>
+  evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
+  witness-check [repoId]   (pre-flight: resolve the interpreter each allowlisted testCommand would really use here, before a packet is in flight)
+  attach-witness <packetId> --manifest <path>   (ingest a witness produced on the worker host; provenance and log hashes re-checked here)
+  body <packetId>
+  attach-draft <packetId> <prUrl>
+  open-draft <packetId> --head <forkOwner:branch>   (machine-account PAT; draft-only; one create per run)
+  sync <packetId> [--threads-answered]
+  reconcile   (live re-read of every packet that names a PR; re-checks merged packets for a revert of our merge commit)
+  ledger
+  evidence-page <packetId>   (maintainer-facing audit page, markdown to stdout)
+  clear-halt --by <name> --note <text>   (a human lifts the factory-wide rate-limit halt — not the halt above)
+
+Any command takes --state <path> to point at a different ledger.
+Any command takes --logs-root <path> to root the witness run logs somewhere other than the checkout.
+State: /private/tmp/pcd-coldstart/.foundry-state.json (seed if missing; refuse if present but malformed). Foundry never merges.
+Witness logs: /private/tmp/pcd-coldstart/docs/evidence/logs/<packetId>/ (read and written there, whatever your cwd).
+Disclosure:
+This patch was prepared by Foundry (ravidsrk/oss-foundry), an operator-gated contribution factory.
+A human reviewed the packet, the diff, and the tests before this draft was opened.
+The factory does not merge. Maintainers own the merge.
+
+exit=0

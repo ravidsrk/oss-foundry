@@ -1,0 +1,31 @@
+### GAP CHECK 1 — does the tool pin X-GitHub-Api-Version?
+  ^ empty = UNPINNED (inherits a rolling default)
+
+--- the headers it actually sends ---
+  export function githubApiHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "oss-foundry",
+      ...extra,
+    };
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+  }
+
+### GAP CHECK 2 — does it consume merge_commit_sha (removed under API version 2026-03-10)?
+  factory/github-pr.ts:608:  meta: { mergeCommitSha?: string; mergedAt?: string; baseRef?: string },
+  factory/github-pr.ts:611:  if (!meta.mergeCommitSha || !meta.mergedAt) {
+  factory/github-pr.ts:644:      mergeCommitSha: meta.mergeCommitSha,
+  factory/github-pr.ts:674:      merge_commit_sha?: string | null;
+  factory/github-pr.ts:695:    if (pr.merge_commit_sha) meta.mergeCommitSha = pr.merge_commit_sha;
+  factory/scorecard.ts:209:  mergeCommitSha: string;
+  factory/scorecard.ts:213:  const merge = input.mergeCommitSha.toLowerCase();
+  factory/seed.ts:50:      mergeCommitSha: "36d0f23708adbdf911e4df050ed516821278a9fc",
+  factory/seed.ts:121:      mergeCommitSha: "4375afc98341e6b991544df592f2b7fa7441ca7e",
+  factory/seed.ts:190:      mergeCommitSha: "32050a009299df3608f5e67d9db3362c0a9ab4bb",
+  factory/state.ts:197:    optional(o.mergeCommitSha, (v) => typeof v === "string") &&
+  factory/types.ts:196:  mergeCommitSha?: string;
+
+### GAP CHECK 3 — does it consume singular assignee (also removed)?
+  ^ empty = not affected
