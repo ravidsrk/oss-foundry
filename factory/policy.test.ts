@@ -477,9 +477,11 @@ test("the issue #37 probe paraphrases classify", () => {
  * is terminal: `AGENTS.md` makes the denylist absolute, so there is no hold to fall back to and no
  * human asked. A false DENY here is the most expensive mistake the scanner can make.
  *
- * The departure sense takes a place or nothing; the comment sense takes a comment-shaped object,
- * optionally behind an indirect one ("leave us a message"). Both directions are pinned together
- * because the fix is a distinction, and a distinction needs two sides to be a test.
+ * The first fix excluded comment-shaped objects and review broke it with one adjective ("leave a
+ * quick comment"): enumerating the innocent reading is the wrong POLARITY, because every word not yet
+ * listed defaults to DENY. The ban now requires positive evidence of departure — a place, an adverb of
+ * leaving, or nothing at all — so anything unrecognised is not a ban. Both directions are pinned
+ * together because the fix is a distinction, and a distinction needs two sides to be a test.
  */
 const SECOND_PERSON_INVITATIONS: string[] = [
   "if you are an agent, leave a comment on the issue first",
@@ -488,6 +490,11 @@ const SECOND_PERSON_INVITATIONS: string[] = [
   "if you are a bot, leave a note explaining what you changed",
   "if you are an agent, leave us a message first",
   "if you are a bot, leave me your review comments",
+  // Modifiers, which is where the first fix broke: an adjective between determiner and noun.
+  "if you are an agent, leave a quick comment",
+  "if you are a bot, leave detailed feedback in the issue",
+  "if you are an agent, leave a brief note explaining the change",
+  "if you are an agent, leave us a short message first",
 ];
 
 const SECOND_PERSON_BANS: string[] = [
@@ -498,6 +505,9 @@ const SECOND_PERSON_BANS: string[] = [
   "if you are a bot, go away",
   "if you are an llm, leave",
   "if you are a bot, do not submit anything",
+  "if you are an agent, leave immediately",
+  "if you are an llm, leave.",
+  "if you are a bot, leave us alone",
 ];
 
 test("a second-person invitation to comment is not a ban, and a second-person ban still is", () => {

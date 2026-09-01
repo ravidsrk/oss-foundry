@@ -42,13 +42,18 @@ const FORBIDDEN_STATEMENTS: RegExp[] = [
   /(?:don['’]t|do\s+not|never)\s+want\s+(?:any\s+)?(?:ai|llms?|chatgpt|bots?)\s+slop/i,
   // Second-person: "if you are a bot, turn back".
   //
-  // `leave` is tempered, and this is a DENY roster so the cost of getting it wrong is terminal. A
-  // repository that says "if you are an agent, leave a comment on the issue first" is INVITING agent
-  // participation with a courtesy step, and a bare `leave` denied it outright — three phrasings
-  // reproduced, all reaching DENY_FORBIDDEN. The departure sense takes a place or nothing ("leave
-  // this repository", "leave now"); the comment sense takes a comment-shaped object. Excluding those
-  // objects keeps the ban and drops the invitation.
-  /if\s+you\s+are\s+(?:an?\s+)?(?:bot|llm|agent|chatgpt)[^.\n]{0,40}(?:turn\s+back|go\s+away|do\s+not\s+submit|leave(?!(?:\s+(?:a|an|the|your|our|some|us|me))*\s+(?:comment|note|feedback|message|remark|review|reply|issue|question)))/i,
+  // `leave` demands POSITIVE evidence of departure, and the polarity is the point. This is a DENY
+  // roster and `AGENTS.md` makes the denylist absolute: there is no hold to fall back to and no human
+  // is asked, so a wrong match here is the most expensive mistake the scanner can make. A repository
+  // saying "if you are an agent, leave a comment on the issue first" is INVITING participation with a
+  // courtesy step, and a bare `leave` denied it outright.
+  //
+  // The first fix excluded comment-shaped objects, and review broke it with one adjective ("leave a
+  // quick comment") — enumerating the innocent reading is the wrong direction, because every word not
+  // yet listed defaults to DENY. So the ban now requires a departure object or nothing at all: a
+  // place, an adverb of leaving, or punctuation. Anything unrecognised is not a ban, which is the
+  // safe default for a roster with no appeal.
+  /if\s+you\s+are\s+(?:an?\s+)?(?:bot|llm|agent|chatgpt)[^.\n]{0,40}(?:turn\s+back|go\s+away|do\s+not\s+submit|leave(?=\s*(?:[.,;!]|$)|\s+(?:this|the|our)?\s*(?:repo|repository|project|codebase)\b|\s+(?:now|immediately|at\s+once|here|quietly)\b|\s+us\s+alone\b))/i,
 ];
 
 /** A human gate that is NOT a signature: someone looks, nobody signs. Separate roster so the
