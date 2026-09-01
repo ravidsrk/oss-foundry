@@ -70,3 +70,11 @@ because `ledger` is the paste-between-GENERATED-markers export, not a diagnostic
     npm test          suite ok — 394 tests across 20 files, every file accounted for
     npm run typecheck tsc --noEmit exit 0
     npm run validate  allowlist ok
+### stopReasons as the single source of truth — negative control
+
+--- let health() drift from stopReasons ---
+  ✔ the review-KPI writer and reporter share one predicate, so they cannot disagree (0.251875ms)
+  suite refused:
+
+--- restored ---
+  suite ok — 405 tests across 20 files, every file accounted for

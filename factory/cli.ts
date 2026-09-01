@@ -51,7 +51,7 @@ import {
 import { packetChecks, seedDivergences } from "./ledger-check.ts";
 import { DISCLOSURE } from "./neighbor.ts";
 import { renderEvidencePage, renderFreezeEvidence, renderPrBody } from "./packet.ts";
-import { health, mergeRate, scorecardRow, terminalCount } from "./scorecard.ts";
+import { health, mergeRate, scorecardRow, stopReasons, terminalCount } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { backupFactoryState, loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
@@ -293,20 +293,6 @@ function mustLoad() {
  * operator opened scorecard.ts at 2 a.m. to find out which (G-08). Named here, next to the print,
  * because a helper in scorecard.ts that nobody calls is the same as no reason.
  */
-function stopReasons(row: ScorecardRow): string[] {
-  const reasons: string[] = [];
-  if (row.maintainerTone === "banned") reasons.push("banned");
-  if (row.reverts > 0) reasons.push(`reverts=${row.reverts}`);
-  if (
-    row.opened >= CAPS.halt_after_opens &&
-    terminalCount(row) > 0 &&
-    mergeRate(row) < CAPS.halt_merge_rate
-  ) {
-    reasons.push(`merge-rate ${row.merged}/${terminalCount(row)}<${CAPS.halt_merge_rate}`);
-  }
-  return reasons;
-}
-
 function printStatus(state: FactoryState, source: "file" | "seed") {
   console.log(`state: ${STATE_FILE}${source === "seed" ? " (absent — committed seed)" : ""}`);
   // The clock verifies the committed seed, never this file (docs/08-operations.md). This is the
