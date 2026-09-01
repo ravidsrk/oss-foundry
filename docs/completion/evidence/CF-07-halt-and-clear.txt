@@ -1,0 +1,24 @@
+### CF-07 — Stop the factory: happy path and the documented asymmetry
+
+## HAPPY: halt <repoId> reaches health=stop
+$ foundry halt ravidsrk/frontguard --reason 'maintainer asked us to stop'
+    no state file at /var/folders/65/nfjkpf196n5_xrwbkyrrgqrc0000gn/T/tmp.GcMOqOv4Vh/state.json — showing the committed seed ledger, not live state. Mutating commands will create it.
+    halted ravidsrk/frontguard (scorecard banned). Edit allowlist.yaml denylist the same hour.
+  exit=0
+  scorecard now:
+      ravidsrk/frontguard  opened=1 merged=1 reverts=0 reviewCommentsAvg=0 tone=banned health=stop  stop=banned
+
+## HAPPY: the factory-wide halt is lifted by clear-halt
+    (planted a secondary-rate-limit halt, the only thing that writes one)
+  $ foundry status   # the halt is IN the report now, not just a stderr side effect
+    FACTORY HALTED 2026-09-01T16:03:01.297538Z: GitHub secondary rate limit while opening a draft
+    in flight: none — factory halted; tick is refused
+  $ foundry clear-halt --by operator --note 'rate limit window passed'
+    halt from 2026-09-01T16:03:01.297538Z cleared by operator
+    in flight: none — tick is allowed
+
+## FAILURE PATH: clear-halt does NOT lift a per-repo stop — the documented asymmetry
+  $ foundry status   # frontguard was halted above and clear-halt just ran
+      ravidsrk/frontguard  opened=1 merged=1 reverts=0 reviewCommentsAvg=0 tone=banned health=stop  stop=banned
+    ^ still tone=banned health=stop, and status now names WHY
+    docs/08-operations.md: 'clear-halt does not undo it ... no command lifts a banned tone'

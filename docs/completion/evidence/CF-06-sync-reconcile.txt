@@ -1,0 +1,23 @@
+### CF-06 — Follow up, release the slot, score the repo
+
+## HAPPY: a terminal outcome is absorbed and scored
+  The committed ledger carries a real absorbed transition (docs/12-ledger.md, Corrections 2026-08-31):
+    - ColeMurray/background-agents: opened=1 merged=0 closedUnmerged=1 noReview=1 tone=neutral
+    ^ opened=1 merged=0 closedUnmerged=1 noReview=1 — a real PR that closed unmerged,
+      absorbed by reconcile and folded into the scorecard, not hand-typed.
+
+## HAPPY: reconcile against live GitHub, and the slot is free
+  $ foundry reconcile
+    reconciled 4 packets; divergences=0 advisories=0 reverts=0 reviews=0
+    in flight: none — tick is allowed
+
+## FAILURE PATH: a GitHub read that fails leaves the ledger uncorrupted
+  Forced with a 1ms deadline so AbortSignal.timeout fires on every request —
+  the transport-failure path T-14 just gave repo-and-operation context to.
+    ledger sha256 before: d2ceec6e2597118b…
+    $ FOUNDRY_GITHUB_TIMEOUT_MS=1 foundry reconcile
+      pkt_ColeMurray_background-agents_1476: The operation was aborted due to timeout syncing ColeMurray/background-agents#1652
+      exit=1
+    ledger sha256 after:  d2ceec6e2597118b…
+    UNCHANGED — the failed read wrote nothing
+    $ foundry status -> exit=0  (the ledger still loads)
