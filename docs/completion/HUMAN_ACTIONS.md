@@ -18,7 +18,7 @@ R15: I do not create accounts, mint credentials, set repository variables, provi
 5. Export it as `FOUNDRY_PAT` in the operator shell.
 6. Let the wizard's step 4 verify it: it reads `x-oauth-scopes` from `HEAD /user` and exits 1 unless the scope set is exactly `public_repo`.
 
-**Unblocks.** `T-16`-class evidence for **CF-04** and **CF-05** — the only flow that writes into a repository you do not own, and the one the entire gate chain exists to protect. It has never fired.
+**Unblocks.** Launch-gate §2 evidence for **CF-04** and **CF-05** — the only flow that writes into a repository you do not own, and the one the entire gate chain exists to protect. It has never fired. There is deliberately no `T-NN` for it: `PLAN.md` §"Blocked on Human Actions" carries these two rather than a task, because the agent cannot start them.
 
 **My verification once you confirm.** Run `foundry witness-check`, then drive `open-draft` end to end on an approved packet and capture the resulting draft PR URL as `evidence/CF-04-happy-*.txt`. I will also confirm the negative path: that a body without the verbatim disclosure block is refused before any POST.
 

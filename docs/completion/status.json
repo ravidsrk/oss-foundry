@@ -1549,6 +1549,11 @@
       "id": "A-12",
       "phase": "P4",
       "decision": "Review round 1 found four defects in my own planning surface and all four were fixed rather than rebutted: G-17 named the wrong blocker (H-02 instead of H-03), T-28 carried no dependencies in the machine-readable graph while PLAN.md said it depended on all preceding work, the task count read 26 against an actual 28, and the P3 size split and the totals were wrong. A planning artifact whose own arithmetic is wrong cannot be trusted to gate anything."
+    },
+    {
+      "id": "A-13",
+      "phase": "P4",
+      "decision": "The GitHub review bot's inline comments are a required pre-merge read, not advisory noise behind a green check. Two valid findings on #122 were merged past because the check was green and the comments were never fetched."
     }
   ],
   "research": [

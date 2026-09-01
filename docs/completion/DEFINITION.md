@@ -7,6 +7,14 @@ status: FROZEN
 
 **Immutable after this commit.** R13: this definition may not be lowered, narrowed, or reinterpreted. If it is wrong, it is wrong in writing and stays that way until a human amends it deliberately.
 
+### Amendment log
+
+A frozen document that gets edited silently is worse than one that was never frozen, so every touch after `frozen_at` is listed here with what changed and what did not.
+
+| when | change | substance changed? |
+|---|---|---|
+| 2026-09-01, post-#122 | §4 ACCEPT: the packet-id arbitrary-write concession cited `G-20` (which is the `.gitignore` gap); corrected to `G-19`, which is the gap that actually describes packet-id validation. Raised by the review bot on PR #122. | **No.** A wrong cross-reference was pointing at the wrong row. The concession, its scope and its wording are untouched — nothing was lowered, narrowed or reinterpreted. |
+
 The bar comes from the repo's own rule, which is a better one than this driver would have invented:
 
 > A station without SHA-bound evidence is doctrine-only. — `AGENTS.md:27`
@@ -88,7 +96,7 @@ Recorded here so a future session cannot re-litigate them.
 - De-duplicating the five hand-copied competing-work reads. **This one is deferred reluctantly** — it is the repo's own named recurring defect and drift is already visible — but it is a refactor across four call sites on the highest-traffic file, and R6's feature freeze plus the S0 work take precedence. Filed, not forgotten.
 
 **ACCEPT — risk accepted with an expiry:**
-- Packet-id-driven arbitrary file write (`G-20`) is *hardened* in this plan, but the underlying concession stands: `docs/10-schemas.md:67` states direct ledger write access is equivalent to operator control. No in-process check can fix that, and it is not pretended otherwise.
+- Packet-id-driven arbitrary file write (`G-19`) is *hardened* in this plan, but the underlying concession stands: `docs/10-schemas.md:67` states direct ledger write access is equivalent to operator control. No in-process check can fix that, and it is not pretended otherwise.
 - Wave 1+ evidence is operator-attested-by-file, not machine-witnessed, until an E2B worker host exists. Stated plainly in `docs/10-schemas.md:69`. **Expiry: the first Wave 1 packet.** Until then, `attach-witness` may not be described as machine witnessing.
 
 **Not applicable, with reasons:**

@@ -119,3 +119,16 @@ Exit criteria: every above-line gap maps to ≥1 task ✔ · every task has acce
 **Second look — one change:** I had scoped `G-17` as "blocked on an E2B account", copying the audit's framing. Re-reading `witness.ts:400-401` against `allowlist.yaml` showed host witnessing is permitted at Wave 0 and that both `ravidsrk/orca-fleet` and `ravidsrk/frontguard` qualify (`wave: 0, sandbox: host`, real test commands). A real machine witness is reachable **today**, on repos the operator owns, with no E2B account. `H-02` was demoted from launch-gating to a product decision with a recommended zero-cost option, and `PLAN.md` says so explicitly.
 
 → **Next: PHASE 5 — execution begins at `T-01`. Write access to source starts here (R2).**
+
+## 2026-09-01T12:5xZ — post-merge correction: PR #122's bot comments
+
+**Process failure, recorded because it would otherwise recur.** PR #122 merged with two unaddressed review comments. The GitHub bot posted them at 12:43:23Z; the `Greptile Review` check went green; I merged on the check. **A green check means the review ran, not that it found nothing.** I never fetched the inline comments. R11 makes the local CLI run the gate, and I read that as licence to ignore the bot — it is not. See `A-13`.
+
+Both findings were valid and are fixed here:
+
+- **[P1] `STATUS.md`'s verdict header was stale.** It still read `PHASE 1 COMPLETE`, `definition not yet frozen`, `TASKS: 0/0`, `NEXT: Phase 2`, while `SHIPLOG.md` and `status.json` pointed at `P1/T-01`. A reader resuming from the file the driver designates as verdict-first would have been sent back through three completed phases. The header is the one artifact the spec says to rewrite at the top of *every* phase, and I wrote it once in Phase 1.
+- **[P2] Four cross-references pointed at valid-but-wrong identifiers.** `RESEARCH.md` mapped the abandoned-branch salvage to `G-16` (the machine-account gap) instead of `G-29`; the rate-limit research effect to `G-09`/`G-10` (the first is the event ring) instead of `G-10`; `DEFINITION.md` mapped the packet-id write to `G-20` (`.gitignore`) instead of `G-19`; and `HUMAN_ACTIONS.md` cited `T-16` for CF-04/CF-05 evidence when `T-16` is CF-06's. All four were artifacts of writing the prose before the register was renumbered.
+
+Fixed the class rather than the four instances: every `G-`/`T-`/`CF-` reference in all five prose artifacts is now checked against the register mechanically — **28 references, each printed beside the row it points at**. No dangling identifiers, and every subject matches. The check is cheap to re-run and is the thing that should have existed before the first commit.
+
+Audit of the other PRs from this pass, for completeness: **#117/#118/#119** were skipped by the bot (dependabot is on its excluded-authors list) — no findings. **#120** was **APPROVED** with zero comments. **#116** carries two inline comments dated `be804a4`, both of which are the two P1s I fixed at `c49c516`/`254801a` and verified by provenance at the time — addressed, though never replied to on the PR itself.
