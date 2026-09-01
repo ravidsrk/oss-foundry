@@ -44,19 +44,24 @@ jobs:
     strategy:
       # Two legs, each proving something the other cannot.
       #
-      # `22.6.0` is the exact floor `package.json` declares, and it is not an arbitrary round
-      # number: it is the release that introduced `--experimental-strip-types`, which every
-      # documented invocation in this repository passes explicitly. Below it Node exits with
-      # `bad option: --experimental-strip-types` before a single line runs, so no in-process check
-      # could ever report it — the manifest claim is only worth anything if CI executes the floor
-      # itself. `factory/ci.test.ts` asserts this leg exists and matches `engines`.
+      # `22.10.0` is the exact floor `package.json` declares, and this leg is why the number is
+      # right. The first guess was 22.6.0, the release that added `--experimental-strip-types` —
+      # wrong, and this leg proved it on its first run. The binding constraint is not the flag at
+      # all: `factory/run-tests.ts` accounts for every test file through `node:test`'s per-file
+      # `test:summary` event, and on 22.9.0 and below that event carries no `file`, so the oracle
+      # reports "reported no summary" for every file and `npm test` refuses outright. Measured by
+      # bisection: 22.9.0 broken, 22.10.0 green.
+      #
+      # Nothing in-process could have caught either mistake — below 22.6.0 Node exits on the
+      # unknown flag before a line runs, and at 22.6.0-22.9.0 the failure is the oracle itself. A
+      # declared floor is only worth something if a run executes it.
       #
       # `24` is the current Active LTS and the line an operator actually runs. It is also where
       # type stripping is Stability 2 (Stable); on the 22.x line it is still a release candidate,
       # so testing only the floor would prove the project works nowhere anyone runs it.
       fail-fast: false
       matrix:
-        node: ["22.6.0", "24"]
+        node: ["22.10.0", "24"]
     steps:
       # Pinned to immutable commits, not `@v4`. A major tag is a moving reference: whoever controls
       # the upstream repository can retarget it, and these two run BEFORE every check here, so

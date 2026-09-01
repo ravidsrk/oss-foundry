@@ -287,17 +287,32 @@ test("pinned action SHAs have a keep-current mechanism (issue #85)", () => {
  *      22.18.0 (where stripping became default-on) and the manifest would be silently wrong,
  *   3. CI runs the declared floor, so the claim is executed rather than asserted.
  */
+/** Where `--experimental-strip-types` was introduced. A lower bound on the floor, not the floor. */
 const STRIP_TYPES_ADDED = "22.6.0";
+/**
+ * The actual floor, and it is higher than the flag: `factory/run-tests.ts` accounts for every test
+ * file through `node:test`'s per-file `test:summary` event, and on 22.9.0 and below that event
+ * carries no `file` — so the oracle reports "reported no summary" for every file and `npm test`
+ * refuses. Measured by bisection against real runtimes: 22.9.0 broken, 22.10.0 green.
+ */
+const SUITE_ORACLE_FLOOR = "22.10.0";
 
-test("the declared Node floor is the version that introduced the flag every script passes", () => {
+test("the declared Node floor is the one the suite's own oracle needs", () => {
   const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
     engines?: { node?: string };
     scripts?: Record<string, string>;
   };
   assert.equal(
     manifest.engines?.node,
-    `>=${STRIP_TYPES_ADDED}`,
-    `engines.node must be >=${STRIP_TYPES_ADDED} — the release that added --experimental-strip-types. Anything lower claims support for versions where Node aborts on the flag before running a line.`,
+    `>=${SUITE_ORACLE_FLOOR}`,
+    `engines.node must be >=${SUITE_ORACLE_FLOOR} — the release where node:test's per-file test:summary carries a \`file\`, which factory/run-tests.ts needs to account for every test file. Below it \`npm test\` refuses outright.`,
+  );
+  // ...and the floor can never drop below the flag's own introduction, whatever else changes.
+  const floor = (manifest.engines?.node ?? "").replace(/^>=/, "").split(".").map(Number);
+  const flagFloor = STRIP_TYPES_ADDED.split(".").map(Number);
+  assert.ok(
+    floor[0]! > flagFloor[0]! || (floor[0] === flagFloor[0] && floor[1]! >= flagFloor[1]!),
+    `engines.node ${manifest.engines?.node} is below ${STRIP_TYPES_ADDED}, where --experimental-strip-types was added — Node would abort on the flag before running a line.`,
   );
 
   // Claim 2: the floor is only correct while every entry point passes the flag explicitly.
