@@ -106,7 +106,7 @@ Exit criteria: definition frozen ✔ · every gap decided ✔ · cut line drawn 
 
 ## PHASE 4 — phased plan · COMPLETE
 
-**28 tasks across P1–P7. 13 S · 15 M · zero L.** Longest dependency chain: 5. Both S0 gaps land in P2, the safety phase.
+**28 tasks across P1–P7. 14 S · 14 M · zero L.** Longest dependency chain: **6** — `T-01 → T-02 → T-05 → T-07 → T-22 → T-28`. Both S0 gaps land in P2, the safety phase. (Counts recomputed from `status.json` after review round 1; the figures first written here by hand were wrong.)
 
 `A-11` resolves the one real design tension: a type-check gate needs a type checker, against an explicit, CI-documented zero-dependency property. `typescript` 7.x now ships platform-specific native optional deps, so a devDependency would import a genuine supply chain and a platform-sensitive lockfile. Decision: **CI-only type check via a pinned `npx`** — runtime supply chain stays at exactly zero, the gate still exists, CI still enforces it. The tsconfig is also made to earn its keep: `erasableSyntaxOnly` pins the Node 26 forward-compat property and `verbatimModuleSyntax` catches the type-import-elision hazard the Node docs warn about.
 
