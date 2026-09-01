@@ -9,6 +9,20 @@ on:
     - cron: "0 */6 * * *"
   workflow_dispatch:
 
+concurrency:
+  # Serialise schedule and workflow_dispatch. Search-then-create on the
+  # alert step is not atomic: two overlapping red runs can both see no
+  # open clock-alert and both create, which is exactly a 6-hourly clock
+  # plus a manual retry of a failing one. One group, shared across
+  # events, so they queue rather than race. cancel-in-progress is FALSE:
+  # GitHub would otherwise cancel the in-flight red run before its alert
+  # step, and the notification this group exists to keep unique would be
+  # the thing that got dropped. Pending runs still collapse to the newest
+  # (GitHub's default for a concurrency group); a tick that never started
+  # has nothing to alert about.
+  group: oss-tick
+  cancel-in-progress: false
+
 jobs:
   tick:
     runs-on: ubuntu-latest
@@ -74,8 +88,11 @@ jobs:
       # WHY IDEMPOTENT. A naive `issues.create` on every red run turns one
       # outage into ~40 issues a week (6-hourly). Search for an existing open
       # `clock-alert` issue and comment on it; reopen a closed one; create only
-      # when none exists. The run URL and the failed job are in every body so
-      # a later comment is still actionable.
+      # when none exists. That lookup is not atomic — two overlapping red
+      # runs can both pass it — so the workflow concurrency group (above)
+      # serialises schedule and dispatch. Together they are the one-alert
+      # guarantee; the lookup alone is not. The run URL and the failed job
+      # are in every body so a later comment is still actionable.
       #
       # HONEST LIMIT. A scheduled run cannot be failed on demand from this
       # repository, so the suite drives the script body against a fake octokit

@@ -10,9 +10,19 @@ Added step `Alert on clock failure`:
   uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
   (same SHA pin as the existing packet-issue step; issues: write already granted)
 
-Idempotency: search open issues labelled `clock-alert` first and comment
-on a match; else reopen a closed match and comment; else create. A naive
-create-on-every-red-run would turn one outage into ~40 issues a week.
+Idempotency has two halves:
+
+  1. Search open issues labelled `clock-alert` and comment on a match;
+     else reopen a closed match and comment; else create. A naive
+     create-on-every-red-run would turn one outage into ~40 issues a week.
+  2. Workflow `concurrency: { group: oss-tick, cancel-in-progress: false }`.
+     Search-then-create is not atomic: a schedule overlapping a
+     workflow_dispatch (the normal shape of someone retrying a failing
+     clock) can both pass the lookups and both create. The group is a
+     static name shared across events so they queue. cancel-in-progress
+     is false so a red run is not cancelled before its alert step.
+     GitHub still collapses pending runs to the newest; a tick that
+     never started has nothing to alert about.
 
 HONEST LIMIT. A scheduled run cannot be failed on demand from this
 repository, so this cannot prove a live red tick filed the issue. What
@@ -24,6 +34,8 @@ was proven:
                              (title, run URL, job name, clock-alert label)
        open alert exists  -> createComment on it, create NOT called
        closed alert exists -> update state=open, createComment, create NOT called
+  3. concurrency group is the literal `oss-tick` (no ${{ interpolation }}),
+     cancel-in-progress: false.
 
 Test: "the 6-hour clock files one alert issue on failure and comments on a repeat"
 
@@ -31,8 +43,11 @@ $ node --experimental-strip-types --test --test-name-pattern 'files one alert is
   ✔ the 6-hour clock files one alert issue on failure and comments on a repeat
   tests 1 / pass 1 / fail 0
 
-A workflow `if:` cannot be negative-controlled by reverting production
-TypeScript: deleting the step reds the same test (no `if: failure()`).
-Not re-run here as a file mutation because the assertion is a text-level
-check on a config file — the same honest limitation factory/ci.test.ts
-already states for the suite-on-pull-request guard.
+--- NEGATIVE CONTROL: delete the concurrency block ---
+
+  ✖ the 6-hour clock files one alert issue on failure and comments on a repeat
+  AssertionError: oss-tick.yml has no shared concurrency group — overlapping schedule+dispatch can each create an alert issue
+    actual: ''
+    expected: /^\s*group:\s*oss-tick\s*$/m
+  EXIT:1
+  restored

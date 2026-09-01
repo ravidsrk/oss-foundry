@@ -444,11 +444,12 @@ test("the published frontguard packet records the roster oracle, not a noop red-
  *
  * HONEST LIMITATION. A scheduled run cannot be failed on demand from this
  * repository, so this cannot prove a live red tick filed the issue. What it
- * can prove: the step's `if:` is `failure()`, the action is SHA-pinned, and
- * the script body — driven against a fake octokit — creates on the first
+ * can prove: the step's `if:` is `failure()`, the action is SHA-pinned, the
+ * script body — driven against a fake octokit — creates on the first
  * failure, comments on a repeat, and reopens a closed alert rather than
- * opening a second issue (a 6-hourly clock that files fresh would turn one
- * outage into ~40 issues a week).
+ * opening a second issue, AND the workflow concurrency group serialises
+ * schedule against dispatch with cancel-in-progress: false so two overlapping
+ * red runs cannot both pass the lookup and both create.
  */
 test("the 6-hour clock files one alert issue on failure and comments on a repeat", async () => {
   const tick = workflows().find((w) => w.name === "oss-tick.yml");
@@ -462,6 +463,29 @@ test("the 6-hour clock files one alert issue on failure and comments on a repeat
     tick.text,
     /issues:\s*write/,
     "oss-tick.yml dropped issues: write — the alert cannot file",
+  );
+
+  // Search-then-create is not atomic. A schedule overlapping a dispatch can
+  // both pass the lookups and both create — the normal shape of someone
+  // retrying a failing clock. The concurrency group is the GitHub-native
+  // lock. It must be a static name (not event_name, not run_id) so the two
+  // triggers share it, and cancel-in-progress must be false so a red run is
+  // not cancelled before its alert step.
+  const concurrency = /^concurrency:$([\s\S]*?)(?=^\S)/m.exec(tick.text)?.[1] ?? "";
+  assert.match(
+    concurrency,
+    /^\s*group:\s*oss-tick\s*$/m,
+    "oss-tick.yml has no shared concurrency group — overlapping schedule+dispatch can each create an alert issue",
+  );
+  assert.doesNotMatch(
+    concurrency,
+    /group:.*\$\{\{/,
+    "oss-tick concurrency group interpolates, so overlapping runs do not share it and the race remains",
+  );
+  assert.match(
+    concurrency,
+    /cancel-in-progress:\s*false\b/,
+    "oss-tick cancel-in-progress is not false — a queued dispatch would cancel a red scheduled run and skip the alert",
   );
 
   const raw = readFileSync(join(WORKFLOW_DIR, "oss-tick.yml"), "utf8");
