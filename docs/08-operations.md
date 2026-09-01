@@ -229,3 +229,61 @@ PR volume is a vanity metric and is not shown as a success KPI.
 3. Move the repo to denylist.
 4. Write a scorecard event with tone `banned`.
 5. Do not open another external PR for 14 days.
+
+## Incident: the ledger will not load
+
+**Symptom.** Every verb dies with the same line, including `status`:
+
+```
+refusing to load <path>: <parser message>. Fix or remove it; will not overwrite with seed.
+```
+
+That refusal is correct and deliberate — the loader will not silently overwrite a damaged ledger with the seed — but it takes out the diagnostic command too, which is why this runbook exists. Three different causes produce it, and the message tells you which:
+
+| message contains | cause | fix |
+|---|---|---|
+| a JSON parser error (`Unexpected end of JSON input`, `Unterminated string…`) | truncated or hand-mangled file | restore, below |
+| `not a Foundry v6 state file` | a ledger from an older schema | restore, or hand-edit `version` only if you know the shape matches |
+| `the one-packet-in-flight invariant is violated` | more packets in flight than `CAPS.in_flight` | restore, or hand-edit the extra packets to a terminal status |
+
+**Restore.** Every mutating run copies the previous ledger to `<path>.bak` before writing, so the backup is the last state that *loaded*:
+
+```
+cp .foundry-state.json.bak .foundry-state.json
+node --experimental-strip-types factory/cli.ts status
+```
+
+**What restoring costs, stated plainly.** One generation. Anything recorded between the backup being taken and the damage is gone — in practice, the single most recent mutating command. That is the trade the backup makes deliberately: two files to reason about under pressure is worse than one, and the durable record is `factory/seed.ts` plus the generated block in `docs/12-ledger.md`, not this file.
+
+**If there is no backup** (a first run, or the backup is damaged too): delete the ledger. `status` then reads the committed seed and says so, and the next mutating command creates a fresh one. Everything not yet promoted into `factory/seed.ts` is lost, which is the argument for promoting rather than accumulating — see the promotion note above.
+
+**Why a torn write is now unlikely rather than merely unlucky.** `saveFactoryState` writes a temp file in the same directory, fsyncs it, and renames over the target. POSIX rename is atomic, so a reader sees the whole old file or the whole new one. Measured before the change, a concurrent reader saw a half-written ledger in 29 of 187 samples; after, 0 of 186.
+
+## Incident: the machine-account PAT is revoked or expired
+
+**Symptom.** `open-draft` fails and nothing else does — the PAT is the only write credential, so reads keep working and the failure looks narrower than it is:
+
+```
+GitHub 401 creating the draft on <owner>/<repo>: Bad credentials
+```
+
+A 403 with a scope complaint means the token exists but is too narrow (or was broadened and then restricted); a 401 means it is gone, expired, or mistyped.
+
+**Fix.**
+
+```
+bash scripts/machine-account-wizard.sh
+```
+
+It walks the five steps and, at step 4, verifies the token by reading `x-oauth-scopes` from `HEAD /user` — it exits non-zero unless the scope set is exactly `public_repo`. Then re-export it in the operator shell:
+
+```
+export FOUNDRY_PAT=<new token>
+node --experimental-strip-types factory/cli.ts witness-check
+```
+
+**The expiry is 90 days and nothing in this repository reminds you.** That is a known gap, filed rather than fixed: the scope is checked at mint time by the wizard and never re-checked at runtime, so a token that is broadened later is accepted silently. Note the expiry date somewhere you will see it.
+
+**What is safe to do while the PAT is missing.** Everything except `open-draft`. `tick`, `approve`, `evidence`, `attach-witness`, `sync`, `reconcile`, `ledger` and `status` need no write credential. A packet can sit at `draft-ready` indefinitely; the in-flight cap is not consumed by a missing token.
+
+**What must NOT be done.** Do not substitute your own personal token for `FOUNDRY_PAT`. The separation is the point: the machine account is what makes a draft attributable to the factory rather than to the maintainer, and `docs/07-github-app.md` is the design.

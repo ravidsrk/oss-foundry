@@ -53,7 +53,7 @@ import { DISCLOSURE } from "./neighbor.ts";
 import { renderEvidencePage, renderFreezeEvidence, renderPrBody } from "./packet.ts";
 import { health, scorecardRow } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
-import { loadFactoryState, saveFactoryState } from "./state.ts";
+import { backupFactoryState, loadFactoryState, saveFactoryState } from "./state.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { installTerminalBoundary } from "./terminal.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryState } from "./types.ts";
@@ -248,6 +248,22 @@ function persist(state: FactoryState): void {
       `refusing to write the repo-root ledger ${STATE_FILE} from a test run — pass \`--state <tmpfile>\` to every spawned CLI so the test cannot mutate real state.`,
     );
     process.exit(1);
+  }
+  /**
+   * One generation of backup, taken BEFORE the write, so `<state>.bak` is always the last ledger
+   * that loaded rather than the one we are about to replace it with.
+   *
+   * `saveFactoryState` makes a torn write essentially impossible; this covers the failures it
+   * cannot — a bad hand-edit, an `rm`, or a state the loader legitimately refuses because the
+   * invariants really are violated. Recovery is written up in `docs/08-operations.md`.
+   *
+   * A failed backup is a WARNING, not a refusal, and the direction matters: refusing to work
+   * because a convenience copy could not be made would turn a full disk into a dead factory, while
+   * a missing `.bak` costs only the seatbelt. The operator is told either way.
+   */
+  const backup = backupFactoryState(STATE_FILE);
+  if (!backup.ok) {
+    console.error(`could not back up ${STATE_FILE} before writing: ${backup.error} — continuing without a backup`);
   }
   saveFactoryState(STATE_FILE, state);
 }

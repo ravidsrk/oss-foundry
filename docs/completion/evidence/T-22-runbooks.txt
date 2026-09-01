@@ -1,0 +1,18 @@
+### T-22 — runbooks, verified by following them
+
+## Runbook 1: the ledger will not load
+
+  setup: ledger + backup exist -> 
+
+  SYMPTOM (as the runbook says, every verb including status):
+    exit=1
+    refusing to load /var/folders/65/nfjkpf196n5_xrwbkyrrgqrc0000gn/T/tmp.HXEpFybPEB/.foundry-state.json
+
+  FIX, the runbook's two commands verbatim:
+    $ cp .foundry-state.json.bak .foundry-state.json
+    $ foundry status
+      exit=0  -> recovered
+
+  NO-BACKUP path, also as written:
+      no state file at /var/folders/65/nfjkpf196n5_xrwbkyrrgqrc0000gn/T/tmp.HXEpFybPEB/.foundry-state.json — showing the committed seed ledger, not live state. Mutating commands will create it.
+      exit=0 -> reads the committed seed and says so

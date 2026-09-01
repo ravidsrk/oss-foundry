@@ -1,0 +1,16 @@
+### T-11 — packet id format enforced at the load boundary
+
+--- NEGATIVE CONTROL: remove the guard, plant a traversal id ---
+    AssertionError [ERR_ASSERTION]: a ledger containing a traversal packet id must not load
+  suite refused:
+
+--- restored ---
+  suite ok — 386 tests across 20 files, every file accounted for
+
+--- and the real ids still load ---
+  ok pkt_ColeMurray_background-agents_1476 -> true
+  ok pkt_ravidsrk_orca-fleet_71 -> true
+  ok pkt_ravidsrk_frontguard_195 -> true
+  ok pkt_ravidsrk_orca-fleet_42 -> true
+  ok pkt_matplotlib_matplotlib_0 -> true
+  ok pkt_OpenHands_OpenHands_16907 -> true

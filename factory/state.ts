@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { CAPS } from "./allowlist.ts";
 import { seedState } from "./seed.ts";
 import { inflightCount, type FactoryState } from "./types.ts";
@@ -241,11 +242,40 @@ function isSandbox(value: unknown): boolean {
   );
 }
 
+/**
+ * A packet id is a filesystem path component, so its FORMAT is a security property and not a
+ * cosmetic one.
+ *
+ * `witnessLogPaths` builds `docs/evidence/logs/<packetId>/{test,revert}.log` by interpolation, and
+ * `persistWitnessLogs` resolves that and writes it. Until this guard existed the only check on an id
+ * was `typeof o.id === "string"`, so a hand-edited ledger carrying
+ * `pkt_../../../../tmp/anything` produced an arbitrary write — and `witnessLogPathViolation` could
+ * not catch it, because the path it compares against is derived from the same poisoned id.
+ *
+ * This is defence in depth, stated plainly rather than oversold: `docs/10-schemas.md` already
+ * concedes that direct write access to the ledger is equivalent to operator control, so anyone who
+ * can plant the id can also run the CLI. What it removes is the gap between "can edit a JSON file"
+ * and "can write anywhere the process can reach", which are not the same capability.
+ *
+ * The shape is `idFor`'s output (`factory/packet.ts`): `pkt_<owner>_<repo>_<issue>`, where the repo
+ * id's `/` becomes `_`. GitHub owner and repo names allow letters, digits, `-`, `_` and `.`, so the
+ * class is deliberately no wider than that — and critically it contains no `/`, no `\`, no `..`
+ * and no NUL, which is the whole point.
+ */
+const PACKET_ID = /^pkt_[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isValidPacketId(id: string): boolean {
+  // `..` cannot appear even though `.` is legal in a repo name: a segment of dots is a traversal,
+  // and no real owner/repo/issue triple produces one.
+  return PACKET_ID.test(id) && !id.includes("..");
+}
+
 function isPacket(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const o = value as Record<string, unknown>;
   return (
     typeof o.id === "string" &&
+    isValidPacketId(o.id) &&
     typeof o.repoId === "string" &&
     Number.isInteger(o.issueNumber) &&
     typeof o.issueTitle === "string" &&
@@ -451,6 +481,77 @@ export function loadFactoryState(
   }
 }
 
+/**
+ * Write the ledger so an interrupted run cannot destroy it.
+ *
+ * This used to be one line — `writeFileSync(path, json)` — and that is a truncating write in place.
+ * `open(O_TRUNC)` empties the file first, so a crash, a `SIGKILL`, a full disk or a laptop lid
+ * between truncate and the last byte leaves valid-JSON-prefix garbage. The loader above then does
+ * the right thing and REFUSES it, which is where the real cost lands: every verb goes through
+ * `mustLoad`, so a half-written ledger takes out `status` too — the one command an operator would
+ * reach for to find out what happened. There is no backup (see `backupFactoryState`, added
+ * alongside this) and there was no documented recovery.
+ *
+ * Three steps, each load-bearing:
+ *
+ *  1. **Temp file in the SAME directory.** `rename` is only atomic within a filesystem; a temp in
+ *     `os.tmpdir()` can be on a different device and fails with `EXDEV`, or silently degrades to a
+ *     copy. The `.tmp-` prefix and the pid keep two concurrent writers from colliding on the name.
+ *  2. **`flush: true`.** This is the part that is easy to leave out and useless to omit. Node's
+ *     `writeFileSync` returns once the bytes reach the OS page cache, not the disk — the `flush`
+ *     option (fsync under the hood) is what makes them durable, and its default is `false`. Without
+ *     it the rename is atomic over data that a power loss can still take, so the ledger would
+ *     survive `SIGKILL` and not survive the wall socket.
+ *  3. **`renameSync` over the target.** POSIX requires this to be atomic: a reader sees either the
+ *     whole old file or the whole new one, never a mixture, and the destination name never
+ *     disappears. On Windows Node's rename overwrites but the platform documents no atomicity
+ *     guarantee, so this is strictly better there and not a promise there.
+ *
+ * The temp file is removed on a failed write so a crashed run does not leave litter beside the
+ * ledger, and the original is left exactly as it was.
+ */
 export function saveFactoryState(path: string, state: FactoryState): void {
-  writeFileSync(path, JSON.stringify(state, null, 2));
+  const json = JSON.stringify(state, null, 2);
+  const tmpPath = join(dirname(path), `.tmp-${basename(path)}.${process.pid}`);
+  try {
+    writeFileSync(tmpPath, json, { flush: true });
+    renameSync(tmpPath, path);
+  } catch (err) {
+    // Leave the target untouched and take the debris with us.
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      // Nothing useful to do: the original ledger is intact either way, and masking the real
+      // failure below with a cleanup failure would be the worse trade.
+    }
+    throw err;
+  }
+}
+
+/**
+ * Copy the ledger to `<path>.bak` before a mutating run, so there is something to restore FROM.
+ *
+ * `saveFactoryState` above makes a torn write nearly impossible; it does not help with the other
+ * ways a ledger is lost — a bad hand-edit, an `rm`, or a state the loader legitimately refuses
+ * because the invariants really are violated. The recovery procedure in
+ * `docs/08-operations.md` is written against this file.
+ *
+ * Deliberately ONE generation, not a rotation. Two files an operator must reason about under
+ * pressure is worse than one, and the durable record of record is `factory/seed.ts` plus the
+ * generated block in `docs/12-ledger.md` — this is a seatbelt for the working copy between
+ * promotions, not an archive. Absent ledger is not an error: there is nothing to back up on the
+ * first run.
+ */
+export function backupFactoryState(path: string): { ok: true; backup?: string } | { ok: false; error: string } {
+  if (!existsSync(path)) return { ok: true };
+  const backup = `${path}.bak`;
+  try {
+    // Same atomic dance: a backup that can itself be torn is not a backup.
+    const tmpPath = join(dirname(path), `.tmp-${basename(backup)}.${process.pid}`);
+    writeFileSync(tmpPath, readFileSync(path), { flush: true });
+    renameSync(tmpPath, backup);
+    return { ok: true, backup };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "backup failed" };
+  }
 }
