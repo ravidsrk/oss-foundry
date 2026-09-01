@@ -1,50 +1,39 @@
 ### T-18 — inherited alert on the 6-hour clock (G-07)
 
-.github/workflows/oss-tick.yml had no `if: failure()` step. Nothing in the
-repository told a human when the unattended 6-hour clock failed. A personal
-GitHub notification setting does not count: launch gate §6 requires a
-mechanism a stranger could inherit from the repo.
+.github/workflows/oss-tick.yml had no alert. Personal GitHub notification
+settings do not count: launch gate §6 requires a mechanism a stranger
+could inherit from the repo.
 
-Added step `Alert on clock failure`:
-  if: ${{ always() && !success() }}
-  uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-  (same SHA pin as the existing packet-issue step; issues: write already granted)
+The reporter is a SIBLING job, not a step inside `tick`:
 
-WHY NOT `failure()`. A job that hits `timeout-minutes: 20` is CANCELLED.
-`failure()` and `cancelled()` are distinct; `failure()` does not run on a
-cancelled job. A hung clock is the outage nobody would otherwise notice.
-`always()` makes GitHub still consider the step while tearing the job down;
-`!success()` drops the green path. TRADE: a human who cancels a run
-deliberately also gets an alert. For an unattended 6-hourly clock a
-spurious alert costs a glance; a missing one costs an unnoticed outage.
+  alert:
+    needs: tick
+    if: ${{ always() && needs.tick.result != 'success' }}
+    timeout-minutes: 5
+    permissions:
+      issues: write
 
-The alert path is two or three REST calls. A timeout teardown does not
-give the step a fresh timeout-minutes budget; a step-level timeout can
-only shrink that window and is omitted. Concurrency serialises RUNS, not
-steps — the alert still executes inside the cancelled run.
+WHY A SEPARATE JOB. timeout-minutes on `tick` kills that job outright.
+No remaining step in `tick` executes, whatever its `if:` says — not
+`failure()`, not `always() && !success()`. A hung clock is the outage
+nobody would otherwise notice. `needs.tick.result != 'success'` covers
+failure, cancelled and timed_out alike.
 
-Idempotency has two halves:
+TRADE: a human who cancels a run deliberately also gets an alert. A
+glance beats an unnoticed outage.
 
-  1. Search open issues labelled `clock-alert` and comment on a match;
-     else reopen a closed match and comment; else create. A naive
-     create-on-every-red-run would turn one outage into ~40 issues a week.
-  2. Workflow `concurrency: { group: oss-tick, cancel-in-progress: false }`.
-     Search-then-create is not atomic: a schedule overlapping a
-     workflow_dispatch can both pass the lookups and both create. The
-     group is a static name shared across events so they queue.
+No checkout: github-script uses the job token. Two or three REST calls.
+The run URL is in every body. Job-level `issues: write` is required —
+permissions do not inherit from `tick`.
 
-HONEST LIMIT. A scheduled run cannot be failed on demand from this
-repository, so this cannot prove a live red tick filed the issue. What
-was proven:
+Concurrency is workflow-level (`group: oss-tick`, cancel-in-progress:
+false) so whole runs serialise. A job-level group shared by tick and
+alert would deadlock (alert needs tick while tick held the group).
 
-  1. The comment-stripped workflow pins
-     `- name: Alert on clock failure` immediately followed by
-     `if: ${{ always() && !success() }}`.
-  2. The script body, driven locally against a fake octokit:
-       no existing issue  -> listForRepo open, listForRepo closed, create
-       open alert exists  -> createComment on it, create NOT called
-       closed alert exists -> update state=open, createComment, create NOT called
-  3. concurrency group is the literal `oss-tick`, cancel-in-progress: false.
+HONEST LIMITS.
+  1. A scheduled run cannot be failed on demand from this repository.
+  2. The alert job can itself fail (GitHub outage, revoked token) and
+     nothing watches the watcher.
 
 Test: "the 6-hour clock files one alert issue on failure and comments on a repeat"
 
@@ -52,9 +41,9 @@ $ node --experimental-strip-types --test --test-name-pattern 'files one alert is
   ✔ the 6-hour clock files one alert issue on failure and comments on a repeat
   tests 1 / pass 1 / fail 0
 
---- NEGATIVE CONTROL: if: ${{ failure() }} ---
+--- NEGATIVE CONTROL: drop the job if: (collapse toward a tick-local step) ---
 
   ✖ the 6-hour clock files one alert issue on failure and comments on a repeat
-  AssertionError: Alert on clock failure must use always() && !success() — failure() misses a timeout-cancelled hung clock, which is the outage nobody would otherwise notice
+  AssertionError: alert job must run when tick is not success (failure, cancelled, timed_out). A step if: inside tick does not survive timeout-minutes killing that job
   EXIT:1
   restored

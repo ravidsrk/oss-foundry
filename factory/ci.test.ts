@@ -58,6 +58,21 @@ function triggerBlock(text: string): string {
   return rest.slice(0, end === -1 ? rest.length : end).join("\n");
 }
 
+/**
+ * One job's body, so `needs: tick` on the alert job cannot be satisfied by a
+ * comment or a step name inside `tick`. Ends at the next sibling job or a
+ * top-level key. `{2}` is a literal two spaces: `\s` would also match a
+ * newline and over-read.
+ */
+function jobBlock(text: string, name: string): string {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => new RegExp(`^  ${name}:\\s*$`).test(l));
+  if (start === -1) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^  \S/.test(l) || /^[A-Za-z]/.test(l));
+  return rest.slice(0, end === -1 ? rest.length : end).join("\n");
+}
+
 test("some workflow runs the full test suite on the pull-request path", () => {
   const gates = workflows().filter((w) => /^\s*pull_request:\s*$/m.test(triggerBlock(w.text)));
   assert.ok(
@@ -440,35 +455,48 @@ test("the published frontguard packet records the roster oracle, not a noop red-
 /**
  * G-07 / T-18. Launch gate §6 requires an alert a stranger could inherit from
  * the repository. Personal GitHub notification settings do not count. The
- * 6-hour clock is the unattended path, so the failure step lives there.
+ * 6-hour clock is the unattended path, so the failure path lives there.
  *
  * HONEST LIMITATION. A scheduled run cannot be failed on demand from this
  * repository, so this cannot prove a live red tick filed the issue. What it
- * can prove: the step's `if:` is `always() && !success()` (not `failure()`,
- * which misses timeout-cancellation), the action is SHA-pinned, the
- * script body — driven against a fake octokit — creates on the first
- * failure, comments on a repeat, and reopens a closed alert rather than
- * opening a second issue, AND the workflow concurrency group serialises
- * schedule against dispatch with cancel-in-progress: false so two overlapping
- * red runs cannot both pass the lookup and both create.
+ * can prove: the alert is its OWN job (`needs: tick`, `always() &&
+ * needs.tick.result != 'success'`), not a step inside `tick` — a step in
+ * `tick` does not survive `timeout-minutes` killing that job, which is the
+ * hung-clock case. The script body, driven against a fake octokit, creates
+ * on the first failure, comments on a repeat, and reopens a closed alert
+ * rather than opening a second issue. The workflow concurrency group
+ * serialises whole runs so two overlapping red runs cannot both pass the
+ * lookup and both create.
  */
 test("the 6-hour clock files one alert issue on failure and comments on a repeat", async () => {
   const tick = workflows().find((w) => w.name === "oss-tick.yml");
   assert.ok(tick, "oss-tick.yml is missing");
+
+  const tickJob = jobBlock(tick.text, "tick");
+  const alertJob = jobBlock(tick.text, "alert");
+  assert.ok(
+    alertJob,
+    "oss-tick.yml has no `alert` job — collapsing the alert into `tick` means timeout-minutes kills the reporter with the hung clock",
+  );
   assert.match(
-    tick.text,
-    /- name: Alert on clock failure\s*\n\s+if:\s*\$\{\{\s*always\(\)\s*&&\s*!success\(\)\s*\}\}/,
-    "Alert on clock failure must use always() && !success() — failure() misses a timeout-cancelled hung clock, which is the outage nobody would otherwise notice",
+    alertJob,
+    /^\s*needs:\s*tick\s*$/m,
+    "alert job does not need tick — it cannot observe tick's result, including timed_out",
+  );
+  assert.match(
+    alertJob,
+    /if:\s*\$\{\{\s*always\(\)\s*&&\s*needs\.tick\.result\s*!=\s*'success'\s*\}\}/,
+    "alert job must run when tick is not success (failure, cancelled, timed_out). A step if: inside tick does not survive timeout-minutes killing that job",
+  );
+  assert.match(
+    alertJob,
+    /issues:\s*write/,
+    "alert job has no issues: write — job-level permissions do not inherit from tick",
   );
   assert.doesNotMatch(
-    tick.text,
-    /- name: Alert on clock failure\s*\n\s+if:\s*\$\{\{\s*failure\(\)\s*\}\}/,
-    "Alert on clock failure fell back to failure(), which does not run when timeout-minutes cancels the job",
-  );
-  assert.match(
-    tick.text,
-    /issues:\s*write/,
-    "oss-tick.yml dropped issues: write — the alert cannot file",
+    tickJob,
+    /clock-alert|oss-tick: clock failed/,
+    "alert script collapsed back into tick — a timeout-minutes kill would leave no alert",
   );
 
   // Search-then-create is not atomic. A schedule overlapping a dispatch can
@@ -476,7 +504,8 @@ test("the 6-hour clock files one alert issue on failure and comments on a repeat
   // retrying a failing clock. The concurrency group is the GitHub-native
   // lock. It must be a static name (not event_name, not run_id) so the two
   // triggers share it, and cancel-in-progress must be false so a red run is
-  // not cancelled before its alert step.
+  // not cancelled before its alert job. Workflow-level, not job-level: a
+  // group shared by tick and alert would deadlock (alert needs tick).
   const concurrency = /^concurrency:$([\s\S]*?)(?=^\S)/m.exec(tick.text)?.[1] ?? "";
   assert.match(
     concurrency,
@@ -499,12 +528,13 @@ test("the 6-hour clock files one alert issue on failure and comments on a repeat
   assert.match(script, /listForRepo/, "alert script never searches for an existing issue — it will file a duplicate every red tick");
   assert.match(script, /createComment/, "alert script never comments on an existing issue");
   assert.match(script, /issues\.create/, "alert script never files the first issue");
+  assert.match(script, /actions\/runs\/\$\{context\.runId\}/, "alert body dropped the run URL — that is the most useful line");
 
   const context = {
     serverUrl: "https://github.com",
     repo: { owner: "ravidsrk", repo: "oss-foundry" },
     runId: 12345,
-    job: "tick",
+    job: "alert",
     workflow: "oss-tick",
   };
   const runUrl = "https://github.com/ravidsrk/oss-foundry/actions/runs/12345";
@@ -520,7 +550,7 @@ test("the 6-hour clock files one alert issue on failure and comments on a repeat
   assert.ok(created, "first failure did not create an issue");
   assert.equal(created.args.title, "oss-tick: clock failed");
   assert.match(String(created.args.body), new RegExp(runUrl.replaceAll("/", "\\/")));
-  assert.match(String(created.args.body), /Job: tick/);
+  assert.match(String(created.args.body), /Tick result:/);
   assert.deepEqual(created.args.labels, ["clock-alert"]);
 
   const existing = mockGithubIssues([

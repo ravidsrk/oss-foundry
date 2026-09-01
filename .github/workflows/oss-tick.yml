@@ -10,16 +10,20 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Serialise schedule and workflow_dispatch. Search-then-create on the
-  # alert step is not atomic: two overlapping red runs can both see no
-  # open clock-alert and both create, which is exactly a 6-hourly clock
-  # plus a manual retry of a failing one. One group, shared across
-  # events, so they queue rather than race. cancel-in-progress is FALSE:
-  # GitHub would otherwise cancel the in-flight red run before its alert
-  # step, and the notification this group exists to keep unique would be
-  # the thing that got dropped. Pending runs still collapse to the newest
-  # (GitHub's default for a concurrency group); a tick that never started
-  # has nothing to alert about.
+  # Serialise whole runs (tick then its sibling alert). Search-then-create
+  # on the alert job is not atomic: two overlapping red runs can both see
+  # no open clock-alert and both create, which is exactly a 6-hourly clock
+  # plus a manual retry of a failing one. One group, shared across events,
+  # so they queue rather than race. cancel-in-progress is FALSE: GitHub
+  # would otherwise cancel the in-flight red run before its alert job, and
+  # the notification this group exists to keep unique would be the thing
+  # that got dropped. Pending runs still collapse to the newest (GitHub's
+  # default); a tick that never started has nothing to alert about.
+  #
+  # The group is workflow-level on purpose. Do NOT add a job-level group
+  # shared by `tick` and `alert`: alert needs tick, so it would wait on
+  # tick while tick held the group, and the run would hang until the
+  # workflow timeout. Jobs in the same run do not compete for this slot.
   group: oss-tick
   cancel-in-progress: false
 
@@ -81,44 +85,48 @@ jobs:
               body,
               labels: ["packet"],
             });
-      # Launch gate §6: an inherited alert, not a personal GitHub notification
-      # setting. Personal watches die with the operator; a stranger who forks
-      # this repository must still hear that the unattended 6-hour clock failed.
-      #
-      # WHY IDEMPOTENT. A naive `issues.create` on every red run turns one
-      # outage into ~40 issues a week (6-hourly). Search for an existing open
-      # `clock-alert` issue and comment on it; reopen a closed one; create only
-      # when none exists. That lookup is not atomic — two overlapping red
-      # runs can both pass it — so the workflow concurrency group (above)
-      # serialises schedule and dispatch. Together they are the one-alert
-      # guarantee; the lookup alone is not. The run URL and the failed job
-      # are in every body so a later comment is still actionable.
-      #
-      # HONEST LIMIT. A scheduled run cannot be failed on demand from this
-      # repository, so the suite drives the script body against a fake octokit
-      # (factory/ci.test.ts) rather than claiming a live red tick created the
-      # issue.
-      #
-      # WHY `always() && !success()`, NOT `failure()`. A job that hits
-      # `timeout-minutes: 20` is CANCELLED, and `failure()` and `cancelled()`
-      # are distinct statuses — `failure()` does not run on a cancelled job.
-      # A hung clock is precisely the outage nobody would otherwise notice,
-      # so the condition must cover cancellation. `always()` is what makes
-      # GitHub still consider the step while tearing the job down;
-      # `!success()` drops the green path. TRADE: a human who cancels a run
-      # deliberately also gets an alert. For an unattended 6-hourly clock a
-      # spurious alert costs a glance; a missing one costs an unnoticed
-      # outage. Do not "simplify" this back to `failure()` — that is how
-      # the hung-clock case goes silent.
-      #
-      # The alert path is two or three REST calls on purpose. A timeout
-      # teardown does not give the step a fresh timeout-minutes budget, so
-      # a long sequence may not finish; a step-level timeout-minutes can
-      # only shrink that window and is omitted. Concurrency serialises
-      # RUNS, not steps: this step still executes inside the cancelled run
-      # and is not queued behind another run's alert.
+
+  # Launch gate §6: an inherited alert, not a personal GitHub notification
+  # setting. Personal watches die with the operator; a stranger who forks
+  # this repository must still hear that the unattended 6-hour clock failed.
+  #
+  # WHY A SEPARATE JOB. timeout-minutes on `tick` kills that job outright.
+  # No remaining step in `tick` executes, whatever its `if:` says — not
+  # `failure()`, not `always() && !success()`. A hung clock is the outage
+  # nobody would otherwise notice, so the reporter cannot live in the job
+  # whose termination it reports. `needs: tick` plus
+  # `always() && needs.tick.result != 'success'` covers failure, cancelled
+  # and timed_out alike. TRADE: a human who cancels a run deliberately
+  # also gets an alert. A glance beats an unnoticed outage.
+  #
+  # WHY IDEMPOTENT. A naive `issues.create` on every red run turns one
+  # outage into ~40 issues a week (6-hourly). Search for an existing open
+  # `clock-alert` issue and comment on it; reopen a closed one; create only
+  # when none exists. That lookup is not atomic; the workflow concurrency
+  # group serialises whole runs (tick then this job). Together they are
+  # the one-alert guarantee; the lookup alone is not. The run URL is in
+  # every body so a later comment is still actionable.
+  #
+  # No checkout: github-script talks to the API with the job token. A hung
+  # clone must not eat the 5-minute budget. The path is two or three REST
+  # calls. Job-level `issues: write` is required — permissions do not
+  # inherit from `tick`.
+  #
+  # HONEST LIMIT. A scheduled run cannot be failed on demand from this
+  # repository, so the suite drives the script body against a fake octokit
+  # (factory/ci.test.ts) rather than claiming a live red tick created the
+  # issue. Separately: this job can itself fail (GitHub outage, revoked
+  # token) and nothing watches the watcher. Naming that is better than
+  # implying total coverage.
+  alert:
+    needs: tick
+    if: ${{ always() && needs.tick.result != 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
       - name: Alert on clock failure
-        if: ${{ always() && !success() }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -126,9 +134,8 @@ jobs:
             const label = "clock-alert";
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const what = [
-              "The unattended 6-hour clock failed.",
-              `Job: ${context.job}`,
-              `Workflow: ${context.workflow}`,
+              "The unattended 6-hour clock did not succeed.",
+              "Tick result: ${{ needs.tick.result }}",
               `Run: ${runUrl}`,
               "",
               "This issue is the inherited alert (launch gate §6). A stranger who clones the repo gets it without changing GitHub notification settings.",
