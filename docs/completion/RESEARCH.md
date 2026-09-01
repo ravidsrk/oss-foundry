@@ -51,7 +51,7 @@ Issue #37 is **CLOSED** (landed by other means during the 2026-08-29 sweep), so 
 - `base ratchet: nothing the baseline denies reaches ALLOW unless it is listed`
 - `every corpus row keeps its verdict across a hard wrap`
 
-These are real invariants of the class the current suite still lacks. **But** `factory/policy.ts` was substantially rewritten after that branch was cut (the CLA/DCO work, PR #91), so the tests will not apply unmodified. This is a genuine salvage-or-delete decision with content on both sides → gap **G-16**.
+These are real invariants of the class the current suite still lacks. **But** `factory/policy.ts` was substantially rewritten after that branch was cut (the CLA/DCO work, PR #91), so the tests will not apply unmodified. This is a genuine salvage-or-delete decision with content on both sides → gap **G-29**.
 
 The other 15 local branches are merged into `main` and are pure debris; 9 stale worktrees sit under `~/projects/oss-foundry-*` (left untouched per `A-07`).
 
@@ -130,7 +130,7 @@ That sentence is **still the repo description today, unchanged**. The delta over
 
 **EFFECT: confirms_gap, and confirms one design decision is better than the baseline.**
 - **Better than required:** the product's halt-and-never-retry on a secondary limit is *more* conservative than GitHub's own guidance, and "cannot be checked in advance" is exactly why a durable halt is the right shape. `docs/SPEC.md:61` is vindicated, not merely defensible. No change.
-- **Confirms the gap:** the **primary** limit is neither detected nor documented. The 5,000/hr and 60/hr ceilings appear nowhere in the repo, so nobody can compute headroom against the measured 19-requests-per-tick spend — and an unauthenticated operator silently gets 60/hr, failing on the fourth tick of an hour with an unexplained 403. → **G-09**, **G-10**.
+- **Confirms the gap:** the **primary** limit is neither detected nor documented. The 5,000/hr and 60/hr ceilings appear nowhere in the repo, so nobody can compute headroom against the measured 19-requests-per-tick spend — and an unauthenticated operator silently gets 60/hr, failing on the fourth tick of an hour with an unexplained 403. → **G-10**.
 
 ### R-06 — Atomic and durable file replacement
 
@@ -157,7 +157,7 @@ tmp in same dir → writeFileSync(tmp, json, { flush: true }) → renameSync(tmp
 | F-R-01 | R-06 | **G-01** — ledger write is neither atomic nor durable; exact fix known |
 | F-R-02 | R-04 | **G-04** — no `X-GitHub-Api-Version` pin; `merge_commit_sha` removal will silently kill revert detection |
 | F-R-03 | R-02 + R-03 | **G-06** — `engines` floor is wrong *and* unenforceable; CI pins the RC line |
-| F-R-04 | R-05 | **G-09/G-10** — primary rate limit undetected and undocumented |
+| F-R-04 | R-05 | **G-10** — primary rate limit undetected and undocumented |
 
 ### Definition inputs — what "complete" requires in this domain
 
