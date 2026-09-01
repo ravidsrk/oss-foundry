@@ -1,0 +1,49 @@
+### T-18 — inherited alert on the 6-hour clock (G-07)
+
+.github/workflows/oss-tick.yml had no alert. Personal GitHub notification
+settings do not count: launch gate §6 requires a mechanism a stranger
+could inherit from the repo.
+
+The reporter is a SIBLING job, not a step inside `tick`:
+
+  alert:
+    needs: tick
+    if: ${{ always() && needs.tick.result != 'success' }}
+    timeout-minutes: 5
+    permissions:
+      issues: write
+
+WHY A SEPARATE JOB. timeout-minutes on `tick` kills that job outright.
+No remaining step in `tick` executes, whatever its `if:` says — not
+`failure()`, not `always() && !success()`. A hung clock is the outage
+nobody would otherwise notice. `needs.tick.result != 'success'` covers
+failure, cancelled and timed_out alike.
+
+TRADE: a human who cancels a run deliberately also gets an alert. A
+glance beats an unnoticed outage.
+
+No checkout: github-script uses the job token. Two or three REST calls.
+The run URL is in every body. Job-level `issues: write` is required —
+permissions do not inherit from `tick`.
+
+Concurrency is workflow-level (`group: oss-tick`, cancel-in-progress:
+false) so whole runs serialise. A job-level group shared by tick and
+alert would deadlock (alert needs tick while tick held the group).
+
+HONEST LIMITS.
+  1. A scheduled run cannot be failed on demand from this repository.
+  2. The alert job can itself fail (GitHub outage, revoked token) and
+     nothing watches the watcher.
+
+Test: "the 6-hour clock files one alert issue on failure and comments on a repeat"
+
+$ node --experimental-strip-types --test --test-name-pattern 'files one alert issue' factory/ci.test.ts
+  ✔ the 6-hour clock files one alert issue on failure and comments on a repeat
+  tests 1 / pass 1 / fail 0
+
+--- NEGATIVE CONTROL: drop the job if: (collapse toward a tick-local step) ---
+
+  ✖ the 6-hour clock files one alert issue on failure and comments on a repeat
+  AssertionError: alert job must run when tick is not success (failure, cancelled, timed_out). A step if: inside tick does not survive timeout-minutes killing that job
+  EXIT:1
+  restored

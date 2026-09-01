@@ -3,6 +3,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { repoById } from "./allowlist.ts";
+import { isNoopTestCommand } from "./load-allowlist.ts";
+import { seedState } from "./seed.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const WORKFLOW_DIR = join(REPO_ROOT, ".github/workflows");
@@ -52,6 +55,21 @@ function triggerBlock(text: string): string {
   if (start === -1) return "";
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((l) => /^[A-Za-z]/.test(l));
+  return rest.slice(0, end === -1 ? rest.length : end).join("\n");
+}
+
+/**
+ * One job's body, so `needs: tick` on the alert job cannot be satisfied by a
+ * comment or a step name inside `tick`. Ends at the next sibling job or a
+ * top-level key. `{2}` is a literal two spaces: `\s` would also match a
+ * newline and over-read.
+ */
+function jobBlock(text: string, name: string): string {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => new RegExp(`^  ${name}:\\s*$`).test(l));
+  if (start === -1) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^  \S/.test(l) || /^[A-Za-z]/.test(l));
   return rest.slice(0, end === -1 ? rest.length : end).join("\n");
 }
 
@@ -407,3 +425,244 @@ test("CI type checks, with a pinned checker, and the manifest stays dependency-f
     "package.json declares devDependencies — the type checker is meant to be installed transiently by the typecheck script, so a clone still needs no install to run `npm test`",
   );
 });
+
+/**
+ * G-13 / T-13. The published frontguard packet recorded `testCommand: "true"`
+ * with `negativeControl: "red-on-revert"`. A noop cannot go red on revert
+ * (issue #112), so that record asserted a proof it cannot have performed, and
+ * it contradicted `allowlist.yaml`'s `npm test` for the same repo. Lives here
+ * because seed.ts has no dedicated test file and this file already guards
+ * committed artifacts that would otherwise have no home.
+ */
+test("the published frontguard packet records the roster oracle, not a noop red-on-revert", () => {
+  const packet = seedState().packets.find((p) => p.repoId === "ravidsrk/frontguard");
+  assert.ok(packet, "frontguard packet is missing from the seed");
+  assert.ok(packet.evidence, "frontguard packet is missing evidence");
+  const repo = repoById("ravidsrk/frontguard");
+  assert.ok(repo, "frontguard is missing from the roster");
+  assert.equal(
+    packet.evidence.testCommand,
+    repo.testCommand,
+    "published oracle must match the roster's declared oracle for the same repo (G-13 / F-1-06)",
+  );
+  assert.equal(
+    isNoopTestCommand(packet.evidence.testCommand) && packet.evidence.negativeControl === "red-on-revert",
+    false,
+    "a noop testCommand cannot claim red-on-revert — that is a negative control that controls for nothing (G-13 / F-1-05, issue #112)",
+  );
+});
+
+/**
+ * G-07 / T-18. Launch gate §6 requires an alert a stranger could inherit from
+ * the repository. Personal GitHub notification settings do not count. The
+ * 6-hour clock is the unattended path, so the failure path lives there.
+ *
+ * HONEST LIMITATION. A scheduled run cannot be failed on demand from this
+ * repository, so this cannot prove a live red tick filed the issue. What it
+ * can prove: the alert is its OWN job (`needs: tick`, `always() &&
+ * needs.tick.result != 'success'`), not a step inside `tick` — a step in
+ * `tick` does not survive `timeout-minutes` killing that job, which is the
+ * hung-clock case. The script body, driven against a fake octokit, creates
+ * on the first failure, comments on a repeat, and reopens a closed alert
+ * rather than opening a second issue. The workflow concurrency group
+ * serialises whole runs so two overlapping red runs cannot both pass the
+ * lookup and both create.
+ */
+test("the 6-hour clock files one alert issue on failure and comments on a repeat", async () => {
+  const tick = workflows().find((w) => w.name === "oss-tick.yml");
+  assert.ok(tick, "oss-tick.yml is missing");
+
+  const tickJob = jobBlock(tick.text, "tick");
+  const alertJob = jobBlock(tick.text, "alert");
+  assert.ok(
+    alertJob,
+    "oss-tick.yml has no `alert` job — collapsing the alert into `tick` means timeout-minutes kills the reporter with the hung clock",
+  );
+  assert.match(
+    alertJob,
+    /^\s*needs:\s*tick\s*$/m,
+    "alert job does not need tick — it cannot observe tick's result, including timed_out",
+  );
+  assert.match(
+    alertJob,
+    /if:\s*\$\{\{\s*always\(\)\s*&&\s*needs\.tick\.result\s*!=\s*'success'\s*\}\}/,
+    "alert job must run when tick is not success (failure, cancelled, timed_out). A step if: inside tick does not survive timeout-minutes killing that job",
+  );
+  assert.match(
+    alertJob,
+    /issues:\s*write/,
+    "alert job has no issues: write — job-level permissions do not inherit from tick",
+  );
+  assert.doesNotMatch(
+    tickJob,
+    /clock-alert|oss-tick: clock failed/,
+    "alert script collapsed back into tick — a timeout-minutes kill would leave no alert",
+  );
+
+  // Search-then-create is not atomic. A schedule overlapping a dispatch can
+  // both pass the lookups and both create — the normal shape of someone
+  // retrying a failing clock. The concurrency group is the GitHub-native
+  // lock. It must be a static name (not event_name, not run_id) so the two
+  // triggers share it, and cancel-in-progress must be false so a red run is
+  // not cancelled before its alert job. Workflow-level, not job-level: a
+  // group shared by tick and alert would deadlock (alert needs tick).
+  const concurrency = /^concurrency:$([\s\S]*?)(?=^\S)/m.exec(tick.text)?.[1] ?? "";
+  assert.match(
+    concurrency,
+    /^\s*group:\s*oss-tick\s*$/m,
+    "oss-tick.yml has no shared concurrency group — overlapping schedule+dispatch can each create an alert issue",
+  );
+  assert.doesNotMatch(
+    concurrency,
+    /group:.*\$\{\{/,
+    "oss-tick concurrency group interpolates, so overlapping runs do not share it and the race remains",
+  );
+  assert.match(
+    concurrency,
+    /cancel-in-progress:\s*false\b/,
+    "oss-tick cancel-in-progress is not false — a queued dispatch would cancel a red scheduled run and skip the alert",
+  );
+
+  const raw = readFileSync(join(WORKFLOW_DIR, "oss-tick.yml"), "utf8");
+  const script = extractClockAlertScript(raw);
+  assert.match(script, /listForRepo/, "alert script never searches for an existing issue — it will file a duplicate every red tick");
+  assert.match(script, /createComment/, "alert script never comments on an existing issue");
+  assert.match(script, /issues\.create/, "alert script never files the first issue");
+  assert.match(script, /actions\/runs\/\$\{context\.runId\}/, "alert body dropped the run URL — that is the most useful line");
+
+  const context = {
+    serverUrl: "https://github.com",
+    repo: { owner: "ravidsrk", repo: "oss-foundry" },
+    runId: 12345,
+    job: "alert",
+    workflow: "oss-tick",
+  };
+  const runUrl = "https://github.com/ravidsrk/oss-foundry/actions/runs/12345";
+
+  const first = mockGithubIssues([]);
+  await runClockAlertScript(script, first, context);
+  assert.deepEqual(
+    first.calls.map((c) => c.method),
+    ["listForRepo", "listForRepo", "create"],
+    `first failure must search open, then closed, then create; got ${first.calls.map((c) => c.method).join(",")}`,
+  );
+  const created = first.calls.find((c) => c.method === "create");
+  assert.ok(created, "first failure did not create an issue");
+  assert.equal(created.args.title, "oss-tick: clock failed");
+  assert.match(String(created.args.body), new RegExp(runUrl.replaceAll("/", "\\/")));
+  assert.match(String(created.args.body), /Tick result:/);
+  assert.deepEqual(created.args.labels, ["clock-alert"]);
+
+  const existing = mockGithubIssues([
+    {
+      number: 77,
+      title: "oss-tick: clock failed",
+      html_url: "https://github.com/ravidsrk/oss-foundry/issues/77",
+      state: "open",
+    },
+  ]);
+  await runClockAlertScript(script, existing, context);
+  assert.equal(
+    existing.calls.some((c) => c.method === "create"),
+    false,
+    "a repeat failure must not open a second issue",
+  );
+  const comment = existing.calls.find((c) => c.method === "createComment");
+  assert.ok(comment, "a repeat failure must comment on the open alert");
+  assert.equal(comment.args.issue_number, 77);
+  assert.match(String(comment.args.body), new RegExp(runUrl.replaceAll("/", "\\/")));
+
+  const closed = mockGithubIssues([
+    {
+      number: 77,
+      title: "oss-tick: clock failed",
+      html_url: "https://github.com/ravidsrk/oss-foundry/issues/77",
+      state: "closed",
+    },
+  ]);
+  await runClockAlertScript(script, closed, context);
+  assert.equal(
+    closed.calls.some((c) => c.method === "create"),
+    false,
+    "a later failure must reopen the closed alert, not file a second issue",
+  );
+  const update = closed.calls.find((c) => c.method === "update");
+  assert.ok(update, "closed alert was not reopened");
+  assert.equal(update.args.issue_number, 77);
+  assert.equal(update.args.state, "open");
+  assert.ok(
+    closed.calls.some((c) => c.method === "createComment" && c.args.issue_number === 77),
+    "reopen must comment with the new run URL",
+  );
+});
+
+type ClockIssue = { number: number; title: string; html_url: string; state: "open" | "closed" };
+type ClockCall = { method: string; args: Record<string, unknown> };
+
+function mockGithubIssues(issues: ClockIssue[]): { calls: ClockCall[]; rest: { issues: Record<string, (args: Record<string, unknown>) => Promise<unknown>> } } {
+  const calls: ClockCall[] = [];
+  return {
+    calls,
+    rest: {
+      issues: {
+        listForRepo: async (args) => {
+          calls.push({ method: "listForRepo", args });
+          const state = args.state ?? "open";
+          return { data: issues.filter((i) => i.state === state) };
+        },
+        create: async (args) => {
+          calls.push({ method: "create", args });
+          return { data: { number: 99, html_url: "https://github.com/ravidsrk/oss-foundry/issues/99" } };
+        },
+        createComment: async (args) => {
+          calls.push({ method: "createComment", args });
+          return { data: {} };
+        },
+        update: async (args) => {
+          calls.push({ method: "update", args });
+          return { data: {} };
+        },
+      },
+    },
+  };
+}
+
+/** The JS body of the `Alert on clock failure` github-script step. */
+function extractClockAlertScript(raw: string): string {
+  const lines = raw.split("\n");
+  const nameIdx = lines.findIndex((l) => /^\s*- name: Alert on clock failure\s*$/.test(l));
+  assert.notEqual(nameIdx, -1, "oss-tick.yml has no step named `Alert on clock failure`");
+  let scriptIdx = -1;
+  for (let i = nameIdx + 1; i < lines.length; i += 1) {
+    if (/^\s*- name:/.test(lines[i])) break;
+    if (/^\s*script:\s*\|\s*$/.test(lines[i])) {
+      scriptIdx = i;
+      break;
+    }
+  }
+  assert.notEqual(scriptIdx, -1, "Alert on clock failure step has no `script: |` block");
+  const headerIndent = lines[scriptIdx].match(/^ */)?.[0].length ?? 0;
+  const collected: string[] = [];
+  for (let i = scriptIdx + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim() === "") {
+      collected.push(line);
+      continue;
+    }
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    if (indent <= headerIndent) break;
+    collected.push(line);
+  }
+  const first = collected.find((l) => l.trim() !== "");
+  const strip = first ? (first.match(/^ */)?.[0].length ?? 0) : headerIndent + 2;
+  return collected.map((l) => l.slice(strip)).join("\n");
+}
+
+async function runClockAlertScript(
+  script: string,
+  github: unknown,
+  context: unknown,
+): Promise<void> {
+  const run = new Function("github", "context", `return (async () => {\n${script}\n})();`);
+  await run(github, context);
+}

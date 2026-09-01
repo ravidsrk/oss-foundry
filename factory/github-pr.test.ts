@@ -28,6 +28,7 @@ import {
   resetUnauthenticatedGithubWarning,
 } from "./github-pr.ts";
 import { REVERT_WINDOW_DAYS } from "./scorecard.ts";
+import { scoutGithub } from "./github-scout.ts";
 
 const BASE = "251fe899c5bd843a7dad71d908c0af3bfcea79e1";
 const HEAD = "d91fe2f6725163fab8f9dd42e5c2b0c0c9f0f40d";
@@ -1080,13 +1081,123 @@ test("#113: a truthy invalid FOUNDRY_GITHUB_TIMEOUT_MS falls back to the shipped
 });
 
 /**
+ * G-21 / T-14. A thrown fetch used to surface as the bare undici string
+ * `fetch failed` — no repo, no operation, no remedy, indistinguishable from a
+ * product defect. HTTP-status failures already name the call (`listing pulls
+ * on ${repoId}`); transport failures must too. Asserted at every call site
+ * that can throw, not one: covering a single helper and leaving the rest on
+ * the old catch is the original hole. `fetchIssueClosingRef` and `fetchRepoFile`
+ * swallow transport errors by contract (best-effort / optional reads) and are
+ * not in this list.
+ */
+test("a thrown transport error names the repo and the operation", async () => {
+  const boom: typeof fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+
+  const sites: {
+    name: string;
+    repo: string;
+    operation: RegExp;
+    run: () => Promise<{ ok: boolean; error?: string }>;
+  }[] = [
+    {
+      name: "listOpenPulls",
+      repo: "ravidsrk/orca-fleet",
+      operation: /listing pulls/,
+      run: () => listOpenPulls("ravidsrk/orca-fleet", boom),
+    },
+    {
+      name: "listCrossReferencingOpenPulls",
+      repo: "ravidsrk/orca-fleet",
+      operation: /reading timeline/,
+      run: () => listCrossReferencingOpenPulls("ravidsrk/orca-fleet", 71, boom),
+    },
+    {
+      name: "fetchIssueState",
+      repo: "ravidsrk/orca-fleet",
+      operation: /reading ravidsrk\/orca-fleet#71/,
+      run: () => fetchIssueState("ravidsrk/orca-fleet", 71, boom),
+    },
+    {
+      name: "compareCommits",
+      repo: "ravidsrk/orca-fleet",
+      operation: /comparing /,
+      run: () => compareCommits("ravidsrk/orca-fleet", BASE, HEAD, boom),
+    },
+    {
+      name: "fetchHumanReview",
+      repo: "ravidsrk/orca-fleet",
+      operation: /reading reviews/,
+      run: () => fetchHumanReview("ravidsrk/orca-fleet", 70, boom),
+    },
+    {
+      name: "listCommitsSince",
+      repo: "ravidsrk/orca-fleet",
+      operation: /listing commits/,
+      run: () => listCommitsSince("ravidsrk/orca-fleet", { since: "2026-08-27T07:04:52Z" }, boom),
+    },
+    {
+      name: "revertCheck",
+      repo: "ravidsrk/orca-fleet",
+      operation: /listing commits/,
+      run: () =>
+        revertCheck(
+          "ravidsrk/orca-fleet",
+          { mergeCommitSha: HEAD, mergedAt: "2026-08-27T07:04:52Z", baseRef: "main" },
+          boom,
+        ),
+    },
+    {
+      name: "syncGithubPr",
+      repo: "ravidsrk/orca-fleet",
+      operation: /syncing ravidsrk\/orca-fleet#70/,
+      run: () => syncGithubPr({ url: "https://github.com/ravidsrk/orca-fleet/pull/70" }, boom),
+    },
+    {
+      name: "createDraftPull",
+      repo: "ColeMurray/background-agents",
+      operation: /creating the draft/,
+      run: () =>
+        createDraftPull(
+          "ColeMurray/background-agents",
+          { title: "t", head: "ravidsrk:b", body: "Fixes #1" },
+          boom,
+          { FOUNDRY_PAT: "ghp_x" },
+        ),
+    },
+  ];
+
+  for (const site of sites) {
+    const result = await site.run();
+    assert.equal(result.ok, false, `${site.name} must fail closed on a thrown fetch`);
+    const error = result.error ?? "";
+    assert.notEqual(
+      error,
+      "fetch failed",
+      `${site.name} surfaced the bare transport string with no repo and no operation`,
+    );
+    assert.match(error, /fetch failed/, `${site.name} must still carry the underlying transport detail: ${error}`);
+    assert.match(
+      error,
+      new RegExp(site.repo.replace("/", "\\/")),
+      `${site.name} must name the repo; got ${error}`,
+    );
+    assert.match(error, site.operation, `${site.name} must name the operation; got ${error}`);
+  }
+});
+
+
+/**
  * G-04 / T-09. The pin is the whole fix: without `X-GitHub-Api-Version` every request inherits
  * GitHub's rolling default, and version `2026-03-10` removes `merge_commit_sha` — the field
  * `syncGithubPr` copies onto `PrMeta.mergeCommitSha` and the sole input to `classifyRevert`.
  * A test that only inspects `githubApiHeaders()` would miss `createDraftPull`, which builds
- * its headers inline, so this enumerates every shipped GitHub call site and asserts the header
- * on the request that actually left. The version string is written here, not read out of the
- * constant, for the same reason the page-cap test writes `10`.
+ * its headers inline, and would miss `scoutGithub`, which uses the global `fetch` rather
+ * than the injected seam. This enumerates every shipped GitHub call site — including the
+ * unwired scout — and asserts the header on the request that actually left. The version
+ * string is written here, not read out of the constant, for the same reason the page-cap
+ * test writes `10`.
  */
 test("every GitHub fetch carries X-GitHub-Api-Version 2022-11-28", async () => {
   assert.equal(GITHUB_API_VERSION, "2022-11-28");
@@ -1142,11 +1253,27 @@ test("every GitHub fetch carries X-GitHub-Api-Version 2022-11-28", async () => {
           { FOUNDRY_PAT: "ghp_x" },
         ),
     },
+    {
+      name: "scoutGithub",
+      run: async (f) => {
+        const prev = globalThis.fetch;
+        globalThis.fetch = f;
+        try {
+          return await scoutGithub({ maxPerRepo: 1 });
+        } finally {
+          globalThis.fetch = prev;
+        }
+      },
+    },
   ];
   assert.equal(
     sites.length,
-    11,
+    12,
     "the shipped GitHub call-site count; a new site must be added here so the pin cannot go missing on it",
+  );
+  assert.ok(
+    sites.some((s) => s.name === "scoutGithub"),
+    "Call-site enumeration omits scout — scoutGithub sends through githubApiHeaders and could lose the pin without redding this test",
   );
 
   for (const site of sites) await site.run(tracking(site.name));
