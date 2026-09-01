@@ -1,0 +1,44 @@
+### T-14 — transport failures name the repo and the operation (G-21)
+
+factory/github-pr.ts used to catch a thrown fetch as
+
+  err instanceof Error ? err.message : "fetch failed"
+
+so an offline host, a DNS failure or a dropped connection reached the
+operator as the bare undici string `fetch failed` — no repo, no operation,
+no remedy, indistinguishable from a product defect. HTTP-status failures
+already carried `what` (`listing pulls on ${repoId}`); transport failures
+now go through githubTransportError(err, what) at every call site that
+can throw:
+
+  listOpenPulls              listing pulls on ${repoId}
+  listCrossReferencingOpenPulls  reading timeline for ${repoId}#${n}
+  fetchIssueState            reading ${repoId}#${n}
+  compareCommits             comparing ${base}...${head} on ${repoId}
+  fetchHumanReview           reading reviews on ${repoId}#${n}
+  listCommitsSince           listing commits on ${repoId}
+  syncGithubPr               syncing ${owner}/${repo}#${n}
+  createDraftPull            creating the draft on ${repoId}
+
+revertCheck forwards listCommitsSince's error. fetchIssueClosingRef and
+fetchRepoFile swallow transport errors by contract (best-effort / optional
+reads) and are not in this list.
+
+Tested through the injected fetchImpl seam by making it throw TypeError("fetch failed").
+Cannot take the real network down in CI; the seam is the same catch path.
+
+Test: "a thrown transport error names the repo and the operation"
+
+$ node --experimental-strip-types --test --test-name-pattern 'thrown transport error' factory/github-pr.test.ts
+  ✔ a thrown transport error names the repo and the operation
+  tests 1 / pass 1 / fail 0
+
+--- NEGATIVE CONTROL: githubTransportError returns the bare detail, ignoring `what` ---
+
+  ✖ a thrown transport error names the repo and the operation
+  AssertionError [ERR_ASSERTION]: listOpenPulls surfaced the bare transport string with no repo and no operation
+    actual: 'fetch failed'
+    expected: 'fetch failed'
+    operator: 'notStrictEqual'
+  EXIT:1
+  restored

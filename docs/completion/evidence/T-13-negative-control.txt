@@ -1,0 +1,39 @@
+### T-13 — published frontguard packet records a real oracle (G-13)
+
+The committed seed at factory/seed.ts recorded
+
+  testCommand: "true"
+  negativeControl: "red-on-revert"
+
+on pkt_ravidsrk_frontguard_195. A noop cannot go red on revert (issue #112),
+so that pair asserted a proof it cannot have performed. Compounding it,
+allowlist.yaml:42 has always declared `npm test` for ravidsrk/frontguard —
+the published oracle did not match the roster's declared oracle for the
+same repo.
+
+Which correction is honest: the recorded command was wrong, not the
+control. `no-suite` is the exemption for repos that genuinely have none
+(awesome-copilot, e2b-cookbook — they also cannot name firstIssues, which
+this packet did). Sibling Wave 0 evidence already records the roster
+oracle. The packet now records `testCommand: "npm test"` with
+`negativeControl: "red-on-revert"`.
+
+docs/12-ledger.md GENERATED block: regenerated via
+`node --experimental-strip-types factory/cli.ts ledger`. Evidence fields
+are not in that table, so the block was already byte-identical. Confirmed
+by `the committed ledger GENERATED block regenerates byte-identical from
+this tree`.
+
+Test: "the published frontguard packet records the roster oracle, not a noop red-on-revert"
+
+$ node --experimental-strip-types --test --test-name-pattern 'published frontguard packet' factory/ci.test.ts
+  ✔ the published frontguard packet records the roster oracle, not a noop red-on-revert
+  tests 1 / pass 1 / fail 0
+
+--- NEGATIVE CONTROL: restore testCommand: "true" ---
+
+  ✖ the published frontguard packet records the roster oracle, not a noop red-on-revert
+  AssertionError [ERR_ASSERTION]: published oracle must match the roster's declared oracle for the same repo (G-13 / F-1-06)
+  'true' !== 'npm test'
+  EXIT:1
+  restored

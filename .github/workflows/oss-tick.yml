@@ -67,3 +67,77 @@ jobs:
               body,
               labels: ["packet"],
             });
+      # Launch gate §6: an inherited alert, not a personal GitHub notification
+      # setting. Personal watches die with the operator; a stranger who forks
+      # this repository must still hear that the unattended 6-hour clock failed.
+      #
+      # WHY IDEMPOTENT. A naive `issues.create` on every red run turns one
+      # outage into ~40 issues a week (6-hourly). Search for an existing open
+      # `clock-alert` issue and comment on it; reopen a closed one; create only
+      # when none exists. The run URL and the failed job are in every body so
+      # a later comment is still actionable.
+      #
+      # HONEST LIMIT. A scheduled run cannot be failed on demand from this
+      # repository, so the suite drives the script body against a fake octokit
+      # (factory/ci.test.ts) rather than claiming a live red tick created the
+      # issue.
+      - name: Alert on clock failure
+        if: ${{ failure() }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = "oss-tick: clock failed";
+            const label = "clock-alert";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const what = [
+              "The unattended 6-hour clock failed.",
+              `Job: ${context.job}`,
+              `Workflow: ${context.workflow}`,
+              `Run: ${runUrl}`,
+              "",
+              "This issue is the inherited alert (launch gate §6). A stranger who clones the repo gets it without changing GitHub notification settings.",
+              "Fix the clock, then close this issue. A later failure will reopen it and comment with the new run URL.",
+            ].join("\n");
+            const query = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: label,
+              per_page: 5,
+            };
+            const open = await github.rest.issues.listForRepo({ ...query, state: "open" });
+            const existingOpen = open.data.find((i) => i.title === title) ?? open.data[0];
+            if (existingOpen) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingOpen.number,
+                body: what,
+              });
+              console.log("commented on existing alert", existingOpen.html_url);
+              return;
+            }
+            const closed = await github.rest.issues.listForRepo({ ...query, state: "closed" });
+            const existingClosed = closed.data.find((i) => i.title === title) ?? closed.data[0];
+            if (existingClosed) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingClosed.number,
+                state: "open",
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingClosed.number,
+                body: what,
+              });
+              console.log("reopened alert", existingClosed.html_url);
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body: what,
+              labels: [label],
+            });

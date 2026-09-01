@@ -143,7 +143,15 @@ export function seedState(): FactoryState {
       baseSha: "4d77aa0c976b51b47240e41f37e1682696991728",
       headSha: "09882b0075d7bb8f99a76c2526504b9194ce380d",
       reviewedSha: "09882b0075d7bb8f99a76c2526504b9194ce380d",
-      testCommand: "true",
+      // G-13 / T-13: this used to record `testCommand: "true"` with
+      // `negativeControl: "red-on-revert"`. A noop cannot go red on revert
+      // (issue #112), so that pair asserted a proof it cannot have performed.
+      // The recorded command was wrong, not the control: allowlist.yaml has
+      // always declared `npm test` for frontguard, and `no-suite` is the
+      // exemption for repos that genuinely have none (awesome-copilot,
+      // e2b-cookbook — they also cannot name firstIssues, which this packet
+      // did). Sibling Wave 0 evidence records the roster oracle too.
+      testCommand: "npm test",
       testExit: 0,
       negativeControl: "red-on-revert",
       filesChanged: 1,

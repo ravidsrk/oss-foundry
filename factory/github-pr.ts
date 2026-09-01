@@ -147,6 +147,19 @@ function githubHttpError(res: Response, what: string): string {
   return what ? `GitHub ${res.status} ${what}` : `GitHub ${res.status}`;
 }
 
+/**
+ * Transport-class failures (offline host, DNS, dropped connection, AbortError)
+ * used to reach the operator as the bare undici string `fetch failed` — no repo,
+ * no operation, no remedy, indistinguishable from a product defect (G-21 / T-14).
+ * HTTP-status failures already carry `what` (`listing pulls on ${repoId}`); this
+ * is that same label on the `catch` path. A helper one site forgets to call is
+ * the original hole, so every call site that can throw must go through here.
+ */
+function githubTransportError(err: unknown, what: string): string {
+  const detail = err instanceof Error && err.message ? err.message : "fetch failed";
+  return what ? `${detail} ${what}` : detail;
+}
+
 export function githubApiHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
@@ -203,7 +216,7 @@ export async function listOpenPulls(
       })),
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    return { ok: false, error: githubTransportError(err, `listing pulls on ${repoId}`) };
   }
 }
 
@@ -237,7 +250,7 @@ export async function listCrossReferencingOpenPulls(
       .map((e) => e.source!.issue!.html_url as string);
     return { ok: true, urls: [...new Set(urls)], truncated: read.truncated };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    return { ok: false, error: githubTransportError(err, `reading timeline for ${repoId}#${issueNumber}`) };
   }
 }
 
@@ -310,7 +323,7 @@ export async function fetchIssueState(
       },
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    return { ok: false, error: githubTransportError(err, `reading ${repoId}#${issueNumber}`) };
   }
 }
 
@@ -438,7 +451,13 @@ export async function compareCommits(
       messages,
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    return {
+      ok: false,
+      error: githubTransportError(
+        err,
+        `comparing ${baseSha.slice(0, 7)}...${headSha.slice(0, 7)} on ${repoId}`,
+      ),
+    };
   }
 }
 
@@ -558,7 +577,7 @@ export async function fetchHumanReview(
       truncated: reviewsRead.truncated || commentsRead.truncated,
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    return { ok: false, error: githubTransportError(err, `reading reviews on ${repoId}#${number}`) };
   }
 }
 
@@ -676,7 +695,7 @@ export async function listCommitsSince(
       })),
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    return { ok: false, error: githubTransportError(err, `listing commits on ${repoId}`) };
   }
 }
 
@@ -805,7 +824,7 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
   } catch (err) {
     return {
       ok: false as const,
-      error: err instanceof Error ? err.message : "fetch failed",
+      error: githubTransportError(err, `syncing ${parsed.owner}/${parsed.repo}#${parsed.number}`),
     };
   }
 }
@@ -892,6 +911,6 @@ export async function createDraftPull(
     }
     return { ok: true, url: body.html_url ?? "", number: body.number ?? 0 };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+    return { ok: false, error: githubTransportError(err, `creating the draft on ${repoId}`) };
   }
 }

@@ -1,0 +1,38 @@
+### T-18 — inherited alert on the 6-hour clock (G-07)
+
+.github/workflows/oss-tick.yml had no `if: failure()` step. Nothing in the
+repository told a human when the unattended 6-hour clock failed. A personal
+GitHub notification setting does not count: launch gate §6 requires a
+mechanism a stranger could inherit from the repo.
+
+Added step `Alert on clock failure`:
+  if: ${{ failure() }}
+  uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+  (same SHA pin as the existing packet-issue step; issues: write already granted)
+
+Idempotency: search open issues labelled `clock-alert` first and comment
+on a match; else reopen a closed match and comment; else create. A naive
+create-on-every-red-run would turn one outage into ~40 issues a week.
+
+HONEST LIMIT. A scheduled run cannot be failed on demand from this
+repository, so this cannot prove a live red tick filed the issue. What
+was proven:
+
+  1. The comment-stripped workflow contains `if: ${{ failure() }}`.
+  2. The script body, driven locally against a fake octokit:
+       no existing issue  -> listForRepo open, listForRepo closed, create
+                             (title, run URL, job name, clock-alert label)
+       open alert exists  -> createComment on it, create NOT called
+       closed alert exists -> update state=open, createComment, create NOT called
+
+Test: "the 6-hour clock files one alert issue on failure and comments on a repeat"
+
+$ node --experimental-strip-types --test --test-name-pattern 'files one alert issue' factory/ci.test.ts
+  ✔ the 6-hour clock files one alert issue on failure and comments on a repeat
+  tests 1 / pass 1 / fail 0
+
+A workflow `if:` cannot be negative-controlled by reverting production
+TypeScript: deleting the step reds the same test (no `if: failure()`).
+Not re-run here as a file mutation because the assertion is a text-level
+check on a config file — the same honest limitation factory/ci.test.ts
+already states for the suite-on-pull-request guard.
