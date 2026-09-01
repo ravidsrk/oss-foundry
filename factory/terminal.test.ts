@@ -395,8 +395,23 @@ test("every operator entry point installs the terminal boundary — driven, not 
   const scripts = Object.values(
     JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")).scripts as Record<string, string>,
   );
+  /**
+   * YAML comments are stripped, for the same reason `factory/ci.test.ts` strips them before its
+   * own matching — except this guard fails in the OPPOSITE direction, which is how the omission
+   * was found. There, a comment could satisfy a check. Here, a comment could INVENT an entry
+   * point: a `ci.yml` note reading "`factory/ci.test.ts` asserts this" made a test file a
+   * "discovered entry point" and demanded a drive for something no workflow executes.
+   *
+   * Stripping cannot weaken detection. A real entry point is named on a `run:` line; a name that
+   * appears only inside a `#` comment is prose about a file, not an invocation of it.
+   */
+  const stripYamlComments = (text: string) =>
+    text
+      .split("\n")
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
   const workflows = readdirSync(join(REPO_ROOT, ".github/workflows")).map((f) =>
-    readFileSync(join(REPO_ROOT, ".github/workflows", f), "utf8"),
+    stripYamlComments(readFileSync(join(REPO_ROOT, ".github/workflows", f), "utf8")),
   );
   /**
    * `_`, `.` and `/` are in the class because they were not, and the omission was the second hole
@@ -421,6 +436,22 @@ test("every operator entry point installs the terminal boundary — driven, not 
       `${shape} is invisible to entry-point discovery, so it could ship without the boundary`,
     );
   }
+
+  // ...and the comment stripping, pinned in BOTH directions. A `#` line must not invent an entry
+  // point, and a real `run:` line must still produce one — a stripper that ate everything would
+  // make this whole guard vacuous and the assertion above would not notice.
+  const commented = "jobs:\n  x:\n    steps:\n      # see factory/phantom.ts for why\n      - run: npm test\n";
+  assert.deepEqual(
+    [...stripYamlComments(commented).matchAll(ENTRY_POINT)].map((m) => m[1]),
+    [],
+    "a file named only inside a YAML comment must not be discovered as an entry point",
+  );
+  const real = "jobs:\n  x:\n    steps:\n      - run: node --experimental-strip-types factory/real.ts\n";
+  assert.deepEqual(
+    [...stripYamlComments(real).matchAll(ENTRY_POINT)].map((m) => m[1]),
+    ["real.ts"],
+    "stripping comments must not hide an entry point that a run: line actually invokes",
+  );
 
   /**
    * The one exemption, and it is not an operator surface. `run-tests.ts` pipes `node:test`'s own

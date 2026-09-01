@@ -36,8 +36,27 @@ concurrency:
 jobs:
   suite:
     runs-on: ubuntu-latest
+    # A hung run should not hold a required check open indefinitely. The suite takes ~25s; twenty
+    # minutes is the same bound `oss-tick.yml` already uses.
+    timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      # Two legs, each proving something the other cannot.
+      #
+      # `22.6.0` is the exact floor `package.json` declares, and it is not an arbitrary round
+      # number: it is the release that introduced `--experimental-strip-types`, which every
+      # documented invocation in this repository passes explicitly. Below it Node exits with
+      # `bad option: --experimental-strip-types` before a single line runs, so no in-process check
+      # could ever report it — the manifest claim is only worth anything if CI executes the floor
+      # itself. `factory/ci.test.ts` asserts this leg exists and matches `engines`.
+      #
+      # `24` is the current Active LTS and the line an operator actually runs. It is also where
+      # type stripping is Stability 2 (Stable); on the 22.x line it is still a release candidate,
+      # so testing only the floor would prove the project works nowhere anyone runs it.
+      fail-fast: false
+      matrix:
+        node: ["22.6.0", "24"]
     steps:
       # Pinned to immutable commits, not `@v4`. A major tag is a moving reference: whoever controls
       # the upstream repository can retarget it, and these two run BEFORE every check here, so
@@ -48,10 +67,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          # The floor `package.json` declares (`engines.node: >=22`), and the version the clock
-          # already runs, so CI tests the version the project claims to support rather than
-          # whatever is newest.
-          node-version: "22"
+          node-version: ${{ matrix.node }}
 
       # No install step: `package.json` declares no dependencies and the repo has no lockfile, so
       # there is nothing to restore and `npm ci` would fail on the missing lockfile.

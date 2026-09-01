@@ -1,0 +1,23 @@
+### T-01 — Node floor: declared, executed, and guarded
+
+--- why a runtime check is dead code: node aborts before running anything ---
+$ node --experimental-bogus-flag -e 'console.log("code ran")'
+node: bad option: --experimental-bogus-flag
+
+--- every documented invocation passes the flag explicitly (0 rely on default-on) ---
+  node --experimental-strip-types factory/cli.ts
+  node --experimental-strip-types factory/run-tests.ts
+  node --experimental-strip-types factory/validate-allowlist.ts
+  node --experimental-strip-types factory/verify-ledger.ts
+  without the flag: 0
+
+--- declared floor ---
+  engines.node = >=22.6.0
+--- CI legs ---
+         node: ["22.6.0", "24"]
+
+--- suite ---
+suite ok — 381 tests across 19 files, every file accounted for
+--- negative control: a real uninstalled entry point still reds the boundary guard ---
+  AssertionError: factory/phantom-entry.ts is a discovered entry point with no drive in this test
+  (reproduced above by swapping ci.yml's run: line; restored after)

@@ -1,0 +1,12 @@
+# Pins the runtime for this repository so a local shell and CI agree about what "Node 22+" means.
+#
+# `package.json` declares `engines.node: >=22.6.0` — the release that introduced
+# `--experimental-strip-types`, which every documented invocation here passes explicitly. Below that
+# release Node exits with `bad option: --experimental-strip-types` before any code runs, so nothing
+# in-process can report the mistake; the floor has to be declared and executed rather than checked.
+#
+# This pin is the CURRENT line, not the floor: 24 is the Active LTS and the line where type stripping
+# is Stability 2 (Stable). On 22.x it is still a release candidate. CI runs both (see
+# `.github/workflows/ci.yml`) so the floor claim is proven and the line people actually use is too.
+[tools]
+node = "24"

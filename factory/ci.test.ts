@@ -269,3 +269,74 @@ test("pinned action SHAs have a keep-current mechanism (issue #85)", () => {
   assert.match(text, /directory:\s*\//);
   assert.match(text, /schedule:/);
 });
+
+/**
+ * ISSUE: `engines.node` read `>=22` while every documented command in this repository passes
+ * `--experimental-strip-types`, a flag that does not exist before **22.6.0**. A stranger on 22.4
+ * satisfied the declared floor and got `node: bad option: --experimental-strip-types`.
+ *
+ * WHY THIS IS A TEST AND NOT A RUNTIME CHECK. Node rejects an unknown option *before* executing
+ * anything — verified: `node --experimental-bogus-flag -e 'console.log(1)'` prints `node: bad
+ * option:` and runs no code. So on the versions the floor is meant to exclude, no in-process check
+ * can possibly run. A runtime `process.versions.node` guard would be unreachable dead code. The
+ * only enforceable thing is that the DECLARED floor stays true, and that CI actually executes it.
+ *
+ * Three claims, each of which can drift independently:
+ *   1. the floor equals the flag's introduction version,
+ *   2. every script still passes the flag — because if one stopped, the real floor would jump to
+ *      22.18.0 (where stripping became default-on) and the manifest would be silently wrong,
+ *   3. CI runs the declared floor, so the claim is executed rather than asserted.
+ */
+const STRIP_TYPES_ADDED = "22.6.0";
+
+test("the declared Node floor is the version that introduced the flag every script passes", () => {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+    engines?: { node?: string };
+    scripts?: Record<string, string>;
+  };
+  assert.equal(
+    manifest.engines?.node,
+    `>=${STRIP_TYPES_ADDED}`,
+    `engines.node must be >=${STRIP_TYPES_ADDED} — the release that added --experimental-strip-types. Anything lower claims support for versions where Node aborts on the flag before running a line.`,
+  );
+
+  // Claim 2: the floor is only correct while every entry point passes the flag explicitly.
+  const scripts = Object.entries(manifest.scripts ?? {});
+  assert.ok(scripts.length > 0, "package.json declares no scripts");
+  for (const [name, body] of scripts) {
+    if (!/\bnode\b/.test(body)) continue;
+    assert.match(
+      body,
+      /--experimental-strip-types/,
+      `script \`${name}\` runs node without --experimental-strip-types: \`${body}\`. Relying on default-on type stripping moves the real floor to 22.18.0, so engines.node above is now wrong.`,
+    );
+  }
+});
+
+test("CI executes the declared Node floor, it does not merely assert it", () => {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+    engines?: { node?: string };
+  };
+  const floor = (manifest.engines?.node ?? "").replace(/^>=/, "");
+  const ci = workflows().find((w) => w.name === "ci.yml");
+  assert.ok(ci, "ci.yml is missing");
+
+  const matrix = ci.text.match(/node:\s*\[([^\]]*)\]/);
+  assert.ok(matrix, "ci.yml declares no node version matrix — the floor claim is then untested");
+  const legs = matrix[1]!.split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
+  assert.ok(
+    legs.includes(floor),
+    `ci.yml matrix ${JSON.stringify(legs)} does not run the declared floor ${floor}. A floor no run exercises is a claim, not a guarantee.`,
+  );
+  // ...and the line an operator actually runs, where type stripping is Stable rather than a
+  // release candidate. Testing only the floor would prove the project works nowhere anyone runs it.
+  assert.ok(
+    legs.some((v) => v === "24" || v.startsWith("24.")),
+    `ci.yml matrix ${JSON.stringify(legs)} omits Node 24, the Active LTS and the only line where type stripping is Stability 2 (Stable).`,
+  );
+  assert.match(
+    ci.text,
+    /\$\{\{\s*matrix\.node\s*\}\}/,
+    "ci.yml declares a node matrix but setup-node does not consume it, so every leg runs the same version",
+  );
+});
