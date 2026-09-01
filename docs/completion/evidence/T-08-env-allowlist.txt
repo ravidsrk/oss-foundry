@@ -1,0 +1,54 @@
+T-08 — invert witnessChildEnv from a denylist to an allowlist (G-02)
+
+Allowlist (factory/witness.ts WITNESS_CHILD_ENV_KEYS):
+  PATH, HOME, TMPDIR, TEMP, TMP, LANG, LC_ALL, LC_CTYPE, TZ, GIT_CONFIG_GLOBAL
+
+Each entry is justified in-source. SHELL is omitted (bash -c is the contract).
+Windows SystemRoot/USERPROFILE omitted (host runner is POSIX: bash -c, rm -rf).
+
+--- child's observed env (planted secrets in the parent, then printenv in the child) ---
+
+Planted on the parent and absent from the child:
+  NPM_TOKEN=foundry_planted_npm_token
+  AWS_SECRET_ACCESS_KEY=foundry_planted_aws_secret
+  ANTHROPIC_API_KEY=foundry_planted_anthropic_key
+  OP_SERVICE_ACCOUNT_TOKEN=foundry_planted_op_token
+  FOUNDRY_PAT=foundry_planted_foundry_pat
+  NOT_A_TOOLCHAIN_VAR=foundry_planted_unrelated
+
+witnessChildEnv({ PATH, HOME, NPM_TOKEN, AWS_SECRET_ACCESS_KEY, ANTHROPIC_API_KEY, FOUNDRY_PAT })
+  keys: ["HOME","PATH"]
+
+hostRunner("run-tests@head", printenv) exit 0:
+  PATH_LEN=1122
+  HOME_SET=yes
+  printenv (bash also synthesises PWD/SHLVL/_):
+    HOME, LANG, PATH, TMPDIR, PWD, SHLVL, _
+  leaked planted values: (none)
+
+--- test (fix in place) ---
+
+node --experimental-strip-types --test --test-name-pattern 'G-02|#114' factory/witness-host.test.ts
+
+✔ #114 / G-02: the host runner allowlists the child env and drops planted secrets (15.91575ms)
+ℹ tests 1
+ℹ pass 1
+ℹ fail 0
+
+--- negative control ---
+
+Reverted witnessChildEnv to the four-name denylist
+(FOUNDRY_PAT, GITHUB_TOKEN, GH_TOKEN, E2B_API_KEY; copy everything else).
+
+node --experimental-strip-types --test --test-name-pattern 'G-02' factory/witness-host.test.ts
+
+✖ #114 / G-02: the host runner allowlists the child env and drops planted secrets (0.790208ms)
+  AssertionError [ERR_ASSERTION]: GIT_ASKPASS is a credential helper, not a toolchain need
+  + actual - expected
+  + '/tmp/askpass'
+  - undefined
+
+The denylist still passes FOUNDRY_PAT's cousins and every other parent var
+(NPM_TOKEN, AWS_SECRET_ACCESS_KEY, GIT_ASKPASS, …). Restore the allowlist; test green.
+
+Fix restored from the known-good copy; cmp matched; G-02 test pass 1 fail 0.

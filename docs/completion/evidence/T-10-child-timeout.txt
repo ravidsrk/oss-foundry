@@ -1,0 +1,80 @@
+T-10 — bound witness children and the unwired scout fetch (G-14, G-26)
+
+Default: WITNESS_CHILD_TIMEOUT_MS = 900000 (15 minutes).
+  Why minutes: a cold npm ci plus an upstream suite is a multi-minute job; the 15s
+  GitHub-fetch bound would kill a healthy run. 15 minutes is long enough for that
+  job on a laptop and short enough that a hung registry / `while true` cannot pin
+  `evidence` until the operator SIGKILLs the factory.
+
+Override: FOUNDRY_WITNESS_TIMEOUT_MS, integer 1..WITNESS_CHILD_TIMEOUT_MAX_MS (1 hour).
+Invalid values (-1, Infinity, 15.5, 0, non-number) fall back to 15 minutes
+(matching githubFetchTimeoutMs). A 0/NaN timeout would disable the deadline.
+
+A timed-out child is SIGKILL'd. execFile's `timeout` + `killSignal` cover the
+spawned PID; a pgrep -P walk SIGKILLs descendants so `bash -c 'npm test'`
+cannot leave the suite running after bash dies.
+Refusal names the step:
+  witness step "<step>" exceeded the <n>ms deadline and was killed
+
+Scout fetch (factory/github-scout.ts) now goes through githubRequestInit
+(AbortSignal.timeout). fetchImpl is a test seam. Module remains unwired.
+
+--- hung child (fix in place) ---
+
+FOUNDRY_WITNESS_TIMEOUT_MS=250
+hostRunner("run-tests@head", ["sleep 10"])
+
+✔ G-14: a hung witness child is killed at the deadline and the refusal names the step (274.30625ms)
+  exit != 0
+  output matches: witness step "run-tests@head" exceeded the 250ms deadline and was killed
+  elapsed < 2000ms
+
+✔ G-14: a truthy invalid FOUNDRY_WITNESS_TIMEOUT_MS falls back to the shipped bound
+
+--- scout deadline (fix in place) ---
+
+✔ G-26: the unwired scout's fetch carries a deadline (10.550833ms)
+  every fetchImpl call received init.signal
+
+✔ G-26: a hung scout fetch fails closed within the deadline (246.986416ms)
+  FOUNDRY_GITHUB_TIMEOUT_MS=40; 6 Wave≤1 repos abort; errors match /abort|timeout/i
+  elapsed < 2000ms
+
+--- negative control: child timeout ---
+
+Removed execFile `timeout`/`killSignal` and the setTimeout that SIGKILLs the
+process tree (timer = undefined). Nothing then killed the child.
+
+node --experimental-strip-types --test --test-name-pattern 'hung witness child' factory/witness-host.test.ts
+
+✖ G-14: a hung witness child is killed at the deadline and the refusal names the step (2003.732583ms)
+  Error: hung witness child was not killed
+      at Timeout._onTimeout (factory/witness-host.test.ts:329:33)
+
+Watchdog fired at 2s; sleep 10 was still running. Restore the deadline; test green.
+
+--- negative control: scout fetch ---
+
+Reverted to `fetchImpl(url, { headers })` (no githubRequestInit).
+
+node --experimental-strip-types --test --test-name-pattern 'scout.s fetch carries a deadline' factory/witness-host.test.ts
+
+✖ G-26: the unwired scout's fetch carries a deadline (1.223292ms)
+  AssertionError: ravidsrk/orca-fleet: scout fetch received no AbortSignal — githubRequestInit must attach a deadline;
+  … (6 Wave≤1 repos) …
+  6 !== 0
+
+Restore githubRequestInit; test green.
+
+Fix restored; G-14 and G-26 tests pass.
+
+--- suite ---
+
+npm test
+  suite ok — 383 tests across 19 files, every file accounted for
+
+typecheck (origin/main has no `npm run typecheck` / tsconfig; P1 lands that gate)
+  npx -p typescript@5.9.3 -p @types/node@24.9.2 tsc --noEmit --strict \
+    --erasableSyntaxOnly --verbatimModuleSyntax \
+    factory/witness.ts factory/github-scout.ts factory/witness-host.test.ts
+  EXIT:0  (0 errors)

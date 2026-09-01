@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
-import { chmodSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmp } from "./tmp-dir.ts";
-import { hostRunner, resolveToolchain, witnessChildEnv, witnessEvidence } from "./witness.ts";
+import { scoutGithub } from "./github-scout.ts";
+import {
+  hostRunner,
+  resolveToolchain,
+  witnessChildEnv,
+  witnessChildTimeoutMs,
+  witnessEvidence,
+  WITNESS_CHILD_TIMEOUT_MS,
+  WITNESS_CHILD_TIMEOUT_MAX_MS,
+} from "./witness.ts";
 
 /**
  * `hostRunner` driven against a real shell — the only assertions in the repo that a fake runner
@@ -227,30 +237,120 @@ test("two witness runs for the same repo under one frozen millisecond both succe
  * #80 was filed for, one layer down. Refused here as well as sanitised by the caller, because a
  * guard that only exists at the call site is one call site away from not existing.
  */
-test("#114: the host runner does not pass FOUNDRY_PAT into the child", async () => {
+test("#114 / G-02: the host runner allowlists the child env and drops planted secrets", async () => {
   const isolated = witnessChildEnv({
     PATH: "/usr/bin",
+    HOME: "/tmp",
+    TMPDIR: "/tmp",
+    LANG: "C.UTF-8",
+    TZ: "UTC",
+    GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
+    HTTPS_PROXY: "http://user:foundry_planted_proxy_pass@proxy.example:8080",
+    HTTP_PROXY: "http://proxy.example:3128",
+    NO_PROXY: "localhost,127.0.0.1",
+    NVM_DIR: "/opt/nvm",
+    NODE_EXTRA_CA_CERTS: "/etc/ssl/corp.pem",
+    GIT_SSL_CAINFO: "/etc/ssl/git.pem",
+    MISE_DATA_DIR: "/opt/mise",
+    MISE_GITHUB_TOKEN: "foundry_planted_mise_token",
+    ASDF_GITHUB_API_TOKEN: "foundry_planted_asdf_token",
+    GIT_ASKPASS: "/tmp/askpass",
+    SHELL: "/bin/zsh",
     FOUNDRY_PAT: "ghp_should_never_leak",
     GITHUB_TOKEN: "ghs_also_secret",
     GH_TOKEN: "ghp_gh",
     E2B_API_KEY: "e2b_secret",
-    HOME: "/tmp",
+    NPM_TOKEN: "foundry_planted_npm_token",
+    AWS_SECRET_ACCESS_KEY: "foundry_planted_aws_secret",
+    ANTHROPIC_API_KEY: "foundry_planted_anthropic_key",
+    OP_SERVICE_ACCOUNT_TOKEN: "foundry_planted_op_token",
+    NOT_A_TOOLCHAIN_VAR: "foundry_planted_unrelated",
   });
+  assert.equal(isolated.PATH, "/usr/bin");
+  assert.equal(isolated.HOME, "/tmp");
+  assert.equal(isolated.TMPDIR, "/tmp");
+  assert.equal(isolated.LANG, "C.UTF-8");
+  assert.equal(isolated.TZ, "UTC");
+  assert.equal(isolated.GIT_CONFIG_GLOBAL, "/tmp/gitconfig");
+  assert.equal(isolated.HTTPS_PROXY, "http://proxy.example:8080");
+  assert.equal(isolated.HTTP_PROXY, "http://proxy.example:3128");
+  assert.equal(isolated.NO_PROXY, "localhost,127.0.0.1");
+  assert.equal(isolated.NVM_DIR, "/opt/nvm");
+  assert.equal(isolated.NODE_EXTRA_CA_CERTS, "/etc/ssl/corp.pem");
+  assert.equal(isolated.GIT_SSL_CAINFO, "/etc/ssl/git.pem");
+  assert.equal(isolated.MISE_DATA_DIR, "/opt/mise");
+  assert.equal(isolated.MISE_GITHUB_TOKEN, undefined, "MISE_GITHUB_TOKEN is a credential; no MISE_* glob");
+  assert.equal(isolated.ASDF_GITHUB_API_TOKEN, undefined, "ASDF_GITHUB_API_TOKEN is a credential; no ASDF_* glob");
+  assert.equal(isolated.GIT_ASKPASS, undefined, "GIT_ASKPASS is a credential helper, not a toolchain need");
+  assert.equal(isolated.SHELL, undefined, "SHELL is not a toolchain need; bash -c is the contract");
   assert.equal(isolated.FOUNDRY_PAT, undefined);
   assert.equal(isolated.GITHUB_TOKEN, undefined);
   assert.equal(isolated.GH_TOKEN, undefined);
   assert.equal(isolated.E2B_API_KEY, undefined);
-  assert.equal(isolated.PATH, "/usr/bin");
-  assert.equal(isolated.HOME, "/tmp");
+  assert.equal(isolated.NPM_TOKEN, undefined);
+  assert.equal(isolated.AWS_SECRET_ACCESS_KEY, undefined);
+  assert.equal(isolated.ANTHROPIC_API_KEY, undefined);
+  assert.equal(isolated.OP_SERVICE_ACCOUNT_TOKEN, undefined);
+  assert.equal(isolated.NOT_A_TOOLCHAIN_VAR, undefined);
+  assert.deepEqual(
+    Object.keys(isolated).sort(),
+    [
+      "GIT_CONFIG_GLOBAL",
+      "GIT_SSL_CAINFO",
+      "HOME",
+      "HTTPS_PROXY",
+      "HTTP_PROXY",
+      "LANG",
+      "MISE_DATA_DIR",
+      "NODE_EXTRA_CA_CERTS",
+      "NO_PROXY",
+      "NVM_DIR",
+      "PATH",
+      "TMPDIR",
+      "TZ",
+    ].sort(),
+  );
 
-  const saved = process.env.FOUNDRY_PAT;
-  process.env.FOUNDRY_PAT = "ghp_should_never_leak";
+  const planted: Record<string, string> = {
+    NPM_TOKEN: "foundry_planted_npm_token",
+    AWS_SECRET_ACCESS_KEY: "foundry_planted_aws_secret",
+    ANTHROPIC_API_KEY: "foundry_planted_anthropic_key",
+    OP_SERVICE_ACCOUNT_TOKEN: "foundry_planted_op_token",
+    FOUNDRY_PAT: "foundry_planted_foundry_pat",
+    NOT_A_TOOLCHAIN_VAR: "foundry_planted_unrelated",
+    MISE_GITHUB_TOKEN: "foundry_planted_mise_token",
+    HTTPS_PROXY: "http://user:foundry_planted_proxy_pass@127.0.0.1:9",
+    NVM_DIR: "/tmp/foundry-nvm-dir",
+  };
+  const saved: Record<string, string | undefined> = {};
+  for (const key of Object.keys(planted)) saved[key] = process.env[key];
   try {
-    const run = await hostRunner("run-tests@head", ["printenv FOUNDRY_PAT || true"]);
-    assert.doesNotMatch(run.output, /ghp_should_never_leak/);
+    Object.assign(process.env, planted);
+    const run = await hostRunner("run-tests@head", [
+      [
+        'echo PATH_LEN=${#PATH}',
+        'echo HOME_SET=$(if [ -n "$HOME" ]; then echo yes; else echo no; fi)',
+        "printenv",
+      ].join("; "),
+    ]);
+    assert.equal(run.exit, 0, run.output);
+    assert.match(run.output, /PATH_LEN=[1-9]/, `child PATH was empty — over-aggressive allowlist: ${run.output}`);
+    assert.match(run.output, /HOME_SET=yes/, `child HOME was missing: ${run.output}`);
+    assert.match(run.output, /^NVM_DIR=\/tmp\/foundry-nvm-dir$/m, `NVM_DIR did not reach the child: ${run.output}`);
+    assert.match(run.output, /^HTTPS_PROXY=http:\/\/127\.0\.0\.1:9\/?$/m, `stripped proxy URL missing: ${run.output}`);
+    for (const [key, value] of Object.entries(planted)) {
+      if (key === "NVM_DIR") continue;
+      if (key === "HTTPS_PROXY") {
+        assert.doesNotMatch(run.output, /foundry_planted_proxy_pass/, `proxy userinfo reached the child: ${run.output}`);
+        continue;
+      }
+      assert.doesNotMatch(run.output, new RegExp(value), `${key} reached the child: ${run.output}`);
+    }
   } finally {
-    if (saved === undefined) delete process.env.FOUNDRY_PAT;
-    else process.env.FOUNDRY_PAT = saved;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 
@@ -259,5 +359,251 @@ test("the host runner refuses a scratch prefix that would escape the tmpdir", as
     const result = await hostRunner("mkdtemp", [bad]);
     assert.equal(result.exit, 1, `${bad} was accepted: ${result.output}`);
     assert.match(result.output, /path separator/, result.output);
+  }
+});
+
+test("G-14: a hung witness child is killed at the deadline and the refusal names the step", async () => {
+  // Real clock on purpose: the production deadline is `setTimeout` + SIGKILL of a live
+  // `sleep` process group. Fake timers cannot observe whether the grandchild actually died.
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "250";
+  const started = Date.now();
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", ["sleep 10"]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung witness child was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(
+      run.output,
+      /witness step "run-tests@head" exceeded the 250ms deadline and was killed/,
+      run.output,
+    );
+    assert.ok(Date.now() - started < 2000, `hung child took ${Date.now() - started}ms`);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-14: a hung grandchild is dead after the deadline, not reparented", async () => {
+  // Real clock: we have to observe a live grandchild PID and then that it is gone.
+  // Fake timers cannot tell a reparented `sleep` from a reaped one.
+  const pidFile = join(tmp("foundry-grandchild-"), "pid");
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "400";
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", [`(sleep 20 & echo $! > ${JSON.stringify(pidFile)}; wait)`]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung grandchild parent was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(run.output, /exceeded the 400ms deadline/, run.output);
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    assert.ok(Number.isInteger(pid) && pid > 1, `pid file held ${pid}`);
+    const listed = spawnSync("ps", ["-p", String(pid), "-o", "state="], { encoding: "utf8" });
+    const state = listed.stdout.trim();
+    assert.ok(
+      state === "" || state.startsWith("Z"),
+      `grandchild ${pid} still running (ps state=${JSON.stringify(state)}) — reparented after the shell died`,
+    );
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-14: a daemonized grandchild is dead after the deadline", async () => {
+  // Real clock. The intermediate subshell exits immediately so `sleep` is
+  // reparented to init — `pgrep -P` on the witness shell cannot see it.
+  // Process-group membership survives that; a group SIGKILL must reap it.
+  const pidFile = join(tmp("foundry-daemon-"), "pid");
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "400";
+  let daemonPid: number | undefined;
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", [
+        `(sleep 20 >/dev/null 2>&1 & echo $! > ${JSON.stringify(pidFile)}); sleep 20`,
+      ]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung daemon parent was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(run.output, /exceeded the 400ms deadline/, run.output);
+    daemonPid = Number(readFileSync(pidFile, "utf8").trim());
+    assert.ok(Number.isInteger(daemonPid) && daemonPid > 1, `pid file held ${daemonPid}`);
+    const listed = spawnSync("ps", ["-p", String(daemonPid), "-o", "state="], { encoding: "utf8" });
+    const state = listed.stdout.trim();
+    assert.ok(
+      state === "" || state.startsWith("Z"),
+      `daemonized grandchild ${daemonPid} still running (ps state=${JSON.stringify(state)}) — escaped the process group`,
+    );
+  } finally {
+    if (daemonPid !== undefined) {
+      try {
+        process.kill(daemonPid, "SIGKILL");
+      } catch {
+        // already dead
+      }
+    }
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-14: a setsid grandchild is not reached — that is the sandbox boundary", async () => {
+  // Pins the documented limit, not a bug. A process that calls setsid() leaves
+  // the group we signal and is not a pgrep -P child after the intermediate
+  // parent exits. Defeating it would need a cgroup/jail/VM (ADR 0003); a
+  // best-effort pid scan that sometimes kills the wrong process is worse.
+  // This test fails if the limit silently changes shape (we start reaching it,
+  // or we stop spawning a group at all and start claiming we do).
+  const dir = tmp("foundry-setsid-");
+  const pidFile = join(dir, "pid");
+  const script = join(dir, "escape.py");
+  writeFileSync(
+    script,
+    [
+      "import os, sys, time",
+      "pid = os.fork()",
+      "if pid > 0:",
+      "    sys.stdout.write(str(pid))",
+      "    sys.exit(0)",
+      "os.setsid()",
+      "devnull = os.open(os.devnull, os.O_RDWR)",
+      "os.dup2(devnull, 0)",
+      "os.dup2(devnull, 1)",
+      "os.dup2(devnull, 2)",
+      "time.sleep(20)",
+    ].join("\n"),
+  );
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "400";
+  let escapedPid: number | undefined;
+  try {
+    const run = await Promise.race([
+      hostRunner("run-tests@head", [
+        `python3 ${JSON.stringify(script)} > ${JSON.stringify(pidFile)} 2>/dev/null; sleep 20`,
+      ]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("setsid parent was not killed")), 2000),
+      ),
+    ]);
+    assert.notEqual(run.exit, 0, run.output);
+    assert.match(run.output, /exceeded the 400ms deadline/, run.output);
+    escapedPid = Number(readFileSync(pidFile, "utf8").trim());
+    assert.ok(Number.isInteger(escapedPid) && escapedPid > 1, `pid file held ${escapedPid}`);
+    const listed = spawnSync("ps", ["-p", String(escapedPid), "-o", "state="], { encoding: "utf8" });
+    const state = listed.stdout.trim();
+    assert.ok(
+      state.length > 0 && !state.startsWith("Z"),
+      `setsid grandchild ${escapedPid} was reached (ps state=${JSON.stringify(state)}) — the session-escape boundary moved`,
+    );
+  } finally {
+    if (escapedPid !== undefined) {
+      try {
+        process.kill(escapedPid, "SIGKILL");
+      } catch {
+        // already dead
+      }
+    }
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-14: a self-SIGKILL is not reported as a deadline", async () => {
+  const run = await hostRunner("run-tests@head", ["kill -KILL $$"]);
+  assert.notEqual(run.exit, 0, run.output);
+  assert.doesNotMatch(
+    run.output,
+    /exceeded the .* deadline/,
+    `SIGKILL was mislabeled as a timeout: ${run.output}`,
+  );
+  assert.match(run.output, /killed by SIGKILL/, run.output);
+});
+
+test("G-14: a truthy invalid FOUNDRY_WITNESS_TIMEOUT_MS falls back to the shipped bound", () => {
+  assert.equal(witnessChildTimeoutMs(undefined), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(""), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("nope"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("0"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("-1"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("Infinity"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("15.5"), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(WITNESS_CHILD_TIMEOUT_MAX_MS + 1), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(-1), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs(Number.POSITIVE_INFINITY), WITNESS_CHILD_TIMEOUT_MS);
+  assert.equal(witnessChildTimeoutMs("250"), 250);
+  assert.equal(witnessChildTimeoutMs(250), 250);
+  assert.equal(witnessChildTimeoutMs(WITNESS_CHILD_TIMEOUT_MAX_MS), WITNESS_CHILD_TIMEOUT_MAX_MS);
+
+  const prev = process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+  process.env.FOUNDRY_WITNESS_TIMEOUT_MS = "-1";
+  try {
+    assert.equal(witnessChildTimeoutMs(), WITNESS_CHILD_TIMEOUT_MS);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_WITNESS_TIMEOUT_MS;
+    else process.env.FOUNDRY_WITNESS_TIMEOUT_MS = prev;
+  }
+});
+
+test("G-26: the unwired scout's fetch carries a deadline", async () => {
+  let fetches = 0;
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    fetches += 1;
+    assert.ok(init?.signal, "scout fetch received no AbortSignal — githubRequestInit must attach a deadline");
+    return new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const result = await scoutGithub({ maxPerRepo: 1 }, fetchImpl);
+  assert.equal(result.ok, true);
+  assert.ok(fetches > 0, "scout never called fetch");
+  assert.equal(result.errors.length, 0, result.errors.join("; "));
+});
+
+test("G-26: a hung scout fetch fails closed within the deadline", async () => {
+  // Real clock: `AbortSignal.timeout` is what production attaches, and fake timers do not
+  // fire it. The watchdog holds node:test's event loop until the abort (or 2s, the failure).
+  const hung: typeof fetch = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("hung fetch received no AbortSignal — scoutGithub must attach a deadline"));
+        return;
+      }
+      const fail = () =>
+        reject(signal.reason ?? new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      if (signal.aborted) {
+        fail();
+        return;
+      }
+      signal.addEventListener("abort", fail, { once: true });
+    });
+  const prev = process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+  process.env.FOUNDRY_GITHUB_TIMEOUT_MS = "40";
+  const started = Date.now();
+  try {
+    const result = await Promise.race([
+      scoutGithub({ maxPerRepo: 1 }, hung),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hung scout fetch was not aborted")), 2000),
+      ),
+    ]);
+    assert.equal(result.ok, true);
+    assert.ok(result.errors.length > 0, "hung scout produced no errors");
+    assert.match(result.errors.join("\n"), /abort|timeout|This operation was aborted/i);
+    assert.ok(Date.now() - started < 2000, `hung scout fetch took ${Date.now() - started}ms`);
+  } finally {
+    if (prev === undefined) delete process.env.FOUNDRY_GITHUB_TIMEOUT_MS;
+    else process.env.FOUNDRY_GITHUB_TIMEOUT_MS = prev;
   }
 });
