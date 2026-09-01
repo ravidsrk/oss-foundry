@@ -1,0 +1,24 @@
+### T-27 — rollback rehearsed, not described
+
+Target: the most recent substantive merge, f9a735b (PR #129).
+
+1. The revert applies cleanly — one command, no conflicts:
+     $ git revert -m 1 f9a735b
+     -> d322370 Revert "Merge pull request #129 …"
+
+2. The reverted tree is green:
+     npm test      -> suite ok — 408 tests across 20 files
+     npm run typecheck -> 0 errors
+     npm run validate  -> policy records ok: 8 records
+
+3. The suite NOTICES the rollback: 418 tests before, 408 after.
+   The ten tests #129 added go with it. A revert that changed nothing
+   measurable would mean the change under it was not carrying its weight.
+
+4. CI agrees, on both matrix legs:
+     Greptile Review	pass	2m20s	https://greptile.com/	
+     suite (22.10.0)	pass	46s	https://github.com/ravidsrk/oss-foundry/actions/runs/33529688576/job/99929384067	
+     suite (24)	pass	31s	https://github.com/ravidsrk/oss-foundry/actions/runs/33529688576/job/99929384446	
+
+Disposition: PR #132 closed unmerged. The rehearsal proves the capability;
+performing an actual rollback of work that is fine would churn main for nothing.
