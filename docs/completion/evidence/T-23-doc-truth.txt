@@ -1,0 +1,132 @@
+T-23 / G-15 — each corrected claim beside the code that decides it.
+
+Negative control: `git show origin/main:<file>` still carries the false sentence;
+this branch does not. Docs-only; no production behaviour changed.
+
+================================================================
+1. docs/07-github-app.md:3 "never as a personal PAT"
+================================================================
+
+BEFORE (origin/main docs/07-github-app.md:3):
+  The factory authenticates as a GitHub App, never as a personal PAT.
+
+CODE THAT DECIDES IT:
+  factory/github-pr.ts createDraftPull — the only write:
+    env: Record<string, string | undefined> = process.env
+    const pat = env.FOUNDRY_PAT;
+    if (!pat) return { ok: false, error: "FOUNDRY_PAT is not set — …" };
+    Authorization: `Bearer ${pat}` on POST /repos/{owner}/{repo}/pulls
+  factory/github-pr.ts githubApiHeaders — the only read:
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  grep FOUNDRY_APP_ID / FOUNDRY_APP_PRIVATE_KEY / FOUNDRY_INSTALLATION_ID
+  over factory/ → zero hits.
+
+AFTER (docs/07-github-app.md:3):
+  The factory does **not** authenticate as a GitHub App. The shipping write
+  credential is a classic personal access token (`FOUNDRY_PAT`); the shipping
+  read credential is `GITHUB_TOKEN` or `GH_TOKEN`. …
+  App discussion is under "GitHub App (unimplemented / aspirational)".
+
+================================================================
+2. Three secrets mandated and read by nothing
+================================================================
+
+BEFORE (origin/main docs/07-github-app.md:63-65):
+  - FOUNDRY_APP_ID
+  - FOUNDRY_APP_PRIVATE_KEY
+  - FOUNDRY_INSTALLATION_ID
+
+CODE THAT DECIDES IT:
+  grep over factory/ for those three names → no matches.
+  (Confirmed again on this tree after the doc rewrite.)
+
+AFTER (docs/07-github-app.md):
+  "There is no App client in this tree. FOUNDRY_APP_ID,
+  FOUNDRY_APP_PRIVATE_KEY, and FOUNDRY_INSTALLATION_ID have **zero** reads
+  under factory/. Provisioning them does nothing. Do not set them."
+  Secrets table lists only FOUNDRY_PAT, GITHUB_TOKEN/GH_TOKEN, E2B_API_KEY.
+
+================================================================
+3. docs/06-v2.md E2B lifecycle + clone depth
+================================================================
+
+BEFORE (origin/main docs/06-v2.md:26):
+  Lifecycle: create → shallow clone → test command → harvest patch → destroy.
+
+CODE THAT DECIDES IT:
+  factory/sandbox.ts runSandboxDry:
+    commands are `# planned · not executed · ${cmd}` with exit: -1
+    clone line: `git clone …  # full clone — historical SHAs must be reachable`
+  factory/sandbox.ts SANDBOX_RULES:
+    "Clone is full (historical SHAs must be reachable)."
+  No E2B SDK / client / worker host in this tree.
+  factory/witness.ts witnessEvidence: E2B_API_KEY is a presence check;
+  with or without it the CLI refuses to run a non-host sandbox.
+
+AFTER (docs/06-v2.md):
+  No executor in this tree. Lifecycle is the design for a worker host that
+  is not in this repository. Clone is **full**, not shallow. E2B_API_KEY
+  does not make a sandbox live here.
+
+================================================================
+4. Stations 4 and 5 described as working gates
+================================================================
+
+BEFORE:
+  docs/PRODUCT.md §5 row 4: "One playbook pack. Failing-first. …"
+  docs/PRODUCT.md §5 row 5: "Independent, lit. Negative control: revert goes red."
+  docs/04-stations.md intro: "Four working stations plus freeze, draft, and follow-up."
+  docs/04-stations.md §4: "Worker in a fresh worktree … One playbook pack."
+  docs/04-stations.md §5: "Build-blind. … Does not see the implementer's chain of thought."
+
+CODE THAT DECIDES IT:
+  factory/engine.ts applyAdvance:
+    approved → implementing: runSandboxDry + planSandbox stored, status bump
+    implementing → reviewing: bare status/station bump, no reviewer identity
+    reviewing → draft-ready: gated on evidenceIsReady
+  factory/engine.ts applyAttachEvidence: the attach gate (status must be reviewing)
+  factory/types.ts: export type Lighting = "lit";
+  factory/packet.ts buildPacket: lighting: "lit"
+  factory/state.ts LIGHTING = new Set(["lit"]); loader refuses anything else
+
+AFTER:
+  Both docs state stations 4/5 are not working gates; applyAdvance stores a
+  dry-run plan then bumps status; lighting is the constant "lit" with no
+  reviewer identity; the only real gate on that arc is applyAttachEvidence /
+  evidenceIsReady.
+
+================================================================
+5. "Heuristic rank" as live station-1 behaviour
+================================================================
+
+BEFORE:
+  docs/PRODUCT.md §5 row 1: "Heuristic rank."
+  docs/PRODUCT.md diagram: "heuristic"
+  docs/04-stations.md §1: "Heuristic score: wave, labels, size, freshness."
+  docs/01-architecture.md (origin/main): "scout.ts — heuristic rank."
+
+CODE THAT DECIDES IT:
+  factory/scout.ts rankIssues — sole caller factory/github-scout.ts
+    (docs/06-v2.md: "Not wired into cli.ts, and on no live path.")
+  factory/engine.ts pickCandidate: walks `live` then ALLOWLIST/firstIssues
+    in roster order; returns the first policy-allowable unused non-blocked row.
+    Does not consult scout.total.
+  factory/packet.ts buildPacket still calls scoreIssue and stores the score
+    on the packet — a record, not the picker.
+
+AFTER:
+  Selection is roster order (pickCandidate). rankIssues is unwired.
+  scoreIssue still stamps a score onto the packet; it does not pick the candidate.
+
+================================================================
+Negative control
+================================================================
+
+  git show origin/main:docs/07-github-app.md | sed -n '3p'
+    → The factory authenticates as a GitHub App, never as a personal PAT.
+  git show origin/main:docs/06-v2.md | sed -n '26p'
+    → Lifecycle: create → shallow clone → test command → harvest patch → destroy.
+  This branch's corresponding lines do not contain those sentences.
+  Restoring origin/main versions of the four files would restore the lies;
+  that is the guard. No production test was added because no production
+  behaviour changed.

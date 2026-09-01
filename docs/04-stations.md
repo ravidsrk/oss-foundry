@@ -1,6 +1,6 @@
 # Stations
 
-Four working stations plus freeze, draft, and follow-up. Mapped onto `oss-contribute` so we do not invent a second pipeline.
+Seven named stations mapped onto `oss-contribute` so we do not invent a second pipeline. Scout and policy are live gates; freeze is the human attest; **implement and review are not working gates** — `applyAdvance` stores a dry-run plan, then bumps status; the evidence protocol (`applyAttachEvidence` / `evidenceIsReady`) is the real check on that arc; draft and follow-up are contact and standing.
 
 ## 1. Scout
 
@@ -27,7 +27,7 @@ Does:
   `attach-draft` — a competitor that appeared since gating refuses the approval, the open or the
   attach; an adjacent mention at freeze is surfaced to the human doing the freezing, who is the
   taste gate.
-- Heuristic score: wave, labels, size, freshness.
+- **Selection is roster order, not heuristic rank.** `pickCandidate` (`factory/engine.ts`) walks the `live` list, then `ALLOWLIST` / `firstIssues`, and returns the first policy-allowable unused non-blocked row. `rankIssues` (`factory/scout.ts`) has exactly one caller — `factory/github-scout.ts` — which is on no live path ([06-v2.md](06-v2.md)). `scoreIssue` still stamps wave / labels / size / freshness onto the packet in `buildPacket`; that score is a record, not the picker.
 - Never invent issue numbers. If every named `firstIssues` row is consumed or blocked, the tick **idles**.
 
 Output: at most one candidate. Clock / CLI skip if anything is in flight (`gated` … `submitted`).
@@ -121,13 +121,15 @@ The first 20 factory-wide approvals decrement a visible counter (`humanApprovals
 
 ## 4. Implementer
 
-Worker in a fresh worktree (Wave 0) or E2B box (else). One playbook pack. Failing-first. No coordinator chat in the trace that the reviewer will see.
+**Not a working gate.** `applyAdvance` (`factory/engine.ts`) on status `approved` requires `humanAttest`, calls `runSandboxDry` / `planSandbox`, stores that session on the packet, and bumps status to `implementing` / station `implement`. The stored session is a dry-run plan: commands are comment strings prefixed `# planned · not executed ·` with `exit: -1` (`factory/sandbox.ts`). No playbook pack runs, no worktree is created, no E2B box is booted. Wave 0 host / Wave 1+ E2B execution belongs to a worker host that is not in this tree ([06-v2.md](06-v2.md)).
 
 The CLI dry-run **plans** sandbox commands. It does not stamp `harvested` with exit 0.
 
 ## 5. Independent reviewer
 
-Build-blind. Sees the diff, the test command, the negative control. Does not see the implementer’s chain of thought. Reviewed SHA must equal head SHA at draft time.
+**Not a working gate.** `applyAdvance` on status `implementing` is a bare status bump to `reviewing` / station `review` — no reviewer identity is recorded. `lighting` is the constant `"lit"` (`factory/types.ts` `Lighting = "lit"`; `buildPacket` always writes `"lit"`). The historical `dark-eligible` value is not representable; the loader refuses anything else (`factory/state.ts`).
+
+The only real gate on this arc is attaching witnessed evidence. `applyAttachEvidence` requires status `reviewing` and refuses placeholder SHAs, illegal provenance, a non-fast-forward range, scope overflow, and an unbound commit range. `applyAdvance` from `reviewing` to `draft-ready` then requires `evidenceIsReady` (negative control, witnessed exits, bound SHAs, provenance). Building the independent-reviewer *enforcement* (a second identity, build-blind traces) is a new capability, not present here (gap G-36).
 
 Evidence is attached by the operator (`attachEvidence`), from a run the operator did not perform by
 hand: `evidence` witnesses on the host (Wave 0 only), and `attach-witness` ingests a manifest

@@ -1,0 +1,128 @@
+T-24 / G-22 — derived module list, env-var reference, packet fields.
+
+Derivation timestamp: this branch, factory/*.ts glob + process.env grep.
+
+================================================================
+1. Module inventory (docs/01-architecture.md)
+================================================================
+
+BEFORE (origin/main docs/01-architecture.md): 8 modules
+  allowlist.ts, policy.ts, scout.ts, engine.ts, packet.ts,
+  sandbox.ts, scorecard.ts, cli.ts
+
+DERIVATION: glob factory/*.ts, drop *.test.ts → 29 files.
+
+  Non-test modules (29):
+    allowlist.ts
+    cli.ts
+    competition-read.ts
+    engine.ts
+    fixture-counts.ts          (test-support; not collected by run-tests.ts)
+    github-pr.ts               (SPEC §6 moment of contact)
+    github-scout.ts
+    halt.ts                    (SPEC §6 factory halt)
+    ids.ts
+    ledger-check.ts            (SPEC §7 reconcile)
+    load-allowlist.ts
+    neighbor.ts                (SPEC §6 DISCLOSURE)
+    packet.ts
+    policy-records.ts
+    policy.ts
+    run-tests.ts
+    sandbox.ts
+    scorecard.ts               (SPEC §7 standing)
+    scout.ts
+    seed-fixtures.ts           (test-support)
+    seed.ts
+    state.ts                   (fail-closed ledger loader)
+    status.ts
+    terminal.ts                (sole third-party-text sanitisation boundary)
+    tmp-dir.ts                 (test-support)
+    types.ts
+    validate-allowlist.ts
+    verify-ledger.ts           (SPEC §7 clock vs GitHub)
+    witness.ts                 (SPEC §5 evidence protocol)
+
+  factory/README.md is the closer map of the operator-facing subset
+  (allowlist, policy, engine, packet, cli, github-pr, github-scout,
+  sandbox, scorecard, seed, run-tests, witness). Architecture names
+  every module; README's descriptions of the overlapping set are not
+  contradicted.
+
+AFTER: docs/01-architecture.md lists all 29, grouped as operator-facing /
+SPEC §5–§7 supporting / test-support.
+
+================================================================
+2. Environment-variable reference
+================================================================
+
+BEFORE: zero markdown files documented FOUNDRY_GITHUB_TIMEOUT_MS.
+  grep FOUNDRY_GITHUB_TIMEOUT_MS over **/*.md on origin/main → empty.
+
+DERIVATION: grep process.env.[A-Z_]+ across factory/:
+
+  process.env.FOUNDRY_GITHUB_TIMEOUT_MS  github-pr.ts (shipping), github-pr.test.ts
+  process.env.FOUNDRY_OPERATOR           cli.ts
+  process.env.FOUNDRY_PAT                witness-host.test.ts only (planted leak probe)
+  process.env.GH_TOKEN                   github-pr.ts
+  process.env.GITHUB_TOKEN               github-pr.ts
+  process.env.NODE_TEST_CONTEXT          cli.ts
+  process.env.PATH                       engine.test.ts, witness-host.test.ts (test PATH prefix)
+
+Cross-check env.NAME (parameters defaulting to / passed process.env):
+
+  env.FOUNDRY_PAT      github-pr.ts createDraftPull  ← shipping write
+  env.E2B_API_KEY      witness.ts witnessEvidence    ← presence check
+  env.NODE_TEST_CONTEXT engine.test.ts (test)
+
+Not a process.env read:
+
+  FOUNDRY_LIVE = vars.FOUNDRY_LIVE in .github/workflows/oss-tick.yml
+
+PATH is test plumbing, not a Foundry setting — listed as such in the
+architecture note, not in the operator table.
+
+No FOUNDRY_WITNESS_* timeout name exists on this tree (sibling T-10
+may add one later; grep found none).
+
+AFTER: docs/01-architecture.md "## Environment variables" table covers
+every shipping name above. docs/07-github-app.md points at it.
+FOUNDRY_APP_* explicitly called out as unread.
+
+Reconcile: every process.env.NAME in factory/ is either in that table
+or identified as test-only PATH / the FOUNDRY_PAT leak-probe write.
+Zero shipping reads unlisted.
+
+================================================================
+3. Packet fields omitted from docs/10-schemas.md
+================================================================
+
+BEFORE packet block ended:
+  scout, humanAttest, evidence, prBody, prUrl, prMeta, followUps, sandboxSession
+  (no createdAt, updatedAt, parkReason)
+
+CODE THAT DECIDES IT:
+  factory/types.ts TaskPacket:
+    createdAt: string;          // required
+    updatedAt: string;          // required
+    parkReason?: string;        // optional
+  factory/state.ts isPacket:
+    typeof o.createdAt === "string" &&
+    typeof o.updatedAt === "string" &&
+    optional(o.parkReason, (v) => typeof v === "string")
+  factory/state.ts migratePacket fills a missing createdAt/updatedAt from
+  the other or "—" before isPacket; a non-string is still refused.
+
+AFTER: both required timestamps and optional parkReason are in the packet
+block, citing types.ts and state.ts.
+
+================================================================
+Negative control
+================================================================
+
+  git show origin/main:docs/01-architecture.md | grep -c 'witness.ts\|github-pr.ts\|halt.ts\|state.ts\|terminal.ts'
+    → 0 (those SPEC §5/§6/§7 modules were unnamed)
+  git show origin/main:docs/10-schemas.md | grep -c createdAt
+    → 0 in the packet block (the field was absent)
+  This branch names them. Restoring origin/main docs would drop the
+  inventory and the three packet fields; that is the guard.
