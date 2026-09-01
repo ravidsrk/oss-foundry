@@ -303,14 +303,26 @@ test("the declared Node floor is the version that introduced the flag every scri
   // Claim 2: the floor is only correct while every entry point passes the flag explicitly.
   const scripts = Object.entries(manifest.scripts ?? {});
   assert.ok(scripts.length > 0, "package.json declares no scripts");
+  /**
+   * A node INVOCATION, not the word "node". `\bnode\b` matched `@types/node@24.9.2` in the
+   * typecheck script — `/` and `@` are both word boundaries — and demanded a strip-types flag from
+   * an npm install. Anchoring to a command position is the fix: start of string, or after `&&`,
+   * `||`, `;` or a pipe.
+   */
+  const NODE_INVOCATION = /(?:^|&&|\|\||;|\|)\s*node\s/;
   for (const [name, body] of scripts) {
-    if (!/\bnode\b/.test(body)) continue;
+    if (!NODE_INVOCATION.test(body)) continue;
     assert.match(
       body,
       /--experimental-strip-types/,
       `script \`${name}\` runs node without --experimental-strip-types: \`${body}\`. Relying on default-on type stripping moves the real floor to 22.18.0, so engines.node above is now wrong.`,
     );
   }
+  // ...pinned both ways, because a predicate that matched nothing would make the loop vacuous.
+  assert.equal(NODE_INVOCATION.test("node --experimental-strip-types factory/cli.ts"), true);
+  assert.equal(NODE_INVOCATION.test("npm i x && node --experimental-strip-types a.ts"), true);
+  assert.equal(NODE_INVOCATION.test("npm install @types/node@24.9.2"), false, "@types/node is not an invocation");
+  assert.equal(NODE_INVOCATION.test("./node_modules/.bin/tsc --noEmit"), false, "node_modules is not an invocation");
 });
 
 test("CI executes the declared Node floor, it does not merely assert it", () => {
