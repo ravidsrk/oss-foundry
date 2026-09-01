@@ -1,0 +1,16 @@
+### T-01 (corrected) — the real Node floor is set by the suite's oracle, not the flag
+
+--- bisected against real runtimes installed locally ---
+  node 22.6.0   REFUSED  (oracle: no per-file test:summary)
+  node 22.9.0   REFUSED  (oracle: no per-file test:summary)
+  node 22.10.0  GREEN  suite ok — 383 tests across 20 files, every file accounted for
+  node 22.11.0  GREEN  suite ok — 383 tests across 20 files, every file accounted for
+  node 22.13.0  GREEN  suite ok — 383 tests across 20 files, every file accounted for
+  node 22.18.0  GREEN  suite ok — 383 tests across 20 files, every file accounted for
+  node 24.20.0  GREEN  suite ok — 383 tests across 20 files, every file accounted for
+
+--- so: the flag needs 22.6.0, the ORACLE needs 22.10.0, and the higher one wins ---
+  engines.node = >=22.10.0
+
+--- found by the matrix leg on its first run, not by inspection ---
+  PR #124 suite (22.6.0) failed; suite (24) passed.

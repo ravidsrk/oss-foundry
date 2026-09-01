@@ -1,0 +1,12 @@
+### T-04 — gitignore covers secrets and local agent state
+
+--- before: what ignored .claude/settings.local.json? ---
+  (was: /Users/ravindra/.config/git/ignore:6 — the developer's PERSONAL global config)
+
+--- after: ignored by the repo's own .gitignore ---
+  .env                               .gitignore:11:.env	.env
+  .env.local                         .gitignore:12:.env.*	.env.local
+  .claude/settings.local.json        .gitignore:17:.claude/settings.local.json	.claude/settings.local.json
+
+--- .env.example is NOT ignored (so a documented template can be committed) ---
+  .env.example                       .gitignore:13:!.env.example	.env.example

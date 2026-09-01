@@ -1,0 +1,26 @@
+### T-02 — type-check gate, with negative controls
+
+--- checker actually running (not the 'tsc' squatter package) ---
+$ ./node_modules/.bin/tsc --version
+Version 5.9.3
+  files checked: 50
+
+--- clean on the tree ---
+$ npm run typecheck  -> errors: 0
+0
+
+--- NEGATIVE CONTROL: plain type error
+    factory/_probe.ts(2,7): error TS2322: Type 'string' is not assignable to type 'number'.
+--- NEGATIVE CONTROL: enum (Node 26 hazard, erasableSyntaxOnly)
+    factory/_probe.ts(2,13): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+--- NEGATIVE CONTROL: namespace with runtime code
+    factory/_probe.ts(2,18): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+--- NEGATIVE CONTROL: parameter property
+    factory/_probe.ts(2,30): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+
+--- NEGATIVE CONTROL: verbatimModuleSyntax (value-import of a type) ---
+    factory/_probe.ts(1,10): error TS1484: 'TaskPacket' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+
+--- clean again ---
+  errors: 0
+0

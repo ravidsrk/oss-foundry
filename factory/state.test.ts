@@ -138,7 +138,7 @@ test("v6 ledger missing later-required fields is migrated, not stranded", () => 
   const scout = { ...(packet.scout as Record<string, unknown>) };
   delete scout.parts;
   packet.scout = scout;
-  const row = { ...(seed.scorecard[0] as Record<string, unknown>) };
+  const row = { ...(seed.scorecard[0] as unknown as Record<string, unknown>) };
   delete row.closedUnmerged;
   delete row.lastTouch;
   const path = join(tmp("foundry-"), "old-v6.json");

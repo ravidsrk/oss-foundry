@@ -3,11 +3,12 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.10.0"
   },
   "scripts": {
     "test": "node --experimental-strip-types factory/run-tests.ts",
     "validate": "node --experimental-strip-types factory/validate-allowlist.ts",
-    "foundry": "node --experimental-strip-types factory/cli.ts"
+    "foundry": "node --experimental-strip-types factory/cli.ts",
+    "typecheck": "npm install --no-save --no-package-lock typescript@5.9.3 @types/node@24.9.2 && ./node_modules/.bin/tsc --noEmit"
   }
 }

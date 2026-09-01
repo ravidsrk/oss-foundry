@@ -68,6 +68,7 @@ import { seedState } from "./seed.ts";
 import { asOpenSubmitted, wave1Packet, withOpenSubmittedWave1 } from "./seed-fixtures.ts";
 import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
+import type { EvidenceManifest } from "./types.ts";
 import { INFLIGHT_STATUSES, inflightCount, type FactoryState } from "./types.ts";
 
 function blank(): FactoryState {
@@ -2981,7 +2982,15 @@ function boundWitness(
   };
 }
 
-function manifestWith(witness: unknown, extra: Record<string, unknown> = {}) {
+/**
+ * A manifest carrying an arbitrary `witness`, INCLUDING a malformed one. The parameter is `unknown`
+ * on purpose: most callers here hand it something the validator must reject — wrong provider, wrong
+ * subject, identical log hashes, a missing field — and a fixture that could only build valid
+ * witnesses could not test a single refusal. The cast on the return is the boundary where that
+ * intent meets the typed API, and it is safe precisely because `applyAttachEvidence` re-validates
+ * shape at runtime; that re-validation is what these tests are checking.
+ */
+function manifestWith(witness: unknown, extra: Record<string, unknown> = {}): EvidenceManifest {
   return {
     baseSha: BASE,
     headSha: HEAD,
@@ -2991,7 +3000,8 @@ function manifestWith(witness: unknown, extra: Record<string, unknown> = {}) {
     filesChanged: 1,
     diffLines: 1,
     notes: [],
-    witness,
+    // Cast here, not at the call sites: see this function's docblock. Callers pass junk on purpose.
+    witness: witness as EvidenceManifest["witness"],
     ...extra,
   };
 }

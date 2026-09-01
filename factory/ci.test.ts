@@ -269,3 +269,141 @@ test("pinned action SHAs have a keep-current mechanism (issue #85)", () => {
   assert.match(text, /directory:\s*\//);
   assert.match(text, /schedule:/);
 });
+
+/**
+ * ISSUE: `engines.node` read `>=22` while every documented command in this repository passes
+ * `--experimental-strip-types`, a flag that does not exist before **22.6.0**. A stranger on 22.4
+ * satisfied the declared floor and got `node: bad option: --experimental-strip-types`.
+ *
+ * WHY THIS IS A TEST AND NOT A RUNTIME CHECK. Node rejects an unknown option *before* executing
+ * anything — verified: `node --experimental-bogus-flag -e 'console.log(1)'` prints `node: bad
+ * option:` and runs no code. So on the versions the floor is meant to exclude, no in-process check
+ * can possibly run. A runtime `process.versions.node` guard would be unreachable dead code. The
+ * only enforceable thing is that the DECLARED floor stays true, and that CI actually executes it.
+ *
+ * Three claims, each of which can drift independently:
+ *   1. the floor equals the flag's introduction version,
+ *   2. every script still passes the flag — because if one stopped, the real floor would jump to
+ *      22.18.0 (where stripping became default-on) and the manifest would be silently wrong,
+ *   3. CI runs the declared floor, so the claim is executed rather than asserted.
+ */
+/** Where `--experimental-strip-types` was introduced. A lower bound on the floor, not the floor. */
+const STRIP_TYPES_ADDED = "22.6.0";
+/**
+ * The actual floor, and it is higher than the flag: `factory/run-tests.ts` accounts for every test
+ * file through `node:test`'s per-file `test:summary` event, and on 22.9.0 and below that event
+ * carries no `file` — so the oracle reports "reported no summary" for every file and `npm test`
+ * refuses. Measured by bisection against real runtimes: 22.9.0 broken, 22.10.0 green.
+ */
+const SUITE_ORACLE_FLOOR = "22.10.0";
+
+test("the declared Node floor is the one the suite's own oracle needs", () => {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+    engines?: { node?: string };
+    scripts?: Record<string, string>;
+  };
+  assert.equal(
+    manifest.engines?.node,
+    `>=${SUITE_ORACLE_FLOOR}`,
+    `engines.node must be >=${SUITE_ORACLE_FLOOR} — the release where node:test's per-file test:summary carries a \`file\`, which factory/run-tests.ts needs to account for every test file. Below it \`npm test\` refuses outright.`,
+  );
+  // ...and the floor can never drop below the flag's own introduction, whatever else changes.
+  const floor = (manifest.engines?.node ?? "").replace(/^>=/, "").split(".").map(Number);
+  const flagFloor = STRIP_TYPES_ADDED.split(".").map(Number);
+  assert.ok(
+    floor[0]! > flagFloor[0]! || (floor[0] === flagFloor[0] && floor[1]! >= flagFloor[1]!),
+    `engines.node ${manifest.engines?.node} is below ${STRIP_TYPES_ADDED}, where --experimental-strip-types was added — Node would abort on the flag before running a line.`,
+  );
+
+  // Claim 2: the floor is only correct while every entry point passes the flag explicitly.
+  const scripts = Object.entries(manifest.scripts ?? {});
+  assert.ok(scripts.length > 0, "package.json declares no scripts");
+  /**
+   * A node INVOCATION, not the word "node". `\bnode\b` matched `@types/node@24.9.2` in the
+   * typecheck script — `/` and `@` are both word boundaries — and demanded a strip-types flag from
+   * an npm install. Anchoring to a command position is the fix: start of string, or after `&&`,
+   * `||`, `;` or a pipe.
+   */
+  const NODE_INVOCATION = /(?:^|&&|\|\||;|\|)\s*node\s/;
+  for (const [name, body] of scripts) {
+    if (!NODE_INVOCATION.test(body)) continue;
+    assert.match(
+      body,
+      /--experimental-strip-types/,
+      `script \`${name}\` runs node without --experimental-strip-types: \`${body}\`. Relying on default-on type stripping moves the real floor to 22.18.0, so engines.node above is now wrong.`,
+    );
+  }
+  // ...pinned both ways, because a predicate that matched nothing would make the loop vacuous.
+  assert.equal(NODE_INVOCATION.test("node --experimental-strip-types factory/cli.ts"), true);
+  assert.equal(NODE_INVOCATION.test("npm i x && node --experimental-strip-types a.ts"), true);
+  assert.equal(NODE_INVOCATION.test("npm install @types/node@24.9.2"), false, "@types/node is not an invocation");
+  assert.equal(NODE_INVOCATION.test("./node_modules/.bin/tsc --noEmit"), false, "node_modules is not an invocation");
+});
+
+test("CI executes the declared Node floor, it does not merely assert it", () => {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+    engines?: { node?: string };
+  };
+  const floor = (manifest.engines?.node ?? "").replace(/^>=/, "");
+  const ci = workflows().find((w) => w.name === "ci.yml");
+  assert.ok(ci, "ci.yml is missing");
+
+  const matrix = ci.text.match(/node:\s*\[([^\]]*)\]/);
+  assert.ok(matrix, "ci.yml declares no node version matrix — the floor claim is then untested");
+  const legs = matrix[1]!.split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
+  assert.ok(
+    legs.includes(floor),
+    `ci.yml matrix ${JSON.stringify(legs)} does not run the declared floor ${floor}. A floor no run exercises is a claim, not a guarantee.`,
+  );
+  // ...and the line an operator actually runs, where type stripping is Stable rather than a
+  // release candidate. Testing only the floor would prove the project works nowhere anyone runs it.
+  assert.ok(
+    legs.some((v) => v === "24" || v.startsWith("24.")),
+    `ci.yml matrix ${JSON.stringify(legs)} omits Node 24, the Active LTS and the only line where type stripping is Stability 2 (Stable).`,
+  );
+  assert.match(
+    ci.text,
+    /\$\{\{\s*matrix\.node\s*\}\}/,
+    "ci.yml declares a node matrix but setup-node does not consume it, so every leg runs the same version",
+  );
+});
+
+/**
+ * The type-check gate, guarded the same way the suite step is (issue #54's argument): adding it
+ * fixes today, and does nothing about it being deleted. `--experimental-strip-types` erases types
+ * without checking them and ignores `tsconfig.json`, so if this step goes the repository silently
+ * returns to having no type enforcement at all — and the green check keeps being cited as evidence.
+ *
+ * Also asserted: the checker is version-PINNED. An unpinned `npx typescript` would let the gate's
+ * strictness drift under us on someone else's release schedule, which for a check that reads every
+ * line of the tree is a supply-chain surface as well as a reproducibility one.
+ */
+test("CI type checks, with a pinned checker, and the manifest stays dependency-free", () => {
+  const ci = workflows().find((w) => w.name === "ci.yml");
+  assert.ok(ci, "ci.yml is missing");
+  assert.match(
+    ci.text,
+    /run:\s*npm run typecheck/,
+    "ci.yml no longer runs `npm run typecheck` — nothing in the pipeline reads the types",
+  );
+
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+    dependencies?: unknown;
+    devDependencies?: unknown;
+  };
+  const typecheck = manifest.scripts?.typecheck;
+  assert.ok(typecheck, "package.json declares no typecheck script");
+  assert.match(typecheck, /typescript@\d+\.\d+\.\d+/, `typecheck must pin typescript exactly: ${typecheck}`);
+  assert.match(typecheck, /@types\/node@\d+\.\d+\.\d+/, `typecheck must pin @types/node exactly: ${typecheck}`);
+  assert.match(typecheck, /--no-save/, "the checker must not be written into package.json");
+  assert.match(typecheck, /--no-package-lock/, "the checker must not create a lockfile");
+
+  // The property the transient install exists to preserve: a clone needs nothing to run the suite.
+  assert.equal(manifest.dependencies, undefined, "package.json declares runtime dependencies");
+  assert.equal(
+    manifest.devDependencies,
+    undefined,
+    "package.json declares devDependencies — the type checker is meant to be installed transiently by the typecheck script, so a clone still needs no install to run `npm test`",
+  );
+});

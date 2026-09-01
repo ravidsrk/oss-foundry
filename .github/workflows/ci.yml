@@ -36,8 +36,32 @@ concurrency:
 jobs:
   suite:
     runs-on: ubuntu-latest
+    # A hung run should not hold a required check open indefinitely. The suite takes ~25s; twenty
+    # minutes is the same bound `oss-tick.yml` already uses.
+    timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      # Two legs, each proving something the other cannot.
+      #
+      # `22.10.0` is the exact floor `package.json` declares, and this leg is why the number is
+      # right. The first guess was 22.6.0, the release that added `--experimental-strip-types` —
+      # wrong, and this leg proved it on its first run. The binding constraint is not the flag at
+      # all: `factory/run-tests.ts` accounts for every test file through `node:test`'s per-file
+      # `test:summary` event, and on 22.9.0 and below that event carries no `file`, so the oracle
+      # reports "reported no summary" for every file and `npm test` refuses outright. Measured by
+      # bisection: 22.9.0 broken, 22.10.0 green.
+      #
+      # Nothing in-process could have caught either mistake — below 22.6.0 Node exits on the
+      # unknown flag before a line runs, and at 22.6.0-22.9.0 the failure is the oracle itself. A
+      # declared floor is only worth something if a run executes it.
+      #
+      # `24` is the current Active LTS and the line an operator actually runs. It is also where
+      # type stripping is Stability 2 (Stable); on the 22.x line it is still a release candidate,
+      # so testing only the floor would prove the project works nowhere anyone runs it.
+      fail-fast: false
+      matrix:
+        node: ["22.10.0", "24"]
     steps:
       # Pinned to immutable commits, not `@v4`. A major tag is a moving reference: whoever controls
       # the upstream repository can retarget it, and these two run BEFORE every check here, so
@@ -48,10 +72,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          # The floor `package.json` declares (`engines.node: >=22`), and the version the clock
-          # already runs, so CI tests the version the project claims to support rather than
-          # whatever is newest.
-          node-version: "22"
+          node-version: ${{ matrix.node }}
 
       # No install step: `package.json` declares no dependencies and the repo has no lockfile, so
       # there is nothing to restore and `npm ci` would fail on the missing lockfile.
@@ -64,3 +85,17 @@ jobs:
       # `policy-records.json`, which until now ran only on the clock.
       - name: Validate allowlist and policy records
         run: npm run validate
+
+      # The type checker is installed HERE and nowhere else. `package.json` declares no
+      # dependencies and has no lockfile, and that is a deliberate, tested property of this
+      # repository — a clone needs nothing to run `npm test`. `npm install --no-save
+      # --no-package-lock` gives this job a checker without touching the manifest or writing a
+      # lockfile, and both versions are pinned so the gate cannot drift under us.
+      #
+      # WHY IT MATTERS: `--experimental-strip-types` erases types without checking them and ignores
+      # tsconfig.json entirely, so until this step existed nothing in the pipeline had ever read the
+      # types. The first run found six real problems in non-test source, including two non-null
+      # assertions standing where a guard had already established the fact and a cap-check signature
+      # that silently accepted a read carrying no truncation flag.
+      - name: Type check
+        run: npm run typecheck

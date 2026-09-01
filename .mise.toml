@@ -1,0 +1,14 @@
+# Pins the runtime for this repository so a local shell and CI agree about what "Node 22+" means.
+#
+# `package.json` declares `engines.node: >=22.10.0`. That number is set by the test suite's own
+# oracle, not by the type-stripping flag: `factory/run-tests.ts` accounts for every test file via
+# `node:test`'s per-file `test:summary`, and on 22.9.0 and below that event carries no `file`, so
+# `npm test` refuses outright. Measured by bisection — 22.9.0 broken, 22.10.0 green. The flag itself
+# only needs 22.6.0. Neither limit can be reported from inside the process, which is why CI executes
+# the floor rather than asserting it.
+#
+# This pin is the CURRENT line, not the floor: 24 is the Active LTS and the line where type stripping
+# is Stability 2 (Stable). On 22.x it is still a release candidate. CI runs both (see
+# `.github/workflows/ci.yml`) so the floor claim is proven and the line people actually use is too.
+[tools]
+node = "24"
