@@ -5,7 +5,7 @@
 ```
 VERDICT: CONDITIONAL GO
 COMPLETION: 86% (was 68% at baseline 74af0b2)   GATE: every agent-side condition met; 2 Human Actions outstanding
-CRITICAL FLOWS: 7 total · 3 verified · 2 works · 2 partial · 0 cut
+CRITICAL FLOWS: 7 total · 2 verified · 2 works · 3 partial · 0 cut
 GAPS: S0 2/2 closed · S1 13/16 closed · S2 6/6 above-line closed · CUT 1 done · DEFER 16 · ACCEPT 0
 TASKS: 27/28 done · BLOCKED 0 · HUMAN ACTIONS gating launch: 2 (H-03, H-01)
 NEXT: H-03 — add one `firstIssues` row to allowlist.yaml; it unblocks CF-01, CF-02 and CF-03

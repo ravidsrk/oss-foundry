@@ -321,7 +321,7 @@
       "status": "partial",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": "F-1-01: idle on the committed roster"
+      "note": "tick returns idle on the exhausted roster \u2014 blocked on H-03"
     },
     {
       "id": "CF-02",
@@ -332,7 +332,7 @@
       "status": "works",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": ""
+      "note": "coded and gated; no happy-path evidence until a packet exists \u2014 blocked on H-03"
     },
     {
       "id": "CF-03",
@@ -343,7 +343,7 @@
       "status": "partial",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": "F-1-02: zero machine witnesses ever"
+      "note": "no machine witness ever produced; reachable at Wave 0 once a packet exists \u2014 blocked on H-03"
     },
     {
       "id": "CF-04",
@@ -354,7 +354,7 @@
       "status": "partial",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": "F-1-04: never fired; #1652 was a browser session"
+      "note": "never fired \u2014 blocked on H-01 (machine account + PAT)"
     },
     {
       "id": "CF-05",
@@ -365,7 +365,7 @@
       "status": "works",
       "happy_evidence": null,
       "failure_evidence": null,
-      "note": ""
+      "note": "the path actually used for the one external PR; no captured happy-path run"
     },
     {
       "id": "CF-06",
@@ -374,9 +374,9 @@
       "money": false,
       "irreversible": false,
       "status": "verified",
-      "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "real terminal transition absorbed 2026-08-31"
+      "happy_evidence": "evidence/CF-06-sync-reconcile.txt",
+      "failure_evidence": "evidence/CF-06-sync-reconcile.txt",
+      "note": "happy: live reconcile absorbs a terminal outcome. failure: 1ms deadline, error names repo+operation, ledger sha256 unchanged"
     },
     {
       "id": "CF-07",
@@ -384,10 +384,10 @@
       "entry": "foundry halt | revert | clear-halt",
       "money": false,
       "irreversible": false,
-      "status": "partial",
-      "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "F-8-23: coded and tested, never fired"
+      "status": "verified",
+      "happy_evidence": "evidence/CF-07-halt-and-clear.txt",
+      "failure_evidence": "evidence/CF-07-halt-and-clear.txt",
+      "note": "happy: halt reaches health=stop, clear-halt lifts the factory halt. failure: clear-halt does NOT lift a per-repo banned tone"
     }
   ],
   "gaps": [

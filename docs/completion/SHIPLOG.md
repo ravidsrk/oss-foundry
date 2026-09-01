@@ -148,7 +148,7 @@ Both fixed by deriving from the register rather than retyping: `S0 2 · S1 16 ·
 
 `main` at `ba59027`. **418 tests** (from 379), type check **0 errors**, validator green, zero open PRs, zero `ravidsrk/*` branches.
 
-**Completion 68% → 86%.** Ten of sixteen scored angles moved, and **every angle now meets the frozen Definition's required minimum** — the five that had to move (3, 6, 7, 9, 17) all did.
+**Completion 68% → 86%.** Twelve of sixteen scored angles moved, and **every angle now meets the frozen Definition's required minimum** — the five that had to move (3, 6, 7, 9, 17) all did.
 
 ### The two S0 gaps are closed
 
@@ -184,6 +184,12 @@ Both fixed by deriving from the register rather than retyping: `S0 2 · S1 16 ·
 Gate §6 (one alert proven to fire) is met in mechanism and unit-proven against a fake octokit, but a real scheduled-run failure cannot be produced from this repository. Recorded as a limit rather than claimed as a pass.
 
 16 gaps remain DEFERred below the cut line, unchanged and still filed — including `G-25`, the five hand-copied competing-work reads, which is deferred reluctantly and says so.
+
+### A last finding, on the verdict itself
+
+The header claimed **3 verified** flows and **ten** moved angles. Both were wrong:  still carried the original flow statuses because I updated the scores and forgot the flows, and the true angle count is **twelve**. Caught by review on the gate-verdict PR — the artifact whose entire job is to state the position accurately.
+
+Corrected to **2 verified · 2 works · 3 partial**, and  now records per-flow evidence paths for CF-06 and CF-07 and the blocking Human Action for the other five. Worth recording because it is the third arithmetic error of this run in a hand-written summary, against zero in anything computed from the register — the rule the ship log already states, broken by me again in the act of restating it.
 
 ### Second look — one change
 
