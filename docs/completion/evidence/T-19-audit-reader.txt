@@ -1,0 +1,72 @@
+### T-19 — audit trail reader (G-08)
+
+A stuck factory (factory-wide secondary-rate-limit halt AND a repo with reverts=1)
+explained by one command: `status`. The event log is a separate verb (`events`)
+because `ledger` is the paste-between-GENERATED-markers export, not a diagnostic.
+
+--- 1. status on a stuck factory (stdout = the report) ---
+
+    $ node --experimental-strip-types factory/cli.ts status --state <scratch>
+
+    state: /tmp/.../state.json
+    FACTORY HALTED 2026-08-29T09:00:00.000Z: GitHub secondary rate limit while opening a draft on ColeMurray/background-agents. Never retry — a human clears this with `clear-halt`.
+    Foundry  packets=6 ticks=4 attestedWave0=3 inflight=false
+    humanApprovalsRemaining=16 mergedTotal=3 bans=0
+    in flight: none — factory halted; tick is refused
+    scorecard:
+      ravidsrk/orca-fleet  opened=2 merged=2 reverts=1 reviewCommentsAvg=1 tone=warm health=stop  stop=reverts=1
+      ravidsrk/frontguard  opened=1 merged=1 reverts=0 reviewCommentsAvg=0 tone=warm health=good
+      ColeMurray/background-agents  opened=1 merged=0 reverts=0 reviewCommentsAvg=0 tone=neutral health=good
+
+    What an operator at 2 a.m. can now answer from this one report:
+      - why nothing moves: FACTORY HALTED … secondary rate limit … clear-halt
+      - why tick is refused even with an empty slot: "factory halted; tick is refused"
+        (previously: "tick is allowed")
+      - why orca-fleet is frozen: stop=reverts=1 (SPEC.md §7), not a mystery health=stop
+      - the two KPIs that used to exist only in JSON: reverts=1 reviewCommentsAvg=1
+
+--- 2. events — the ledger's own log, newest first ---
+
+    $ node --experimental-strip-types factory/cli.ts events --state <scratch>
+
+    events: 10 (newest first; ring cap 80)
+    2026-09-01T15:16:57.836Z  score  -  FACTORY HALT (secondary-rate-limit): GitHub secondary rate limit while opening a draft on ColeMurray/background-agents. Never retry — a human clears this with `clear-halt`.
+    2026-08-30T02:25:22.000Z  follow-up  pkt_ColeMurray_background-agents_1476  ColeMurray/background-agents#1652 closed unmerged after ColeMurray completed #1476 via #1668. Slot released. Ledger absorbed 2026-08-31 (issue #109).
+    …
+
+    Why a new verb, not a flag on ledger or status:
+      - `ledger` emits the docs/12-ledger.md GENERATED block. Extending it would desync
+        the published paste and mix an export format with a diagnostic.
+      - `status` is the snapshot of now. 80 event lines would bury the halt / stop= lines.
+      - `--help` lists `events` next to `status`.
+
+--- 3. negative control (fix reverted to origin/main cli.ts, tests kept) ---
+
+    4 fail / 0 pass:
+
+    events reads the ledger event log from the CLI
+      AssertionError: unknown command events
+      1 !== 0
+
+    status prints reverts and reviewCommentsAvg on the scorecard line
+      scorecard line was:
+        ravidsrk/orca-fleet  opened=2 merged=2 tone=warm health=good
+      expected reverts=0 reviewCommentsAvg=1 on that line
+
+    status explains a halted factory as part of the report, not only on stderr
+      stdout had no FACTORY HALTED line
+      combined stdout+stderr DID contain it — proving the old mustLoad-stderr-only path
+      stdout also said "in flight: none — tick is allowed" under a live halt
+
+    status names why a repo is health=stop
+      scorecard line was:
+        ravidsrk/orca-fleet  opened=2 merged=2 tone=warm health=stop
+      expected stop=reverts=1 — health=stop with no predicate
+
+    Fix restored; the same four tests pass.
+
+--- 4. suite ---
+
+    npm test          suite ok — 394 tests across 20 files, every file accounted for
+    npm run typecheck tsc --noEmit exit 0
+    npm run validate  allowlist ok
