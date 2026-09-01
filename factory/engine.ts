@@ -407,8 +407,17 @@ export function isPlaceholderSha(sha: string | undefined): boolean {
   return !isBoundSha(sha);
 }
 
-/** Full SHA-1, not abbreviated, not a known fake, not a single repeated nibble. */
-export function isBoundSha(sha: string | undefined): boolean {
+/**
+ * Full SHA-1, not abbreviated, not a known fake, not a single repeated nibble.
+ *
+ * A type PREDICATE, not a `boolean`, and the difference is load-bearing rather than cosmetic. As a
+ * plain boolean it narrowed nothing, so `applyAttachDraft` had to write `opts.headSha!` twice —
+ * non-null assertions standing exactly where the guard above them had already established the
+ * fact. A `!` is an instruction to the compiler to stop checking, and two of them sat on the path
+ * that binds an external PR to a packet. Now the guard does the narrowing it was always doing at
+ * runtime, and the assertions are gone rather than trusted.
+ */
+export function isBoundSha(sha: string | undefined): sha is string {
   if (!sha) return false;
   const s = sha.trim().toLowerCase();
   if (s === "origin/head" || s.startsWith("deadbeef")) return false;
@@ -879,8 +888,8 @@ export function applyAttachDraft(
   if (!isBoundSha(opts.headSha)) {
     return { state, error: "PR head SHA is required and must match reviewed evidence" };
   }
-  if (!isBoundSha(expected) || opts.headSha!.toLowerCase() !== expected.toLowerCase()) {
-    return { state, error: `PR head ${opts.headSha!.slice(0, 7)} does not match evidence head` };
+  if (!isBoundSha(expected) || opts.headSha.toLowerCase() !== expected.toLowerCase()) {
+    return { state, error: `PR head ${opts.headSha.slice(0, 7)} does not match evidence head` };
   }
   const linked = `${opts.title ?? ""}\n${opts.body ?? ""}`;
   if (!mentionsIssue(linked, packet.issueNumber, packet.issueUrl, packet.repoId)) {

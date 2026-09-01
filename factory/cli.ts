@@ -183,7 +183,18 @@ const ARGV = process.argv.slice(2);
  * of a competitor, and an absence is what a short read cannot establish — so it is refused, not
  * warned, with its own message so a capped read stays distinguishable from a failed one (issue #69).
  */
-function refuseIfCapped(reads: { truncated?: boolean }[], what: string): void {
+/**
+ * A page-capped read cannot support "no competing pull request", so it is a refusal, not a warning.
+ *
+ * `truncated` is REQUIRED, not optional, and that is the whole point of the signature. It used to be
+ * `truncated?: boolean`, which silently accepted the keyword-hit short-circuit below — a synthesised
+ * `{ ok: true, urls: [] }` carrying no flag at all. That read as "not truncated" because `undefined`
+ * is falsy. The behaviour was right by accident (the short-circuit's verdict comes from `pulls`,
+ * which IS checked here), but the type let a reader omit the flag and get a pass, which is the
+ * "truncated success silently disables the FATAL" shape docs/12-ledger.md names. Required means the
+ * next synthesised success has to say which it is, out loud, or it does not compile.
+ */
+function refuseIfCapped(reads: { truncated: boolean }[], what: string): void {
   if (!reads.some((r) => r.truncated)) return;
   console.error(
     `${what}: a competing-work read stopped at the ${MAX_LIST_PAGES}-page cap, so "no competing pull request" is not a fact this run can assert. Narrow the target or raise the cap deliberately.`,
@@ -388,7 +399,7 @@ async function tickWithGithub(state: FactoryState) {
       // without spending a timeline call per issue.
       const keywordHit = findCompetingPull(pulls.pulls, issue.number, issue.url, repo.id);
       const crossRefs = keywordHit
-        ? { ok: true as const, urls: [] as string[] }
+        ? { ok: true as const, urls: [] as string[], truncated: false }
         : await listCrossReferencingOpenPulls(repo.id, issue.number);
       if (!crossRefs.ok) {
         console.error(crossRefs.error);
@@ -558,7 +569,7 @@ async function main() {
         packetForFreeze.issueUrl,
         packetForFreeze.repoId,
       )
-        ? { ok: true as const, urls: [] as string[] }
+        ? { ok: true as const, urls: [] as string[], truncated: false }
         : await listCrossReferencingOpenPulls(packetForFreeze.repoId, packetForFreeze.issueNumber);
       if (!crossRefs.ok) {
         console.error(crossRefs.error);
@@ -1002,7 +1013,7 @@ async function main() {
     const pulls = await listOpenPulls(packet.repoId);
     const crossRefs = pulls.ok
       ? findCompetingPull(pulls.pulls, packet.issueNumber, packet.issueUrl, packet.repoId)
-        ? { ok: true as const, urls: [] as string[] }
+        ? { ok: true as const, urls: [] as string[], truncated: false }
         : await listCrossReferencingOpenPulls(packet.repoId, packet.issueNumber)
       : pulls;
     if (!pulls.ok || !crossRefs.ok) {

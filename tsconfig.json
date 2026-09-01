@@ -1,0 +1,47 @@
+{
+  // TYPE CHECKING ONLY. Nothing here emits: `node --experimental-strip-types` runs the `.ts` files
+  // directly and this config exists so that something, somewhere, actually reads the types it
+  // erases. Node's own docs are explicit that type stripping performs no checking and ignores
+  // tsconfig.json entirely, so before this file 9,639 lines of TypeScript were enforced by review
+  // alone — which is why `factory/state.ts` hand-writes ~200 lines of runtime validators to
+  // re-derive at runtime what a compiler proves statically.
+  //
+  // Run by CI via a pinned `npx typescript@<version> tsc --noEmit`, NOT as a dependency: this
+  // repository's zero-dependency property is deliberate and CI-documented, and typescript 7.x ships
+  // platform-specific native optional dependencies, so a devDependency would import a real supply
+  // chain and a platform-sensitive lockfile for a check that never ships.
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["ES2024"],  // Promise.withResolvers, used in factory/witness.ts
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    // Imports here are written `./foo.ts`, with the extension, because that is what Node requires
+    // at runtime. Plain tsc rejects that without this flag.
+    "allowImportingTsExtensions": true,
+
+    // The two flags that make this gate earn its keep beyond ordinary type errors, both recommended
+    // by Node's own TypeScript documentation for exactly this setup:
+    //
+    // `erasableSyntaxOnly` rejects enums, runtime namespaces, parameter properties and import
+    // aliases — the syntax type stripping cannot handle. Node 26 REMOVED the
+    // `--experimental-transform-types` escape hatch that used to cover it, so this is now the only
+    // thing standing between a well-meaning `enum` and a runtime failure on current Node. The tree
+    // is clean today; this keeps it that way.
+    "erasableSyntaxOnly": true,
+    // `verbatimModuleSyntax` catches the import-elision hazard: a type imported without the `type`
+    // keyword is treated as a value import and throws at runtime under stripping.
+    "verbatimModuleSyntax": true,
+
+    // NOT enabled: `noUncheckedIndexedAccess`. It produces 300+ findings, almost all of them
+    // `arr[0]` in test fixtures, and turning it on is its own piece of work rather than a rider on
+    // installing the gate. Filed rather than silently skipped.
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["factory/**/*.ts", "scripts/**/*.ts"]
+}

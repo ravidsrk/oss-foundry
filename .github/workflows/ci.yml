@@ -80,3 +80,17 @@ jobs:
       # `policy-records.json`, which until now ran only on the clock.
       - name: Validate allowlist and policy records
         run: npm run validate
+
+      # The type checker is installed HERE and nowhere else. `package.json` declares no
+      # dependencies and has no lockfile, and that is a deliberate, tested property of this
+      # repository — a clone needs nothing to run `npm test`. `npm install --no-save
+      # --no-package-lock` gives this job a checker without touching the manifest or writing a
+      # lockfile, and both versions are pinned so the gate cannot drift under us.
+      #
+      # WHY IT MATTERS: `--experimental-strip-types` erases types without checking them and ignores
+      # tsconfig.json entirely, so until this step existed nothing in the pipeline had ever read the
+      # types. The first run found six real problems in non-test source, including two non-null
+      # assertions standing where a guard had already established the fact and a cap-check signature
+      # that silently accepted a read carrying no truncation flag.
+      - name: Type check
+        run: npm run typecheck

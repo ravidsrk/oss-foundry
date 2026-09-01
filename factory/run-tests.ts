@@ -42,7 +42,17 @@ async function main(): Promise<void> {
   stream.on("test:summary", (event) => {
     // The run-wide summary carries no `file`; only the per-file ones do.
     if (typeof event.file !== "string") return;
-    perFile.set(event.file, { tests: event.counts.tests, failed: event.counts.failed });
+    /**
+     * `counts.failed` is real and this cast is a TYPES gap, not a guess. `@types/node` (checked
+     * through 24.9.2) omits `failed` from the `test:summary` counts while the runtime emits it —
+     * verified directly: the event carries
+     * `{tests,failed,passed,cancelled,skipped,todo,topLevel,suites}`. Casting rather than reaching
+     * for `any` keeps the other seven fields checked, and `run-tests.test.ts` pins the runtime
+     * property so that if Node ever DOES drop it, a test says so instead of this file silently
+     * reading `undefined` and reporting every file as having zero failures.
+     */
+    const counts = event.counts as typeof event.counts & { failed: number };
+    perFile.set(event.file, { tests: counts.tests, failed: counts.failed });
   });
 
   // `pipe()` returns the destination, not a promise — await the transfer itself, or the checks

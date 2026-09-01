@@ -340,3 +340,43 @@ test("CI executes the declared Node floor, it does not merely assert it", () => 
     "ci.yml declares a node matrix but setup-node does not consume it, so every leg runs the same version",
   );
 });
+
+/**
+ * The type-check gate, guarded the same way the suite step is (issue #54's argument): adding it
+ * fixes today, and does nothing about it being deleted. `--experimental-strip-types` erases types
+ * without checking them and ignores `tsconfig.json`, so if this step goes the repository silently
+ * returns to having no type enforcement at all — and the green check keeps being cited as evidence.
+ *
+ * Also asserted: the checker is version-PINNED. An unpinned `npx typescript` would let the gate's
+ * strictness drift under us on someone else's release schedule, which for a check that reads every
+ * line of the tree is a supply-chain surface as well as a reproducibility one.
+ */
+test("CI type checks, with a pinned checker, and the manifest stays dependency-free", () => {
+  const ci = workflows().find((w) => w.name === "ci.yml");
+  assert.ok(ci, "ci.yml is missing");
+  assert.match(
+    ci.text,
+    /run:\s*npm run typecheck/,
+    "ci.yml no longer runs `npm run typecheck` — nothing in the pipeline reads the types",
+  );
+
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+    dependencies?: unknown;
+    devDependencies?: unknown;
+  };
+  const typecheck = manifest.scripts?.typecheck;
+  assert.ok(typecheck, "package.json declares no typecheck script");
+  assert.match(typecheck, /typescript@\d+\.\d+\.\d+/, `typecheck must pin typescript exactly: ${typecheck}`);
+  assert.match(typecheck, /@types\/node@\d+\.\d+\.\d+/, `typecheck must pin @types/node exactly: ${typecheck}`);
+  assert.match(typecheck, /--no-save/, "the checker must not be written into package.json");
+  assert.match(typecheck, /--no-package-lock/, "the checker must not create a lockfile");
+
+  // The property the transient install exists to preserve: a clone needs nothing to run the suite.
+  assert.equal(manifest.dependencies, undefined, "package.json declares runtime dependencies");
+  assert.equal(
+    manifest.devDependencies,
+    undefined,
+    "package.json declares devDependencies — the type checker is meant to be installed transiently by the typecheck script, so a clone still needs no install to run `npm test`",
+  );
+});
