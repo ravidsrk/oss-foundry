@@ -53,7 +53,7 @@ The inventory below was derived from `factory/*.ts` on this tree (29 non-`*.test
 - `validate-allowlist.ts` — CLI entry: allowlist + policy-records consistency. `npm run validate`.
 - `neighbor.ts` — SPEC §6 disclosure block (`DISCLOSURE`) and commit-trailer conventions. The verbatim PR-body text. Do not reformat it; `factory/engine.test.ts` asserts every in-repo quotation is byte-identical to the constant.
 - `terminal.ts` — the sole third-party-text sanitisation boundary. Installed on stdout/stderr by every real entry point.
-- `status.ts` — promotion-gate counters: `foundryAttestedWave0Merges` for the raw count (3) and `promotionGateWave0Merges` for the gated one (2), which excludes the operator-clicked merge on an owned repo. Also ledger sections and the quiet label. The four unused UI-layer helpers this line used to name were deleted: they returned tone tokens and an `en-IN` date for a console that does not exist here.
+- `status.ts` — promotion-gate counter (`foundryAttestedWave0Merges`), ledger sections, quiet label. Also still exports unused UI-layer helpers (`statusTone`, `policyTone`, `formatWhen`, `needsFollowUp`) for a console that does not exist here.
 - `ids.ts` — `mintLedgerId`: the only door for event / follow-up / halt ids.
 - `scout.ts` — `scoreIssue` / `rankIssues`. Rank is unwired (see `github-scout.ts`). Score is stamped on packets and not consulted by `pickCandidate`.
 

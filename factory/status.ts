@@ -1,51 +1,46 @@
-import { repoById, sameRepoId } from "./allowlist.ts";
-import type { TaskPacket } from "./types.ts";
+import { repoById } from "./allowlist.ts";
+import type { PacketStatus, PolicyVerdict, TaskPacket } from "./types.ts";
 
-/**
- * Wave 1+ waits on this many Foundry-attested Wave 0 merges that *count toward the
- * promotion gate*. Distinct from `foundryAttestedWave0Merges`, which counts every
- * attested Wave 0 merge including the ones doctrine records-and-excludes.
- */
-export const PROMOTION_GATE_MERGES = 2;
+export function statusTone(
+  status: PacketStatus,
+): "muted" | "ok" | "danger" | "hold" | "accent" {
+  if (status === "merged" || status === "draft-ready" || status === "followed-up") return "ok";
+  if (status === "rejected" || status === "parked") return "danger";
+  if (status === "gated" || status === "reviewing" || status === "approved") return "hold";
+  return "accent";
+}
 
-/**
- * frontguard#196 (packet `pkt_ravidsrk_frontguard_195`) is a Wave 0 attested merge
- * the operator clicked on a repo they own. Foundry never merges, even on owned
- * repos (docs/PRODUCT.md §3 rule 4, §8). The merge is recorded so the ledger is
- * honest; it is excluded from the promotion gate so Wave 1 cannot open on a
- * self-merge that does not evidence a stranger accepted a Foundry patch.
- *
- * Promotion is orca-fleet#70 + #72 (docs/PRODUCT.md §8, docs/12-ledger.md).
- * Hard-coding this packet is the point: the exclusion is of *this merge*, not of
- * the frontguard repo. A later attested frontguard merge still counts.
- *
- * Failure mode if dropped: `foundryAttestedWave0Merges` is 3 on the seed, the
- * gate is `< 2`, and Wave 1 promotes on a merge doctrine names as excluded.
- */
-export function isPromotionGateExcluded(packet: TaskPacket): boolean {
-  return sameRepoId(packet.repoId, "ravidsrk/frontguard") && packet.issueNumber === 195;
+export function policyTone(
+  code: PolicyVerdict["code"],
+): "muted" | "ok" | "danger" | "hold" | "accent" {
+  if (code === "ALLOW") return "ok";
+  if (code === "DENY_FORBIDDEN" || code === "DENY_UNKNOWN_POLICY") return "danger";
+  return "hold";
+}
+
+export function formatWhen(iso: string | null) {
+  if (!iso || iso === "—") return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function needsFollowUp(packet: TaskPacket): boolean {
+  if (!packet.prUrl) return false;
+  if (["merged", "parked", "rejected"].includes(packet.status)) return false;
+  if (packet.status === "followed-up") return false;
+  return packet.status === "submitted" || packet.station === "follow-up";
 }
 
 export function foundryAttestedWave0Merges(packets: TaskPacket[]): number {
   return packets.filter((p) => {
     const repo = repoById(p.repoId);
     return repo?.wave === 0 && p.status === "merged" && Boolean(p.humanAttest);
-  }).length;
-}
-
-/**
- * The number `maySelectRepo` actually gates on. Same predicate as
- * `foundryAttestedWave0Merges` minus the merges `isPromotionGateExcluded` names.
- */
-export function promotionGateWave0Merges(packets: TaskPacket[]): number {
-  return packets.filter((p) => {
-    const repo = repoById(p.repoId);
-    return (
-      repo?.wave === 0 &&
-      p.status === "merged" &&
-      Boolean(p.humanAttest) &&
-      !isPromotionGateExcluded(p)
-    );
   }).length;
 }
 

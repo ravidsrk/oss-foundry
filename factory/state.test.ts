@@ -8,7 +8,7 @@ import { buildPacket } from "./packet.ts";
 import { applyReviewToScorecard, emptyScorecard, health, mergeRate } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { withOpenSubmittedWave1 } from "./seed-fixtures.ts";
-import { isValidPacketId, loadFactoryState, migrateV6, saveFactoryState } from "./state.ts";
+import { isValidPacketId, loadFactoryState, saveFactoryState } from "./state.ts";
 import { evaluatePolicy } from "./policy.ts";
 import type { FactoryState } from "./types.ts";
 
@@ -653,59 +653,4 @@ test("a packet id that could escape the log directory is refused at the load bou
   writeFileSync(path, JSON.stringify(poisoned, null, 2));
   const loaded = loadFactoryState(path);
   assert.equal(loaded.ok, false, "a ledger containing a traversal packet id must not load");
-});
-
-/**
- * `eventsDropped` records how many events the 80-entry ring has evicted. It is optional, because
- * ledgers written before it existed do not carry it — but optional must not mean unchecked.
- *
- * The field's whole purpose is to be trustworthy about how much history is gone. A string where a
- * number belongs would read as 0 through `eventsDroppedOf` and quietly claim nothing was lost, which
- * is worse than the silent truncation the counter was added to fix: a wrong number is believed.
- */
-test("eventsDropped is optional but a wrong type is refused", () => {
-  const dir = tmp("foundry-dropped");
-  const seed = seedState();
-
-  const absent = join(dir, "absent.json");
-  const { eventsDropped: _omit, ...withoutField } = seed as typeof seed & { eventsDropped?: number };
-  writeFileSync(absent, JSON.stringify(withoutField, null, 2));
-  const loadedAbsent = loadFactoryState(absent);
-  assert.ok(loadedAbsent.ok, `a ledger without eventsDropped must load: ${loadedAbsent.ok ? "" : loadedAbsent.error}`);
-
-  const valid = join(dir, "valid.json");
-  writeFileSync(valid, JSON.stringify({ ...seed, eventsDropped: 7 }, null, 2));
-  const loadedValid = loadFactoryState(valid);
-  assert.ok(loadedValid.ok, "a numeric eventsDropped must load");
-  assert.equal(loadedValid.ok && loadedValid.state.eventsDropped, 7);
-
-  // 1.5 is the interesting one and it is not hypothetical: `eventsDroppedOf` floors what it reads,
-  // so a fractional value would load and then be reported as the integer below it — understating
-  // loss in the one field whose entire job is to be accurate about how much history is gone.
-  for (const bad of ["7", -1, 1.5, 0.5, Number.NaN, Infinity, null, {}]) {
-    const path = join(dir, `bad-${String(bad)}.json`);
-    writeFileSync(path, JSON.stringify({ ...seed, eventsDropped: bad }, null, 2));
-    assert.equal(
-      loadFactoryState(path).ok,
-      false,
-      `eventsDropped: ${JSON.stringify(bad)} must be refused — it would read as 0 and claim no history was lost`,
-    );
-  }
-});
-
-/**
- * ...and the migration deliberately does NOT fill it. Every other forward-fill in `migrateV6`
- * supplies a value that was always logically present and merely unrecorded. This one would be an
- * assertion about history nobody has: an older ledger sitting at 80 events may have dropped many
- * events or none, and writing `0` states the second as fact.
- */
-test("migrateV6 does not invent an eventsDropped value", () => {
-  const seed = seedState();
-  const { eventsDropped: _omit, ...older } = seed as typeof seed & { eventsDropped?: number };
-  const migrated = migrateV6(older) as Record<string, unknown>;
-  assert.equal(
-    "eventsDropped" in migrated,
-    false,
-    "migrateV6 filled eventsDropped — that records a claim about lost history rather than a missing default",
-  );
 });

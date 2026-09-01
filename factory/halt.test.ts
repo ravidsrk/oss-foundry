@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmp } from "./tmp-dir.ts";
-import { EVENT_RING_CAP, eventsDroppedOf, maySelectRepo } from "./engine.ts";
+import { maySelectRepo } from "./engine.ts";
 import { applySecondaryLimitHalt, clearFactoryHalt, factoryHalt } from "./halt.ts";
 import { mintLedgerId } from "./ids.ts";
 import { seedState } from "./seed.ts";
@@ -117,26 +117,5 @@ test("only a human clears the halt, and the ledger records who", () => {
   assert.equal(
     cleared.events.some((e) => /ravidsrk/.test(e.message) && /halt/i.test(e.message)),
     true,
-  );
-});
-
-test("a halt on a full event ring records the dropped event", () => {
-  const seed = seedState();
-  const full = {
-    ...seed,
-    events: Array.from({ length: EVENT_RING_CAP }, (_, i) => ({
-      id: `evt_fill_${i}`,
-      at: "2026-08-29T00:00:00.000Z",
-      kind: "tick" as const,
-      message: `fill ${i}`,
-    })),
-  };
-  assert.equal(eventsDroppedOf(full), 0);
-  const halted = applySecondaryLimitHalt(full, { repoId: "ColeMurray/background-agents" });
-  assert.equal(halted.events.length, EVENT_RING_CAP);
-  assert.equal(
-    eventsDroppedOf(halted),
-    1,
-    "halt.ts must go through appendEvent so a drop on the factory-halt path is counted",
   );
 });

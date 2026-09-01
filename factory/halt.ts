@@ -1,4 +1,3 @@
-import { appendEvent } from "./engine.ts";
 import { mintLedgerId } from "./ids.ts";
 import type { FactoryEvent, FactoryHalt, FactoryState } from "./types.ts";
 
@@ -49,7 +48,11 @@ export function applySecondaryLimitHalt(
     source: "secondary-rate-limit",
     repoId: input.repoId,
   };
-  return appendEvent({ ...state, halt }, ev(`FACTORY HALT (${halt.source}): ${halt.reason}`));
+  return {
+    ...state,
+    halt,
+    events: [ev(`FACTORY HALT (${halt.source}): ${halt.reason}`), ...state.events].slice(0, 80),
+  };
 }
 
 export function clearFactoryHalt(state: FactoryState, by: string, note: string): FactoryState {
@@ -57,8 +60,11 @@ export function clearFactoryHalt(state: FactoryState, by: string, note: string):
   if (!previous) return state;
   const rest = { ...state };
   delete rest.halt;
-  return appendEvent(
-    rest,
-    ev(`Factory halt from ${previous.at} cleared by ${by}: ${note || "no note"}`),
-  );
+  return {
+    ...rest,
+    events: [
+      ev(`Factory halt from ${previous.at} cleared by ${by}: ${note || "no note"}`),
+      ...state.events,
+    ].slice(0, 80),
+  };
 }

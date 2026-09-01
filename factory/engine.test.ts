@@ -20,15 +20,11 @@ import {
   applyReject,
   applyRevert,
   applyTick,
-  appendEvent,
-  appendEvents,
   bindingFromCompare,
   branchMentionsIssue,
   classifyCompetition,
   competingWorkAdvisory,
   commitTrailerViolation,
-  EVENT_RING_CAP,
-  eventsDroppedOf,
   evidenceIsReady,
   findCompetingPull,
   hasInflight,
@@ -68,15 +64,9 @@ import {
   scorecardRow,
   revertWindow,
 } from "./scorecard.ts";
-import {
-  foundryAttestedWave0Merges,
-  isPromotionGateExcluded,
-  PROMOTION_GATE_MERGES,
-  promotionGateWave0Merges,
-} from "./status.ts";
 import { seedState } from "./seed.ts";
 import { asOpenSubmitted, wave1Packet, withOpenSubmittedWave1 } from "./seed-fixtures.ts";
-import { loadFactoryState, saveFactoryState } from "./state.ts";
+import { loadFactoryState } from "./state.ts";
 import type { LiveIssue as ScoutIssue } from "./github-scout.ts";
 import type { EvidenceManifest } from "./types.ts";
 import { INFLIGHT_STATUSES, inflightCount, type FactoryState } from "./types.ts";
@@ -188,116 +178,6 @@ test("Wave 1 cannot start before two attested Wave 0 merges", () => {
   if (ticked.packet) {
     assert.notEqual(ticked.packet.repoId, "ColeMurray/background-agents");
   }
-});
-
-/**
- * The published seed has three attested Wave 0 merges. PRODUCT.md §8 excludes frontguard#196
- * (operator clicked merge on an owned repo). If `maySelectRepo` still gated on the raw
- * `foundryAttestedWave0Merges` count, one orca-fleet merge plus that excluded packet would
- * open Wave 1 — a merge the doctrine says does not count.
- */
-test("Wave 1 cannot open on the operator-clicked frontguard#196 merge", () => {
-  const seed = seedState();
-  const excluded = seed.packets.find((p) => p.repoId === "ravidsrk/frontguard" && p.issueNumber === 195);
-  assert.ok(excluded, "seed must still carry the frontguard#196 packet the doctrine names");
-  assert.equal(isPromotionGateExcluded(excluded), true, "frontguard#195 is the named exclusion");
-  const orca = seed.packets.filter((p) => p.repoId === "ravidsrk/orca-fleet" && p.status === "merged");
-  assert.equal(orca.length, 2);
-
-  const onlyExcluded = { ...blank(), packets: [excluded] };
-  assert.equal(foundryAttestedWave0Merges(onlyExcluded.packets), 1);
-  assert.equal(promotionGateWave0Merges(onlyExcluded.packets), 0);
-  const onExcluded = maySelectRepo(onlyExcluded, "ColeMurray/background-agents");
-  assert.equal(onExcluded.ok, false, "frontguard#196 alone must not open Wave 1");
-  if (!onExcluded.ok) assert.match(onExcluded.reason, /two Foundry-attested Wave 0 merges/);
-
-  const mixed = { ...blank(), packets: [excluded, orca[0]!] };
-  assert.equal(foundryAttestedWave0Merges(mixed.packets), 2);
-  assert.equal(promotionGateWave0Merges(mixed.packets), 1);
-  assert.equal(
-    maySelectRepo(mixed, "ColeMurray/background-agents").ok,
-    false,
-    "one orca-fleet merge plus frontguard#196 is still one gate merge — this dies if the exclusion is dropped",
-  );
-
-  assert.equal(promotionGateWave0Merges(seed.packets), PROMOTION_GATE_MERGES);
-  assert.equal(
-    maySelectRepo(seed, "ColeMurray/background-agents").ok,
-    true,
-    "the published seed still opens Wave 1 on orca-fleet#70 + #72",
-  );
-});
-
-function ringEvent(i: number) {
-  return {
-    id: `evt_ring_${i}`,
-    at: "2026-08-29T00:00:00.000Z",
-    kind: "tick" as const,
-    message: `ring ${i}`,
-  };
-}
-
-/**
- * `events` is a bounded ring of 80. The 81st prepend used to destroy the oldest with no
- * marker, no counter, no archive — while docs/12-ledger.md positions the ledger as the
- * audit surface. `eventsDropped` is the cheapest honest record of that loss.
- */
-test("the 81st event records the loss instead of truncating silently", () => {
-  let state = blank();
-  for (let i = 0; i < EVENT_RING_CAP; i++) state = appendEvent(state, ringEvent(i));
-  assert.equal(state.events.length, EVENT_RING_CAP);
-  assert.equal(eventsDroppedOf(state), 0, "a full ring has not dropped anything yet");
-  const oldestId = state.events[EVENT_RING_CAP - 1]!.id;
-  state = appendEvent(state, ringEvent(EVENT_RING_CAP));
-  assert.equal(state.events.length, EVENT_RING_CAP);
-  assert.equal(state.events[0]!.id, `evt_ring_${EVENT_RING_CAP}`);
-  assert.equal(
-    state.events.some((e) => e.id === oldestId),
-    false,
-    "the oldest event is gone from the ring",
-  );
-  assert.equal(
-    eventsDroppedOf(state),
-    1,
-    "the 81st event must increment eventsDropped; silent eviction is the defect",
-  );
-});
-
-test("a batch overflow counts every dropped event", () => {
-  let state = blank();
-  for (let i = 0; i < EVENT_RING_CAP; i++) state = appendEvent(state, ringEvent(i));
-  state = appendEvents(state, [ringEvent(100), ringEvent(101), ringEvent(102)]);
-  assert.equal(eventsDroppedOf(state), 3);
-  assert.equal(state.events.length, EVENT_RING_CAP);
-  assert.equal(state.events[0]!.id, "evt_ring_100");
-});
-
-test("a missing eventsDropped field is read as zero", () => {
-  assert.equal(eventsDroppedOf(blank()), 0);
-});
-
-test("eventsDropped survives a ledger roundtrip even though state.ts does not yet name it", () => {
-  let state = blank();
-  for (let i = 0; i < EVENT_RING_CAP + 1; i++) state = appendEvent(state, ringEvent(i));
-  assert.equal(eventsDroppedOf(state), 1);
-  const path = join(tmp("ring-drop-"), "state.json");
-  saveFactoryState(path, state);
-  const loaded = loadFactoryState(path);
-  assert.equal(loaded.ok, true);
-  if (!loaded.ok) return;
-  assert.equal(eventsDroppedOf(loaded.state), 1, "the extra field must survive JSON load without a types.ts/state.ts change");
-  assert.equal(loaded.state.events.length, EVENT_RING_CAP);
-});
-
-test("applyTick records a drop when the ring is already full", () => {
-  let state = blank();
-  for (let i = 0; i < EVENT_RING_CAP; i++) state = appendEvent(state, ringEvent(i));
-  const ticked = applyTick(state);
-  assert.equal(ticked.state.events.length, EVENT_RING_CAP);
-  assert.ok(
-    eventsDroppedOf(ticked.state) >= 1,
-    "the live tick path must go through appendEvent so overflow is counted",
-  );
 });
 
 test("scorecard halt stop blocks queue and approve", () => {
