@@ -26,10 +26,14 @@ policyDocs        [{ name: AGENTS.md | CONTRIBUTING, chars, excerpt, truncated }
                   `excerpt.length < chars`. Absent when nothing was fetched, which is a different
                   fact from a document fetched and empty (`chars: 0`) and is displayed as one.
 scout             ScoutScore
-createdAt         ISO timestamp. Required string on `TaskPacket` (`factory/types.ts`). `isPacket`
-                  (`factory/state.ts`) requires `typeof === "string"`. `migrateV6` fills a missing
-                  key from `updatedAt` or `"—"` before that check; a non-string is refused.
-updatedAt         ISO timestamp. Required the same way. Written on every status bump.
+createdAt         Required STRING, ISO 8601 by convention but not by enforcement. `isPacket`
+                  (`factory/state.ts:265`) checks `typeof === "string"` and nothing more, so the
+                  format is not validated on load — and `migrateV6` (`factory/state.ts:356`) fills a
+                  missing key from `updatedAt` or, failing that, the literal `"—"`. So a loadable
+                  packet's timestamp may not be a timestamp at all. Do not parse these without
+                  checking; a non-string IS refused.
+updatedAt         Required the same way, with the same caveat (`factory/state.ts:357`). Written on
+                  every status bump.
 humanAttest       { by, at, note }  required before implement on Wave 1+
 evidence          EvidenceManifest
 prBody
