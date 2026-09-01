@@ -894,8 +894,15 @@ function fencedFactoryBlocks(markdown: string): string[] {
   const out: string[] = [];
   for (const block of markdown.matchAll(/```[^\n]*\n([\s\S]*?)```/g)) {
     const body = block[1]!;
-    if (body.split("\n").filter((l) => l.trim()).length < 3) continue;
+    const lines = body.split("\n").filter((l) => l.trim());
+    if (lines.length < 3) continue;
     if (!/Foundry/i.test(body)) continue;
+    // PROSE, not payload. Review's P2: a fence is also how CLI output, config and transcripts are
+    // shown, and any of those naming the factory would have reddened CI for a future author who
+    // pasted one. A disclosure is sentences — every line opens like one and closes like one — which
+    // command output and YAML do not. Narrowing here rather than widening the roster of exceptions,
+    // because an exception list is the thing that rots.
+    if (!lines.every((l) => /^["'(\[]?[A-Z]/.test(l.trim()) && /[.!?"')\]]$/.test(l.trim()))) continue;
     out.push(body);
   }
   return out;
@@ -936,6 +943,47 @@ test("the structural disclosure detector reads shape, not wording (issue #106)",
     "a multi-line block that names no factory is not a disclosure",
   );
   assert.deepEqual(fencedFactoryBlocks("Foundry sends a disclosure with every patch."), [], "prose is not a fence");
+
+  // ...and the shapes a fence is normally used for, which is review's P2: a doc author pasting any
+  // of these would have reddened CI on a block that asserts nothing about what the factory sends.
+  assert.deepEqual(
+    fencedFactoryBlocks("```\n$ npm run foundry -- tick\nFoundry clock fired, no packet open\npacket already open https://example.invalid/1\n```"),
+    [],
+    "CLI output naming the factory is payload, not a disclosure",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```yaml\nfoundry:\n  live: true\n  repo: ravidsrk/oss-foundry\n```"),
+    [],
+    "configuration naming the factory is payload, not a disclosure",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nERROR Foundry refused the packet\n  at tick (factory/cli.ts:1)\n  at main (factory/cli.ts:2)\n```"),
+    [],
+    "a stack trace naming the factory is payload, not a disclosure",
+  );
+
+  // One row per condition, each isolating the one it names. Without these the conditions cover for
+  // each other and a mutant deleting any single one survives — which is how this list was found.
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nFoundry Config Reference\nRepo Name\nLive Flag\n```"),
+    [],
+    "capitalised headings that never close a sentence are not prose",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nfoundry runs the clock every six hours.\nit opens no pull requests.\nit files an issue instead.\n```"),
+    [],
+    "sentences that never open with a capital are not prose either",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nFoundry sends this block.\nA human reviewed it.\n```"),
+    [],
+    "two lines is below the floor, however prose-shaped",
+  );
+  assert.deepEqual(
+    fencedFactoryBlocks("```\nThis patch was prepared automatically.\nA human reviewed it first.\nThe tool does not merge.\n```"),
+    [],
+    "prose of the right shape that names no factory is not this factory's disclosure",
+  );
 });
 
 test("attach-draft refuses a PR body without the verbatim disclosure block", () => {
