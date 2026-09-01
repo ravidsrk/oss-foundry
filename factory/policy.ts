@@ -53,7 +53,13 @@ const FORBIDDEN_STATEMENTS: RegExp[] = [
   // yet listed defaults to DENY. So the ban now requires a departure object or nothing at all: a
   // place, an adverb of leaving, or punctuation. Anything unrecognised is not a ban, which is the
   // safe default for a roster with no appeal.
-  /if\s+you\s+are\s+(?:an?\s+)?(?:bot|llm|agent|chatgpt)[^.\n]{0,40}(?:turn\s+back|go\s+away|do\s+not\s+submit|leave(?=\s*(?:[.,;!]|$)|\s+(?:this|the|our)?\s*(?:repo|repository|project|codebase)\b|\s+(?:now|immediately|at\s+once|here|quietly)\b|\s+us\s+alone\b))/i,
+  //
+  // The place itself carries one narrow exclusion, for the indirect-object reading review found:
+  // "leave the repo a comment" names a place and still asks for a comment. Enumerating comment nouns
+  // is the wrong polarity in general — that is what the previous attempt got wrong — but here it sits
+  // immediately after a matched place, where the set of continuations is small and bounded. "leave
+  // the repository and never come back" is still a ban, which is the row that keeps this honest.
+  /if\s+you\s+are\s+(?:an?\s+)?(?:bot|llm|agent|chatgpt)[^.\n]{0,40}(?:turn\s+back|go\s+away|do\s+not\s+submit|leave(?=\s*(?:[.,;!]|$)|\s+(?:this|the|our)?\s*(?:repo|repository|project|codebase)\b(?!(?:\s+\w+){0,2}\s+(?:comment|note|feedback|message|remark|review|reply))|\s+(?:now|immediately|at\s+once|here|quietly)\b|\s+us\s+alone\b))/i,
 ];
 
 /** A human gate that is NOT a signature: someone looks, nobody signs. Separate roster so the

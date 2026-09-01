@@ -495,6 +495,9 @@ const SECOND_PERSON_INVITATIONS: string[] = [
   "if you are a bot, leave detailed feedback in the issue",
   "if you are an agent, leave a brief note explaining the change",
   "if you are an agent, leave us a short message first",
+  // The indirect-object reading: a place named, and a comment still asked for.
+  "if you are an agent, leave the repo a comment",
+  "if you are a bot, leave the project a short note",
 ];
 
 const SECOND_PERSON_BANS: string[] = [
@@ -508,6 +511,9 @@ const SECOND_PERSON_BANS: string[] = [
   "if you are an agent, leave immediately",
   "if you are an llm, leave.",
   "if you are a bot, leave us alone",
+  // ...and the row that keeps the exclusion above honest: a place followed by more BAN, not a
+  // comment. If the exclusion were widened to any continuation, this would stop denying.
+  "if you are an agent, leave the repository and never come back",
 ];
 
 test("a second-person invitation to comment is not a ban, and a second-person ban still is", () => {
