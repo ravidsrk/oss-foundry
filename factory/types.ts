@@ -362,5 +362,19 @@ export interface FactoryState {
   mergedTotal: number;
   bans: number;
   humanApprovalsRemaining: number;
+  /**
+   * How many events the 80-entry ring has evicted over this ledger's life.
+   *
+   * `events` is a bounded ring, so the 81st event destroys the oldest. Before this counter that loss
+   * was silent — no marker, no count, no archive — while `docs/12-ledger.md` positions the ledger as
+   * the audit surface. A monotonic count is the cheapest honest record: it does not recover the lost
+   * events, and it does not pretend to. It tells a reader that the window they are looking at is not
+   * the whole history, which is the difference between a partial log and a misleading one.
+   *
+   * Optional because ledgers written before it existed do not carry it, and `eventsDroppedOf` reads
+   * an absent field as 0 — which is true for them: a ledger that never reached 80 events dropped
+   * nothing.
+   */
+  eventsDropped?: number;
   halt?: FactoryHalt;
 }

@@ -371,6 +371,11 @@ export function isFactoryState(value: unknown): value is FactoryState {
     typeof o.bans === "number" &&
     typeof o.humanApprovalsRemaining === "number" &&
     (o.lastTickAt === null || typeof o.lastTickAt === "string") &&
+    // Optional because ledgers predating the counter do not carry it, but a WRONG type is still
+    // refused — the whole point of the field is to be trustworthy about how much history is gone,
+    // and a string where a number belongs would read as 0 through `eventsDroppedOf` and quietly
+    // claim nothing was lost.
+    optional(o.eventsDropped, (v) => typeof v === "number" && Number.isFinite(v) && v >= 0) &&
     optional(o.halt, isHalt)
   );
 }
@@ -432,6 +437,12 @@ export function migrateV6(value: unknown): unknown {
   const o = { ...(value as Record<string, unknown>) };
   if (Array.isArray(o.packets)) o.packets = o.packets.map(migratePacket);
   if (Array.isArray(o.scorecard)) o.scorecard = o.scorecard.map(migrateScorecard);
+  // `eventsDropped` is deliberately NOT forward-filled. Every other fill here supplies a value that
+  // was always logically present and merely unrecorded; this one would be an assertion about
+  // history we do not have. An older ledger with 80 events may have dropped many or none, and
+  // writing `0` would state the second as fact. Absence reads as 0 through `eventsDroppedOf`, which
+  // is the same number — but it is an absent field rather than a recorded claim, and that
+  // distinction is the field's entire reason for existing.
   return o;
 }
 
