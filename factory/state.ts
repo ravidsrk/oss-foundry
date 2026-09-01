@@ -545,13 +545,21 @@ export function saveFactoryState(path: string, state: FactoryState): void {
 export function backupFactoryState(path: string): { ok: true; backup?: string } | { ok: false; error: string } {
   if (!existsSync(path)) return { ok: true };
   const backup = `${path}.bak`;
+  // Same atomic dance: a backup that can itself be torn is not a backup.
+  const tmpPath = join(dirname(path), `.tmp-${basename(backup)}.${process.pid}`);
   try {
-    // Same atomic dance: a backup that can itself be torn is not a backup.
-    const tmpPath = join(dirname(path), `.tmp-${basename(backup)}.${process.pid}`);
     writeFileSync(tmpPath, readFileSync(path), { flush: true });
     renameSync(tmpPath, backup);
     return { ok: true, backup };
   } catch (err) {
+    // Take the debris. A failed backup that leaves a full-size staging copy beside the ledger turns
+    // "could not make a backup" into "quietly filled the disk with them", one per mutating run —
+    // and the operator never sees it, because a failed backup is a warning and not a refusal.
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      // Nothing useful to do, and the real error below is the one worth reporting.
+    }
     return { ok: false, error: err instanceof Error ? err.message : "backup failed" };
   }
 }

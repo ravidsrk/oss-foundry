@@ -284,6 +284,8 @@ node --experimental-strip-types factory/cli.ts witness-check
 
 **The expiry is 90 days and nothing in this repository reminds you.** That is a known gap, filed rather than fixed: the scope is checked at mint time by the wizard and never re-checked at runtime, so a token that is broadened later is accepted silently. Note the expiry date somewhere you will see it.
 
-**What is safe to do while the PAT is missing.** Everything except `open-draft`. `tick`, `approve`, `evidence`, `attach-witness`, `sync`, `reconcile`, `ledger` and `status` need no write credential. A packet can sit at `draft-ready` indefinitely; the in-flight cap is not consumed by a missing token.
+**What is safe to do while the PAT is missing.** Everything except `open-draft`. `tick`, `approve`, `evidence`, `attach-witness`, `sync`, `reconcile`, `ledger` and `status` need no write credential.
+
+**But the factory is stalled, not merely narrowed, and that is worth being exact about.** `draft-ready` is one of the `INFLIGHT_STATUSES` (`factory/types.ts`), so a packet waiting on a token holds the single in-flight slot and `tick` will select nothing new until it moves. There is no way to work around this by starting other work: the cap is one, deliberately. Either restore the PAT, or `reject` the packet to free the slot and accept that the evidence must be regenerated later.
 
 **What must NOT be done.** Do not substitute your own personal token for `FOUNDRY_PAT`. The separation is the point: the machine account is what makes a draft attributable to the factory rather than to the maintainer, and `docs/07-github-app.md` is the design.
