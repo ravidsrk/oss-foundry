@@ -26,6 +26,10 @@ policyDocs        [{ name: AGENTS.md | CONTRIBUTING, chars, excerpt, truncated }
                   `excerpt.length < chars`. Absent when nothing was fetched, which is a different
                   fact from a document fetched and empty (`chars: 0`) and is displayed as one.
 scout             ScoutScore
+createdAt         ISO timestamp. Required string on `TaskPacket` (`factory/types.ts`). `isPacket`
+                  (`factory/state.ts`) requires `typeof === "string"`. `migrateV6` fills a missing
+                  key from `updatedAt` or `"—"` before that check; a non-string is refused.
+updatedAt         ISO timestamp. Required the same way. Written on every status bump.
 humanAttest       { by, at, note }  required before implement on Wave 1+
 evidence          EvidenceManifest
 prBody
@@ -35,6 +39,8 @@ prMeta            { url, title, draft, state, merged, mergeable, commits, review
                   `humanReview` ABSENT means the review endpoints were not read — never "nobody reviewed it".
                   `reviewComments` is GitHub's own total: it counts bots, so it is a record, not the KPI.
 followUps         [{ id, at, kind: review-reply|bot-reconcile|quiet|ci|note, body, url? }]
+parkReason        optional string. Why the engine parked the packet (policy denial, scope overflow,
+                  …). `isPacket` accepts a string or absence.
 sandboxSession
 ```
 
