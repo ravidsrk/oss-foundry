@@ -1932,7 +1932,7 @@
     "orphan_evidence_removed": 0,
     "branches_swept": 1,
     "residue_consolidated": 0,
-    "cleanup_pr": null,
+    "cleanup_pr": "https://github.com/ravidsrk/oss-foundry/pull/162",
     "manifest_undispositioned": 0
   }
 }
