@@ -1,7 +1,7 @@
 {
   "product": "Foundry \u2014 operator-gated OSS contribution control plane",
   "repo_path": "/Users/ravindra/projects/oss-foundry",
-  "run_id": "20260901-1143",
+  "run_id": "20260916-1845",
   "mode": "drive",
   "baseline": {
     "commit": "74af0b27f17ac39cda9779cbc6c73e7ed265e7df",
@@ -10,13 +10,13 @@
     "evidence": "evidence/p0-coldstart-2-build-test-run.txt",
     "note": "npm ci fails (no lockfile); zero declared deps so install is a no-op; 379/379 green from a fresh clone"
   },
-  "current_commit": "ba59027",
-  "resume_pointer": "CONDITIONAL_GO/H-03",
+  "current_commit": "f15cec1a6d6aabc14336753e11fb5d90e8848e64",
+  "resume_pointer": "S6",
   "definition_frozen_at": "a708920",
   "completion_pct": 86,
   "gate": {
     "status": "CONDITIONAL_GO",
-    "reason": "Every agent-side gate condition met. Outstanding: launch-gate \u00a72 evidence for CF-01..CF-05, all blocked on H-03 (one roster row) and H-01 (machine account). \u00a76 met in mechanism and unit-proven; a live scheduled-run failure cannot be produced from this repository."
+    "reason": "CONDITIONAL GO. CF-01..CF-05 happy paths blocked on H-03/H-01. \u00a76: alert job filed #136 on dispatch+cancel (same job graph as schedule); a scheduled outage was not observed (A-19). \u00a77: clone+status+tick idle in 9.14s; gated ALLOW is H-03 (A-18). Frozen DEFINITION failure paths that need a packet remain on G-16/17/18."
   },
   "angles": [
     {
@@ -320,8 +320,8 @@
       "irreversible": false,
       "status": "partial",
       "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "tick returns idle on the exhausted roster \u2014 blocked on H-03"
+      "failure_evidence": "evidence/CF-01-idle-exhausted-roster.txt",
+      "note": "tick returns idle on the exhausted roster \u2014 blocked on H-03; idle path captured 2026-09-16"
     },
     {
       "id": "CF-02",
@@ -331,8 +331,8 @@
       "irreversible": false,
       "status": "works",
       "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "coded and gated; no happy-path evidence until a packet exists \u2014 blocked on H-03"
+      "failure_evidence": "evidence/CF-02-failure-not-gated.txt",
+      "note": "coded and gated; happy path blocked on H-03; merged-status refusal captured 2026-09-16"
     },
     {
       "id": "CF-03",
@@ -342,8 +342,8 @@
       "irreversible": false,
       "status": "partial",
       "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "no machine witness ever produced; reachable at Wave 0 once a packet exists \u2014 blocked on H-03"
+      "failure_evidence": "evidence/CF-03-failure-refuse-before-clone.txt",
+      "note": "no machine witness ever produced; reachable at Wave 0 once a packet exists \u2014 blocked on H-03; refuse-before-clone captured 2026-09-16"
     },
     {
       "id": "CF-04",
@@ -353,8 +353,8 @@
       "irreversible": true,
       "status": "partial",
       "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "never fired \u2014 blocked on H-01 (machine account + PAT)"
+      "failure_evidence": "evidence/CF-04-failure-not-draft-ready.txt",
+      "note": "never fired happy path \u2014 blocked on H-01; not-draft-ready refusals captured 2026-09-16"
     },
     {
       "id": "CF-05",
@@ -364,8 +364,8 @@
       "irreversible": true,
       "status": "works",
       "happy_evidence": null,
-      "failure_evidence": null,
-      "note": "the path actually used for the one external PR; no captured happy-path run"
+      "failure_evidence": "evidence/CF-05-failure-cannot-attach.txt",
+      "note": "merged-status refusal + disclosure-refusal suite (CF-05-failure-disclosure.txt); happy path blocked on H-01"
     },
     {
       "id": "CF-06",
@@ -597,7 +597,7 @@
       "tasks": [],
       "owner": "human:H-01",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/137"
     },
     {
       "id": "G-17",
@@ -608,7 +608,7 @@
       "tasks": [],
       "owner": "human:H-03",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/138"
     },
     {
       "id": "G-18",
@@ -619,7 +619,7 @@
       "tasks": [],
       "owner": "human:H-03",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/139"
     },
     {
       "id": "G-19",
@@ -707,7 +707,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/140"
     },
     {
       "id": "G-26",
@@ -717,7 +717,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/141"
     },
     {
       "id": "G-27",
@@ -727,7 +727,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/142"
     },
     {
       "id": "G-28",
@@ -737,7 +737,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/143"
     },
     {
       "id": "G-29",
@@ -747,7 +747,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/144"
     },
     {
       "id": "G-30",
@@ -757,7 +757,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/145"
     },
     {
       "id": "G-31",
@@ -767,7 +767,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/146"
     },
     {
       "id": "G-32",
@@ -777,7 +777,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/147"
     },
     {
       "id": "G-33",
@@ -787,7 +787,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/148"
     },
     {
       "id": "G-34",
@@ -797,7 +797,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/149"
     },
     {
       "id": "G-35",
@@ -807,7 +807,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/150"
     },
     {
       "id": "G-36",
@@ -817,7 +817,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/151"
     },
     {
       "id": "G-37",
@@ -827,7 +827,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/152"
     },
     {
       "id": "G-38",
@@ -837,7 +837,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/153"
     },
     {
       "id": "G-39",
@@ -847,7 +847,7 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/154"
     },
     {
       "id": "G-40",
@@ -857,7 +857,120 @@
       "tasks": [],
       "owner": "agent",
       "accept_expiry": null,
-      "issue_url": null
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/155"
+    },
+    {
+      "id": "G-41",
+      "angle": 9,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "closed",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/136",
+      "source": [
+        "S5-B"
+      ]
+    },
+    {
+      "id": "G-42",
+      "angle": 13,
+      "severity": "S1",
+      "decision": "FINISH",
+      "status": "closed",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null,
+      "source": [
+        "S5-B"
+      ]
+    },
+    {
+      "id": "G-43",
+      "angle": 6,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "closed",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null,
+      "source": [
+        "S5-B"
+      ]
+    },
+    {
+      "id": "G-44",
+      "angle": 1,
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/121",
+      "source": [
+        "S5-B",
+        "#121"
+      ]
+    },
+    {
+      "id": "G-45",
+      "angle": 13,
+      "severity": "S2",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/156",
+      "source": [
+        "S5-B"
+      ]
+    },
+    {
+      "id": "G-46",
+      "angle": 1,
+      "severity": "S2",
+      "decision": "FINISH",
+      "status": "closed",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null,
+      "source": [
+        "S5-B"
+      ]
+    },
+    {
+      "id": "G-47",
+      "angle": 7,
+      "severity": "S3",
+      "decision": "FINISH",
+      "status": "closed",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": null,
+      "source": [
+        "S5-B"
+      ]
+    },
+    {
+      "id": "G-48",
+      "angle": 7,
+      "severity": "S3",
+      "decision": "DEFER",
+      "status": "open",
+      "tasks": [],
+      "owner": "agent",
+      "accept_expiry": null,
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/157",
+      "source": [
+        "S5-B"
+      ]
     }
   ],
   "phases": [
@@ -1527,11 +1640,15 @@
         "T-27"
       ],
       "owner": "agent",
-      "status": "active",
+      "status": "done",
       "branch": null,
       "pr": null,
       "commit": null,
-      "evidence": [],
+      "evidence": [
+        "docs/completion/STATUS.md",
+        "docs/completion/evidence/T-18-alert-fires-live.txt",
+        "docs/completion/evidence/T-26-stranger-test.txt"
+      ],
       "review": "greptile",
       "attempts": 0,
       "block_signature": null
@@ -1547,7 +1664,8 @@
       ],
       "gates_launch": true,
       "verification": "witness-check, then drive open-draft end to end and capture the draft PR URL",
-      "status": "open"
+      "status": "open",
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/158"
     },
     {
       "id": "H-02",
@@ -1558,7 +1676,8 @@
       "gates_launch": false,
       "verification": "capture a real Wave 0 witness with two distinct log sha256s",
       "status": "open",
-      "note": "does NOT gate launch: CF-03 is reachable via Wave 0 host witnessing (witness.ts:400-401) on orca-fleet/frontguard"
+      "note": "does NOT gate launch: CF-03 is reachable via Wave 0 host witnessing (witness.ts:400-401) on orca-fleet/frontguard",
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/159"
     },
     {
       "id": "H-03",
@@ -1570,7 +1689,8 @@
       ],
       "gates_launch": true,
       "verification": "npm run validate, then tick -> gated ALLOW packet, approve, evidence",
-      "status": "open"
+      "status": "open",
+      "issue_url": "https://github.com/ravidsrk/oss-foundry/issues/160"
     }
   ],
   "assumptions": [
@@ -1638,6 +1758,70 @@
       "id": "A-13",
       "phase": "P4",
       "decision": "The GitHub review bot's inline comments are a required pre-merge read, not advisory noise behind a green check. Two valid findings on #122 were merged past because the check was green and the comments were never fetched."
+    },
+    {
+      "id": "A-14",
+      "stage": "S1",
+      "decision": "Resume not restart; 2.2% file change",
+      "rejected": [
+        "full re-audit"
+      ],
+      "reason": "R4 20% threshold"
+    },
+    {
+      "id": "A-15",
+      "stage": "S1",
+      "decision": "Continue into S5-B/C and S6",
+      "rejected": [
+        "stop at CONDITIONAL_GO/H-03"
+      ],
+      "reason": "prior run never filed issues or cleaned up"
+    },
+    {
+      "id": "A-16",
+      "stage": "S1",
+      "decision": "Do not pick a firstIssues row",
+      "rejected": [
+        "scratch roster row as CF-01 happy evidence"
+      ],
+      "reason": "H-03 is a maintainer product decision"
+    },
+    {
+      "id": "A-17",
+      "stage": "S4",
+      "decision": "Write missing T-26-stranger-test.txt from re-run",
+      "rejected": [
+        "declare \u00a77 unmet for missing filename"
+      ],
+      "reason": "path re-demonstrated; tracker drift"
+    },
+    {
+      "id": "A-18",
+      "stage": "S5",
+      "decision": "\u00a77 is onboarding, not CF-01 happy",
+      "rejected": [
+        "leave NO-GO because tick idled"
+      ],
+      "reason": "would collapse \u00a77 into H-03"
+    },
+    {
+      "id": "A-19",
+      "stage": "S5",
+      "decision": "Prove \u00a76 by dispatch+cancel then close #136",
+      "rejected": [
+        "force_fail input",
+        "leave #136 open"
+      ],
+      "reason": "cancel is a documented non-success path"
+    },
+    {
+      "id": "A-20",
+      "stage": "S5",
+      "decision": "Keep CONDITIONAL GO after greptile P1s; soften G-43/G-46",
+      "rejected": [
+        "downgrade NO-GO"
+      ],
+      "reason": "\u00a76 same job graph as schedule; \u00a77 timed clone+tick idle; \u00a73 concurrent reader"
     }
   ],
   "research": [
@@ -1711,6 +1895,29 @@
       "commit": "ba59027",
       "completion_pct": 86,
       "gate": "CONDITIONAL_GO"
+    },
+    {
+      "run_id": "20260916-1845",
+      "commit": "f15cec1",
+      "completion_pct": 86,
+      "gate": "CONDITIONAL_GO"
     }
-  ]
+  ],
+  "stage": "S6",
+  "issues": {
+    "created": 24,
+    "updated": 1,
+    "reopened": 0,
+    "dedup_skipped": 0,
+    "existing_fetched": 68,
+    "ledger": "docs/completion/ISSUES.md"
+  },
+  "cleanup": {
+    "scratch_dirs_removed": 0,
+    "orphan_evidence_removed": 0,
+    "branches_swept": 0,
+    "residue_consolidated": 0,
+    "cleanup_pr": null,
+    "manifest_undispositioned": 0
+  }
 }

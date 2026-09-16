@@ -1,0 +1,17 @@
+# T-03 — hygiene batch (G-23 / G-47)
+
+HEAD: f15cec1a6d6aabc14336753e11fb5d90e8848e64
+date: 2026-09-16 (resume re-capture; original T-03 file was never written — G-47)
+
+S5-B: T-03 marked done; named evidence file absent. The work landed:
+
+1. `timeout-minutes: 20` on `.github/workflows/ci.yml:41` (same bound as oss-tick).
+2. `"private": true` explained in README.md:27 as a publish guard on a public MIT repo, not a mistake.
+3. Merged local branch sweep was a 2026-09-01 operator-machine action; this resume sees local branches `main` and `sweep2/issue-37` only. `sweep2/issue-37` is kept on purpose until G-29's salvage issue exists.
+
+`git branch --list` on the operator host 2026-09-16:
+```
+* main
+  sweep2/issue-37
+```
+Remote heads: `main` only.

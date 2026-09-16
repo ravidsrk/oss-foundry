@@ -1,0 +1,34 @@
+# CF-02 failure — approve refused from status merged
+HEAD: f15cec1
+command: npm run foundry -- approve pkt_ravidsrk_orca-fleet_71 --note 'resume probe' --by pcd
+exit: 1
+
+
+> foundry
+> node --experimental-strip-types factory/cli.ts approve pkt_ravidsrk_orca-fleet_71 --note resume probe --by pcd
+
+Policy text the gate parsed for ravidsrk/orca-fleet#71 — read it before you attest:
+
+  AGENTS.md — 50 chars
+  | This is our repository. Agents may open draft PRs.
+
+  CONTRIBUTING — not fetched.
+
+  Committed policy record — AGENTS.md (fetched 2026-08-28, stance welcome):
+  | Guidance for AI coding agents (Claude Code, Cursor, Copilot, Gemini CLI, OpenCode, etc.) working in this repository.
+
+  Scanner: no ban statement matched in 50 chars from AGENTS.md.
+  Verdict: ALLOW — Allowlisted, policy parsed, scope inside caps. Policy record: welcome (AGENTS.md @ 2026-08-28).
+  The scanner is a high-recall suggester with a known miss mode, not the arbiter. You are.
+
+cannot approve pkt_ravidsrk_orca-fleet_71 from status merged
+
+Also unknown packet:
+
+> foundry
+> node --experimental-strip-types factory/cli.ts approve pkt_does_not_exist --note test
+
+unknown packet pkt_does_not_exist
+
+DEFINITION failure path was: issue closed or competing work between gate and freeze.
+Cannot reach that path without a gated packet (H-03). Closest live refusal: cannot approve from merged.

@@ -4,6 +4,82 @@
 
 ```
 VERDICT: CONDITIONAL GO
+COMPLETION: 86% (was 68% at baseline 74af0b2; 86% at ba59027)   GATE: agent-side lines met after S5-B mini loop; CF-01..CF-05 happy paths blocked on H-03 and H-01
+CRITICAL FLOWS: 7 total · 2 verified · 2 works · 3 partial · 0 cut
+GAPS: S0 0/2 open · S1 3/18 FINISH open (G-16/17/18) · DEFER 19 · CUT 1 · ACCEPT 0
+TASKS: 28/28 done · BLOCKED 0 · HUMAN ACTIONS gating launch: 2 (H-03, H-01)
+ISSUES: created 24 · updated 1 · reopened 0 · dedup-skipped 0 (fetched 68)
+CLEANUP: not yet run
+NEXT: S6 cleanup, then H-03
+```
+
+S5-B (fresh context, SHA `f15cec1`) **downgraded to NO-GO** over substituted proofs on §6 (alert never fired) and §7 (named Stranger Test file absent). Mini S3/S4 closed the *missing-file* and *never-fired* findings. What remains is named, not smoothed over:
+
+- **§6.** The sibling `alert` job filed a real GitHub issue ([#136](https://github.com/ravidsrk/oss-foundry/issues/136)) when `tick.result != success` on run [35137846628](https://github.com/ravidsrk/oss-foundry/actions/runs/35137846628) (`workflow_dispatch` then cancel). Evidence: `T-18-alert-fires-live.txt`. A *scheduled* tick failing on its own has **not** been observed. `oss-tick.yml` says that cannot be produced on demand. `A-19`/`A-20`: same job graph as `schedule`; requiring a cron outage makes §6 unprovable by design.
+- **§7.** Timed clone → `status` → `tick` in **9.14s** (`T-26-stranger-test.txt`). `tick` prints `idle`. CF-01 happy path (gated ALLOW) is **not** this line — it is gate §2 / G-18 / [H-03](https://github.com/ravidsrk/oss-foundry/issues/160) (`A-18`).
+- **§2.** Happy paths CF-01..CF-05 still blocked on H-03/H-01. Reachable early refusals were captured (G-46); they are **not** the frozen DEFINITION.md §1 failure paths that need a gated or draft-ready packet. Those stay on G-16/G-17/G-18.
+- **§3 named files** `T-05-atomic-write.txt` / `T-06-sigkill-loop.txt` written. Carrying proof remains the concurrent reader.
+
+Gate re-evaluated: **CONDITIONAL GO**. Residuals that still fail the frozen wording are exactly the launch-gating Human Actions (H-03, H-01), plus the honest limits recorded under A-18/A-19.
+
+---
+
+## Resume `20260916-1845` — S1-A re-freeze (R4)
+
+**Mode:** agentic with write access. `MODE=drive`. Continuing, not restarting.
+
+| | |
+|---|---|
+| HEAD now | `f15cec1a6d6aabc14336753e11fb5d90e8848e64` (`f15cec1`) · `main` · clean · `HEAD == origin/main` |
+| Last-run commit | `ba59027` — **is** an ancestor of HEAD |
+| Original baseline | `74af0b2` — **is** an ancestor of HEAD |
+| Diff since last run | 3 commits (PR #135 gate-verdict merge + two docs commits). **3 / 134 tracked files = 2.2%** — below the 20% re-audit threshold |
+| Open PRs | 0 |
+| Open issues | 2 (#15 watchlist, #121 block-as-stop) |
+| Local branches | `main`, `sweep2/issue-37` (G-29 salvage; do not delete until the salvage issue exists) |
+| Worktrees at start | primary only |
+| H-03 | **still open** — `allowlist.yaml` firstIssues still 71 / 195 / 1476, all consumed. `tick` → `idle` |
+| H-01 | **still open** — `FOUNDRY_PAT` unset |
+| H-02 | still open, does not gate launch. `E2B_API_KEY` unset |
+
+### Toolchain (this session)
+
+| Tool | Version |
+|---|---|
+| git | 2.55.0 |
+| node | v24.20.0 |
+| npm | 11.19.0 |
+| gh | 2.101.0 |
+| greptile | 3.5.2 |
+| mise | 2026.9.9 |
+| jq | 1.8.2 |
+
+### Cold start against current HEAD — **PASS**
+
+Evidence: `evidence/S1-coldstart-clone-install.txt`, `evidence/S1-coldstart-build-test-run.txt`
+
+| Step | Result |
+|---|---|
+| `git clone` into `/tmp/pcd-20260916-coldstart` | exit 0, HEAD `f15cec1` |
+| `npm ci` | **exit 1** — no lockfile (documented) |
+| `npm install` | exit 0, 0 vulnerabilities |
+| `npm test` run 1 | exit 0 — **418/418**, 10.3s |
+| `npm test` run 2 | exit 0 — **418/418**, 11.0s. Zero flakes |
+| `npm run validate` | exit 0 — `repos=8 denylist=4`, policy records ok |
+| `npm run typecheck` | exit 0 |
+| `npm run foundry -- status` | exit 0, seed snapshot |
+| CI `oss-tick` (scheduled) | last 8 runs **success**, including 2026-09-16T18:00Z |
+
+Stranger Test re-run: README first command 0.58s. Evidence: `evidence/T-26-stranger-test.txt`.
+
+Failure-path captures added for CF-02..CF-05 (happy paths still blocked). CF-01 live path is `idle`.
+
+---
+
+## Prior verdict (run `20260901-1143`, preserved)
+
+```
+VERDICT: CONDITIONAL GO
 COMPLETION: 86% (was 68% at baseline 74af0b2)   GATE: every agent-side condition met; 2 Human Actions outstanding
 CRITICAL FLOWS: 7 total · 2 verified · 2 works · 3 partial · 0 cut
 GAPS: S0 2/2 closed · S1 13/16 closed · S2 6/6 above-line closed · CUT 1 done · DEFER 16 · ACCEPT 0

@@ -1,0 +1,34 @@
+# T-26 / gate §7 Stranger Test — resume re-run 2026-09-16
+
+HEAD at clone: origin/main (f15cec1 at the time of the S1 clone; this timed run cloned live origin/main)
+method: README only. No env vars. No prior knowledge.
+
+## Timed path (empty dir → clone → status → tick)
+
+scratch: /tmp/pcd-stranger-20260916
+command:
+
+    git clone https://github.com/ravidsrk/oss-foundry.git /tmp/pcd-stranger-20260916
+    cd /tmp/pcd-stranger-20260916
+    npm run foundry -- status
+    npm run foundry -- tick
+
+`/usr/bin/time -p` wall clock: **real 9.14s** (user 0.27, sys 0.05). Target ≤15 min.
+
+## status (README "First command")
+
+exit 0. Seed snapshot, no live ledger. `in flight: none — tick is allowed`.
+
+## tick (README "What tick does today")
+
+exit 0. Stands down orca-fleet#71, frontguard#195, background-agents#1476 (all closed). Prints `idle`.
+
+That is CF-01's *current* complete behaviour on the committed roster. The gated ALLOW happy path is DEFINITION.md §1 / gate §2 / G-18 / H-03 — a maintainer must name a firstIssues row. A stranger following the README cannot invent one.
+
+## points needing knowledge not in the docs
+
+none. Node floor, why `npm ci` fails, first command, idle-tick behaviour are all in README.
+
+## prior run
+
+2026-09-01 claimed 19.7s clone-to-first-command (status). This re-run is clone+status+tick in 9.14s.

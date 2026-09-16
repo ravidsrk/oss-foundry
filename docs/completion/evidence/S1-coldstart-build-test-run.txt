@@ -1,0 +1,104 @@
+# S1-A resume cold start — test / validate / typecheck / help / status
+run_id: 20260916-1845
+scratch: /tmp/pcd-20260916-coldstart
+HEAD: f15cec1a6d6aabc14336753e11fb5d90e8848e64
+
+## npm test (run 1)
+exit: 0
+✔ G-14: a setsid grandchild is not reached — that is the sandbox boundary (423.738292ms)
+✔ G-14: a self-SIGKILL is not reported as a deadline (21.524709ms)
+✔ G-14: a truthy invalid FOUNDRY_WITNESS_TIMEOUT_MS falls back to the shipped bound (0.173ms)
+✔ G-26: the unwired scout's fetch carries a deadline (9.547208ms)
+✔ G-26: a hung scout fetch fails closed within the deadline (246.542833ms)
+ℹ tests 418
+ℹ suites 0
+ℹ pass 418
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10257.249208
+
+suite ok — 418 tests across 20 files, every file accounted for
+
+## npm test (run 2, flake check)
+exit: 0
+✔ G-26: the unwired scout's fetch carries a deadline (9.768667ms)
+✔ G-26: a hung scout fetch fails closed within the deadline (246.048458ms)
+ℹ tests 418
+ℹ suites 0
+ℹ pass 418
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10953.577167
+
+suite ok — 418 tests across 20 files, every file accounted for
+
+## npm run validate
+exit: 0
+
+> validate
+> node --experimental-strip-types factory/validate-allowlist.ts
+
+allowlist ok
+version 2 repos=8 denylist=4
+denylist: matplotlib/matplotlib, curl/curl, pydantic/pydantic, stablyai/orca
+repos: ravidsrk/orca-fleet, ravidsrk/frontguard, ColeMurray/background-agents, github/awesome-copilot, e2b-dev/e2b-cookbook, mcp-use/mcp-use, mastra-ai/mastra, OpenHands/OpenHands
+policy records ok: 8 records
+
+## npm run typecheck
+exit: 0
+
+> typecheck
+> npm install --no-save --no-package-lock typescript@5.9.3 @types/node@24.9.2 && ./node_modules/.bin/tsc --noEmit
+
+
+added 3 packages, and audited 4 packages in 999ms
+
+found 0 vulnerabilities
+
+## npm run foundry -- --help
+exit: 0
+  reject <packetId> --reason <text>
+  halt <repoId> --reason <text>   (per-repo scorecard stop — a maintainer asked; NOT cleared by clear-halt)
+  revert <packetId> --reason <text> [--at <iso>]   (a maintainer-stated rollback naming the PR — SPEC.md §7 stop; an explicit git revert of our merge commit is found by reconcile on its own. --at is WHEN THE ROLLBACK HAPPENED, which is what the 30-day window is measured from; it defaults to now)
+  advance <packetId>
+  evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
+  witness-check [repoId]   (pre-flight: resolve the interpreter each allowlisted testCommand would really use here, before a packet is in flight)
+  attach-witness <packetId> --manifest <path>   (ingest a witness produced on the worker host; provenance and log hashes re-checked here)
+  body <packetId>
+  attach-draft <packetId> <prUrl>
+  open-draft <packetId> --head <forkOwner:branch>   (machine-account PAT; draft-only; one create per run)
+  sync <packetId> [--threads-answered]
+  reconcile   (live re-read of every packet that names a PR; re-checks merged packets for a revert of our merge commit)
+  ledger
+  evidence-page <packetId>   (maintainer-facing audit page, markdown to stdout)
+  clear-halt --by <name> --note <text>   (a human lifts the factory-wide rate-limit halt — not the halt above)
+
+Any command takes --state <path> to point at a different ledger.
+Any command takes --logs-root <path> to root the witness run logs somewhere other than the checkout.
+State: /private/tmp/pcd-20260916-coldstart/.foundry-state.json (seed if missing; refuse if present but malformed). Foundry never merges.
+Witness logs: /private/tmp/pcd-20260916-coldstart/docs/evidence/logs/<packetId>/ (read and written there, whatever your cwd).
+Disclosure:
+This patch was prepared by Foundry (ravidsrk/oss-foundry), an operator-gated contribution factory.
+A human reviewed the packet, the diff, and the tests before this draft was opened.
+The factory does not merge. Maintainers own the merge.
+
+
+## npm run foundry -- status  (README first command, no env)
+exit: 0
+
+> foundry
+> node --experimental-strip-types factory/cli.ts status
+
+no state file at /private/tmp/pcd-20260916-coldstart/.foundry-state.json — showing the committed seed ledger, not live state. Mutating commands will create it.
+state: /private/tmp/pcd-20260916-coldstart/.foundry-state.json (absent — committed seed)
+Foundry  packets=6 ticks=4 attestedWave0=3 inflight=false
+humanApprovalsRemaining=16 mergedTotal=3 bans=0
+in flight: none — tick is allowed
+scorecard:
+  ravidsrk/orca-fleet  opened=2 merged=2 reverts=0 reviewCommentsAvg=1 tone=warm health=good
+  ravidsrk/frontguard  opened=1 merged=1 reverts=0 reviewCommentsAvg=0 tone=warm health=good
+  ColeMurray/background-agents  opened=1 merged=0 reverts=0 reviewCommentsAvg=0 tone=neutral health=good

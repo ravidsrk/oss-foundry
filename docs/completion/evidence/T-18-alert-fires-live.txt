@@ -1,0 +1,49 @@
+# T-18 / G-41 — live proof that the inherited clock alert fires
+
+run_id: 20260916-1845
+HEAD: f15cec1a6d6aabc14336753e11fb5d90e8848e64
+date: 2026-09-16T19:00:17Z
+
+## Why this is not a unit test
+
+S5-B (fresh-context reviewer) marked gate §6 UNMET: `T-18-alert-fires.txt` drives the
+script against a fake octokit, and zero `clock-alert` issues existed on GitHub.
+DEFINITION.md §2.6: "One alert has been proven to fire." Mechanism is not fire.
+
+## Rehearsal
+
+1. Created repo label `clock-alert` (the alert job's `issues.create` names it;
+   without the label the job would fail closed and nothing would page).
+2. `gh workflow run oss-tick.yml --ref main`
+   → run https://github.com/ravidsrk/oss-foundry/actions/runs/35137846628
+3. `gh run cancel 35137846628` while `tick` was in `Verify committed ledger`.
+   The workflow documents this path: "TRADE: a human who cancels a run
+   deliberately also gets an alert." `cancelled != success`.
+4. Outcome:
+   - workflow conclusion: cancelled
+   - job `tick`: cancelled
+   - job `alert`: **success**
+5. Alert job created https://github.com/ravidsrk/oss-foundry/issues/136
+   title: `oss-tick: clock failed`
+   label: `clock-alert`
+   body (verbatim):
+
+        The unattended 6-hour clock did not succeed.
+        Tick result: cancelled
+        Run: https://github.com/ravidsrk/oss-foundry/actions/runs/35137846628
+
+        This issue is the inherited alert (launch gate §6). A stranger who clones
+        the repo gets it without changing GitHub notification settings.
+        Fix the clock, then close this issue. A later failure will reopen it
+        and comment with the new run URL.
+
+6. Closed #136 as completed after capturing this file, with a comment that the
+   clock is healthy (scheduled runs on 2026-09-16 succeeded) so a later real
+   failure can reopen — the documented reopen path.
+
+## What this does not prove
+
+A *scheduled* tick that fails on its own (GitHub outage, hung verify-ledger)
+has not been observed. The job graph is the same for `schedule` and
+`workflow_dispatch`. The honest limit in `oss-tick.yml:115-120` remains:
+the alert job can itself fail and nothing watches the watcher.

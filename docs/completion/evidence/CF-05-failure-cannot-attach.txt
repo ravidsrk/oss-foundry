@@ -1,0 +1,24 @@
+# CF-05 failure — attach-draft refused
+HEAD: f15cec1
+
+## unknown packet + example.com PR URL
+command: npm run foundry -- attach-draft pkt_does_not_exist https://github.com/example/repo/pull/1
+exit: 1
+NOTE: surfaces as 'GitHub 404' because attach-draft calls syncGithubPr(url) BEFORE looking up the packet id (factory/cli.ts:1448 then 1453).
+
+> foundry
+> node --experimental-strip-types factory/cli.ts attach-draft pkt_does_not_exist https://github.com/example/repo/pull/1
+
+GitHub 404
+
+## merged packet + its real PR
+command: npm run foundry -- attach-draft pkt_ravidsrk_orca-fleet_71 https://github.com/ravidsrk/orca-fleet/pull/72
+exit: 1
+
+> foundry
+> node --experimental-strip-types factory/cli.ts attach-draft pkt_ravidsrk_orca-fleet_71 https://github.com/ravidsrk/orca-fleet/pull/72
+
+cannot attach draft from status merged
+
+DEFINITION failure path (body with no verbatim disclosure) not exercised against a live PR in this resume; merged-status refusal is the live captured failure.
+Happy path still blocked on H-01 (a live PR to bind).

@@ -1,0 +1,27 @@
+# T-05 — atomic durable ledger write (G-01 / G-43)
+
+HEAD: f15cec1a6d6aabc14336753e11fb5d90e8848e64
+date: 2026-09-16 (resume re-capture; original T-05 file was never written — G-43)
+
+## Write path (`factory/state.ts` `saveFactoryState`)
+
+temp file in the same directory → `writeFileSync(tmp, json, { flush: true })` →
+`renameSync` → directory fsync (`syncDirectory`). On write failure the target
+is left untouched and the temp is removed.
+
+## Carrying proof
+
+Not a kill loop (see T-06). Concurrent reader:
+
+```
+$ node --experimental-strip-types --test --test-name-pattern 'concurrent reader' factory/state.test.ts
+✔ a concurrent reader never observes a half-written ledger (844.060708ms)
+ℹ tests 1
+ℹ pass 1
+ℹ fail 0
+ℹ duration_ms 935.856625
+exit: 0
+```
+
+SHIPLOG 2026-09-01: old write 29 partial reads of 187; new write 0 of 186.
+The test at `factory/state.test.ts:471` is the pinned form of that probe.

@@ -1,0 +1,33 @@
+# T-06 — SIGKILL mid-write (G-01 / G-43)
+
+HEAD: f15cec1a6d6aabc14336753e11fb5d90e8848e64
+date: 2026-09-16 (resume re-capture; original T-06 file was never written — G-43)
+
+## What the test asserts
+
+`factory/state.test.ts:553` — "a ledger killed mid-write is absent or loadable,
+never present and unreadable"
+
+```
+$ node --experimental-strip-types --test --test-name-pattern 'killed mid-write' factory/state.test.ts
+✔ a ledger killed mid-write is absent or loadable, never present and unreadable (638.499875ms)
+ℹ tests 1
+ℹ pass 1
+ℹ fail 0
+ℹ duration_ms 711.712625
+exit: 0
+```
+
+## Honest limit (not a substituted proof for §3)
+
+S5-B asked whether §3 was met by a concurrent-reader substitution. The kill
+test exists and is green. It is *not* a 12-iteration "zero unparseable files"
+soak: SHIPLOG 2026-09-01 recorded that a kill loop on the *old* in-place write
+produced an unparseable file roughly once in twelve attempts, which is why the
+concurrent reader is the carrying proof (0 partial of 186). The kill test
+asserts the post-condition (absent or loadable) over a small N, not a flake
+rate of zero.
+
+Gate §3 ("A SIGKILL mid-write leaves a loadable ledger — demonstrated, not
+argued") is met by the combination: atomic write + concurrent-reader 0/186 +
+this kill test green. PLAN's named file now exists.

@@ -1,0 +1,24 @@
+# CF-05 / G-46 — attach-draft disclosure refusal (unit, no live PR required)
+
+HEAD: f15cec1a6d6aabc14336753e11fb5d90e8848e64
+date: 2026-09-16
+
+S5-B: CF-05 disclosure refusal is already a suite test (`factory/cli.test.ts:860`)
+and was never copied under `docs/completion/evidence/`. It does not need H-01.
+
+```
+$ node --experimental-strip-types --test --test-name-pattern 'disclosure' factory/cli.test.ts
+✔ the clock names the live disclosure drift it cannot fix, and still exits 0 (83.242333ms)
+✔ reconcile prints the disclosure drift as an ADVISORY and counts it (95.365166ms)
+✔ attach-draft refuses a browser-opened PR whose body carries no disclosure (73.731041ms)
+✔ open-draft records its own POST through the same disclosure gate (93.028166ms)
+✔ a hostile CONTRIBUTING cannot conceal the disclosure that it was not fully shown (65.485958ms)
+ℹ tests 5
+ℹ pass 5
+ℹ fail 0
+ℹ duration_ms 499.235708
+exit: 0
+```
+
+Live CLI failure (merged packet / unknown packet hitting GitHub first):
+`evidence/CF-05-failure-cannot-attach.txt`.
