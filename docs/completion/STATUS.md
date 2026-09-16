@@ -13,14 +13,14 @@ CLEANUP: not yet run
 NEXT: S6 cleanup, then H-03
 ```
 
-S5-B (fresh context, SHA `f15cec1`) **downgraded to NO-GO** over substituted proofs on §6 (alert never fired) and §7 (named Stranger Test file absent). Mini S3/S4 closed those:
+S5-B (fresh context, SHA `f15cec1`) **downgraded to NO-GO** over substituted proofs on §6 (alert never fired) and §7 (named Stranger Test file absent). Mini S3/S4 closed the *missing-file* and *never-fired* findings. What remains is named, not smoothed over:
 
-- **§6 now MET live:** run [35137846628](https://github.com/ravidsrk/oss-foundry/actions/runs/35137846628) — `tick` cancelled, sibling `alert` success, filed [#136](https://github.com/ravidsrk/oss-foundry/issues/136) (`clock-alert`). Evidence: `T-18-alert-fires-live.txt`. #136 closed as a rehearsal so a later real failure can reopen.
-- **§7 now MET as onboarding:** `T-26-stranger-test.txt` written; clone → README commands including `tick` idle in well under 15 min (`A-18`). CF-01 happy path stays §2 / H-03.
-- **§2 failure paths** for CF-02..CF-05 captured. Happy paths still H-01/H-03.
-- **§3 named files** `T-05-atomic-write.txt` / `T-06-sigkill-loop.txt` written.
+- **§6.** The sibling `alert` job filed a real GitHub issue ([#136](https://github.com/ravidsrk/oss-foundry/issues/136)) when `tick.result != success` on run [35137846628](https://github.com/ravidsrk/oss-foundry/actions/runs/35137846628) (`workflow_dispatch` then cancel). Evidence: `T-18-alert-fires-live.txt`. A *scheduled* tick failing on its own has **not** been observed. `oss-tick.yml` says that cannot be produced on demand. `A-19`/`A-20`: same job graph as `schedule`; requiring a cron outage makes §6 unprovable by design.
+- **§7.** Timed clone → `status` → `tick` in **9.14s** (`T-26-stranger-test.txt`). `tick` prints `idle`. CF-01 happy path (gated ALLOW) is **not** this line — it is gate §2 / G-18 / [H-03](https://github.com/ravidsrk/oss-foundry/issues/160) (`A-18`).
+- **§2.** Happy paths CF-01..CF-05 still blocked on H-03/H-01. Reachable early refusals were captured (G-46); they are **not** the frozen DEFINITION.md §1 failure paths that need a gated or draft-ready packet. Those stay on G-16/G-17/G-18.
+- **§3 named files** `T-05-atomic-write.txt` / `T-06-sigkill-loop.txt` written. Carrying proof remains the concurrent reader.
 
-Gate re-evaluated: every agent-side line has evidence. Outstanding launch-gating Human Actions only → **CONDITIONAL GO**.
+Gate re-evaluated: **CONDITIONAL GO**. Residuals that still fail the frozen wording are exactly the launch-gating Human Actions (H-03, H-01), plus the honest limits recorded under A-18/A-19.
 
 ---
 

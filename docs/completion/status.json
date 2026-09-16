@@ -16,7 +16,7 @@
   "completion_pct": 86,
   "gate": {
     "status": "CONDITIONAL_GO",
-    "reason": "S5-B NO-GO on substituted \u00a76/\u00a77 proofs; mini loop closed G-41 (live clock-alert #136), G-42 (T-26 file), G-43 (T-05/T-06 files), G-46 (CF failure evidence). Agent-side gate lines now evidenced. Remaining: CF-01..CF-05 happy paths on H-03 and H-01."
+    "reason": "CONDITIONAL GO. CF-01..CF-05 happy paths blocked on H-03/H-01. \u00a76: alert job filed #136 on dispatch+cancel (same job graph as schedule); a scheduled outage was not observed (A-19). \u00a77: clone+status+tick idle in 9.14s; gated ALLOW is H-03 (A-18). Frozen DEFINITION failure paths that need a packet remain on G-16/17/18."
   },
   "angles": [
     {
