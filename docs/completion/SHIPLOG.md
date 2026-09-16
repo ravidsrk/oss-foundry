@@ -6,6 +6,8 @@ Append-only. A session with zero context reads this file and continues from the 
 RESUME POINTER: DONE
 ```
 
+Restart `20260916-1931` re-entered at DONE with 0.0% drift. Pointer stays DONE. Verdict stays CONDITIONAL GO.
+
 ---
 
 ## 2026-09-01T11:42Z — run `20260901-1143` starts
@@ -319,3 +321,31 @@ Hygiene: `git status` clean on `main` after this PR. `git worktree list` = prima
 **Second look:** did not `rm -rf /tmp/pcd-*` — that would have destroyed other agents' scratch (`A-07` class). Manifest-driven only.
 
 → **Next: H-03** (#160). One `firstIssues` row unblocks CF-01, CF-02, CF-03.
+
+---
+
+## 2026-09-16T19:31Z — restart `20260916-1931`
+
+Operator said **restart**. R1: agentic with write access. `git` 2.55.0 · `node` v24.20.0 · `npm` 11.19.0 · `gh` 2.101.0 · `greptile` 3.5.2.
+
+HEAD `10b5d81` — identical to last DONE merge. File change **0.0%**. Baseline `74af0b2` still an ancestor.
+
+**A-22:** do not re-audit 17 angles; do not unfreeze DEFINITION.md. Re-freeze + gate re-eval only.
+
+### S1-A re-freeze
+
+`npm test` 418/418 · `npm run validate` ok · `foundry tick` idle (stand-down 71/195/1476) · `FOUNDRY_PAT` unset · #160 and #158 OPEN.
+
+artifacts: `/tmp/pcd-restart-test.txt` (DELETE after copy) · worktree `/Users/ravindra/projects/oss-foundry-restart-1931` (DELETE after merge).
+
+### Gate (DEFINITION.md §2)
+
+Unchanged CONDITIONAL GO. CF-01..CF-05 happy paths still H-03/H-01. Agent-side work above the cut line is already DONE.
+
+### S5-C re-entry (R17)
+
+No new issues. Comments on #160 #158 #137 #138 #139 that restart `20260916-1931` confirmed they still block. Dedup-skipped the rest of the filing set.
+
+**Second look:** a “restart” with 0% drift that rewrote STATUS.md’s 17 angles would have been theatre. Recorded instead of performed.
+
+→ **Next: still H-03** (#160).
