@@ -276,4 +276,18 @@ Ledger: `docs/completion/ISSUES.md`. Launch-gating: #158 H-01, #160 H-03.
 
 artifacts added: `/tmp/pcd-file-issues.py`, `/tmp/pcd-s5c-summary.json` (DELETE in S6).
 
+### review: greptile `9d3589de-ae27-4fa9-aa0e-b7984337582b` (R11)
+
+Five findings. Disposition:
+
+1. **P2 duplicate A-17** — **fixed** (removed the leftover row; A-20 added for this review).
+2. **P1 G-43 SIGKILL overstated** — **fixed in prose**: G-43 closes missing named files; §3 carrying proof stays the concurrent reader. Kill test is not a soak.
+3. **P1 G-46 failure-path substitutes** — **fixed in prose**: captured refusals are reachable-without-a-packet; frozen DEFINITION failure paths stay on G-16/17/18.
+4. **P1 §6 scheduled alert unproven** — **logged, not downgraded** (`A-19`/`A-20`). The `alert` job filed real issue #136 when `tick.result != success` on the same job graph as `schedule`. `oss-tick.yml` itself says a scheduled run cannot be failed on demand; requiring a scheduled outage makes §6 unprovable by design.
+5. **P1 §7 stranger test incomplete** — **fixed**: re-timed clone+status+tick at **9.14s** into `T-26-stranger-test.txt`.
+
+Identifier check (mechanical): 48 G- ids in json match prose 1:1; H-01..H-03; T-01..T-28; CF-01..CF-07. No secrets in new evidence.
+
+artifacts: `/tmp/pcd-stranger-20260916` (DELETE in S6).
+
 → **Next: S6** cleanup.

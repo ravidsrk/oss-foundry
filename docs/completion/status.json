@@ -1813,6 +1813,15 @@
         "leave #136 open"
       ],
       "reason": "cancel is a documented non-success path"
+    },
+    {
+      "id": "A-20",
+      "stage": "S5",
+      "decision": "Keep CONDITIONAL GO after greptile P1s; soften G-43/G-46",
+      "rejected": [
+        "downgrade NO-GO"
+      ],
+      "reason": "\u00a76 same job graph as schedule; \u00a77 timed clone+tick idle; \u00a73 concurrent reader"
     }
   ],
   "research": [
