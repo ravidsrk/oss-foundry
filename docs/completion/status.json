@@ -10,8 +10,8 @@
     "evidence": "evidence/p0-coldstart-2-build-test-run.txt",
     "note": "npm ci fails (no lockfile); zero declared deps so install is a no-op; 379/379 green from a fresh clone"
   },
-  "current_commit": "f15cec1a6d6aabc14336753e11fb5d90e8848e64",
-  "resume_pointer": "S6",
+  "current_commit": "9c1805b717b52fed5e5dd4da850c0b49c2dc3d12",
+  "resume_pointer": "DONE",
   "definition_frozen_at": "a708920",
   "completion_pct": 86,
   "gate": {
@@ -1822,6 +1822,15 @@
         "downgrade NO-GO"
       ],
       "reason": "\u00a76 same job graph as schedule; \u00a77 timed clone+tick idle; \u00a73 concurrent reader"
+    },
+    {
+      "id": "A-21",
+      "stage": "S6",
+      "decision": "Delete only this run's artifacts",
+      "rejected": [
+        "rm -rf /tmp/pcd-*"
+      ],
+      "reason": "other agents' scratch"
     }
   ],
   "research": [
@@ -1901,9 +1910,15 @@
       "commit": "f15cec1",
       "completion_pct": 86,
       "gate": "CONDITIONAL_GO"
+    },
+    {
+      "run_id": "20260916-1845",
+      "commit": "9c1805b",
+      "completion_pct": 86,
+      "gate": "CONDITIONAL_GO"
     }
   ],
-  "stage": "S6",
+  "stage": "DONE",
   "issues": {
     "created": 24,
     "updated": 1,
@@ -1913,9 +1928,9 @@
     "ledger": "docs/completion/ISSUES.md"
   },
   "cleanup": {
-    "scratch_dirs_removed": 0,
+    "scratch_dirs_removed": 2,
     "orphan_evidence_removed": 0,
-    "branches_swept": 0,
+    "branches_swept": 1,
     "residue_consolidated": 0,
     "cleanup_pr": null,
     "manifest_undispositioned": 0

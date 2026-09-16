@@ -3,7 +3,7 @@
 Append-only. A session with zero context reads this file and continues from the resume pointer.
 
 ```
-RESUME POINTER: S6
+RESUME POINTER: DONE
 ```
 
 ---
@@ -291,3 +291,31 @@ Identifier check (mechanical): 48 G- ids in json match prose 1:1; H-01..H-03; T-
 artifacts: `/tmp/pcd-stranger-20260916` (DELETE in S6).
 
 → **Next: S6** cleanup.
+
+---
+
+## 2026-09-16T19:24Z — S6 CLEANUP · COMPLETE
+
+PR #161 merged as `9c1805b`. Suite post-cleanup: **418/418**, validate ok.
+
+### Manifest disposition
+
+| artifact | disposition | reason |
+|---|---|---|
+| `/tmp/pcd-20260916-coldstart` | DELETE | S1/S4 scratch clone |
+| `/tmp/pcd-stranger-20260916` | DELETE | §7 timed clone |
+| `/tmp/pcd-*.txt` created this run (npm/test/cf/t05/t06/issue-136/run json) | DELETE | copies live in `docs/completion/evidence/` |
+| `/tmp/pcd-file-issues.py`, `/tmp/pcd-s5c-summary.json` | DELETE | S5-C helper |
+| `/Users/ravindra/projects/oss-foundry-s5-signoff` | DELETE | merged worktree |
+| S5-B isolation worktree `subagent-01a0ab8e-…` | DELETE | review-only |
+| `origin/ravidsrk/s5-signoff` | DELETE | `--delete-branch` on merge of #161 |
+| `.foundry-state.json` on primary | KEEP | gitignored live operator ledger created by observational `tick` |
+| `sweep2/issue-37` | KEEP | G-29 salvage source; issue #144 exists but salvage not done |
+| `/tmp/pcd-s1b-*`, `/tmp/pcd-coldstart-20260916` (Python tree), `/tmp/pcd-T19-*`, `/tmp/pcd-audit-review.*` | KEEP | **not this run's manifest** (`A-21`). Other product/agent residue. |
+| `docs/completion/**` referenced evidence | KEEP | canonical record |
+
+Hygiene: `git status` clean on `main` after this PR. `git worktree list` = primary only. `git branch -a` = `main` + `sweep2/issue-37` + `origin/main`. No `pcd` scratch paths from this run remain.
+
+**Second look:** did not `rm -rf /tmp/pcd-*` — that would have destroyed other agents' scratch (`A-07` class). Manifest-driven only.
+
+→ **Next: H-03** (#160). One `firstIssues` row unblocks CF-01, CF-02, CF-03.
