@@ -1,0 +1,34 @@
+# CF-04 failure — open-draft refused before any POST
+HEAD: f15cec1
+FOUNDRY_PAT: unset
+
+## unknown packet
+command: npm run foundry -- open-draft pkt_does_not_exist --head someone:branch
+exit: 1
+
+> foundry
+> node --experimental-strip-types factory/cli.ts open-draft pkt_does_not_exist --head someone:branch
+
+unknown packet pkt_does_not_exist
+
+## merged packet (has PR)
+command: npm run foundry -- open-draft pkt_ravidsrk_orca-fleet_71 --head ravidsrk:x
+exit: 1
+
+> foundry
+> node --experimental-strip-types factory/cli.ts open-draft pkt_ravidsrk_orca-fleet_71 --head ravidsrk:x
+
+open-draft needs a draft-ready packet with no PR; pkt_ravidsrk_orca-fleet_71 is merged with https://github.com/ravidsrk/orca-fleet/pull/72
+
+## parked packet
+command: npm run foundry -- open-draft pkt_OpenHands_OpenHands_16907 --head x:y
+exit: 1
+
+> foundry
+> node --experimental-strip-types factory/cli.ts open-draft pkt_OpenHands_OpenHands_16907 --head x:y
+
+open-draft needs a draft-ready packet with no PR; pkt_OpenHands_OpenHands_16907 is parked
+
+DEFINITION failure path (disclosure missing / competing work / secondary limit) not reachable without a draft-ready packet.
+Happy path (real draft PR URL) still blocked on H-01.
+These refusals fire before GitHub writes — no FOUNDRY_PAT required.

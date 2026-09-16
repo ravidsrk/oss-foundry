@@ -56,15 +56,33 @@ Cut line is drawn after `G-24`. Everything above it is in `PLAN.md`; everything 
 | G-39 | F-3-04 | S3 | DEFER | `engine.test.ts` is 5718 lines / 151 tests and `cli.ts` is 1422 lines mixing argv parsing, path anchoring, GitHub orchestration and 18 verb bodies. The single largest maintenance liability. |
 | G-40 | F-9-02 | S3 | DEFER | Severity prefixes are a convention, not a schema, and the stdout/stderr split is inconsistent (`SEED DRIFT` to stdout, `ADVISORY` to stderr). |
 
+## S5-B re-entry (SHA `f15cec1`, 2026-09-16)
+
+Fresh-context reviewer downgraded CONDITIONAL GO → NO-GO over substituted proofs. Findings re-entered here. Mini S3/S4 closed the agent-side FINISH items before S5-C.
+
+| id | source | angle | flow | sev | decision | status | rationale |
+|---|---|---|---|---|---|---|---|
+| **G-41** | S5-B §6 | 9 | all | S1 | FINISH | **closed** | §6 claimed MET via a fake-octokit unit test; no `clock-alert` issue existed. Live fire: dispatch run [35137846628](https://github.com/ravidsrk/oss-foundry/actions/runs/35137846628), `tick` cancelled, sibling `alert` success, created [#136](https://github.com/ravidsrk/oss-foundry/issues/136). Evidence: `T-18-alert-fires-live.txt`. |
+| **G-42** | S5-B §7 | 13 | CF-01 | S1 | FINISH | **closed** | Named file `T-26-stranger-test.txt` was absent and T-26 was marked done. File written on this resume; clone → README first commands including `tick` idle in ≤15 min. CF-01 *happy* path (gated ALLOW) remains G-18 / H-03, which is gate §2, not a second copy of §7 (`A-18`). |
+| **G-43** | S5-B §3 | 6 | all | S2 | FINISH | **closed** | PLAN-named `T-05-atomic-write.txt` and `T-06-sigkill-loop.txt` were never written. Re-captured from the pinned tests on `f15cec1`. Concurrent reader remains the carrying proof; the kill test is green over small N. |
+| **G-44** | S5-B / #121 | 1 | CF-04 | S2 | DEFER | open | GitHub "close all contributions by a blocked user" is a silent maintainer stop; `applyPrSync` records `closedUnmerged`. Cannot fire until CF-04. Already filed as #121 — S5-C updates, does not re-create. |
+| **G-45** | S5-B | 13 | CF-05 | S2 | DEFER | open | `attach-draft` calls `syncGithubPr(url)` before looking up the packet id (`factory/cli.ts:1448` then `1453`). Unknown packet + `example/repo#1` → `GitHub 404`, not `unknown packet`. |
+| **G-46** | S5-B §2 | 1 | CF-02..05 | S2 | FINISH | **closed** | Failure-path files were null at `f15cec1`. Captured on this resume: CF-02..CF-05 live refusals plus the disclosure-refusal suite (`CF-05-failure-disclosure.txt`). Happy paths still H-01/H-03. |
+| **G-47** | S5-B | 7 | — | S3 | FINISH | **closed** | T-03 done, named evidence file absent. Work had landed (`ci.yml` timeout, README `private: true`). File written: `T-03-hygiene.txt`. |
+| **G-48** | S5-B | 7 | — | S3 | DEFER | open | `oss-tick.yml` still pins `node-version: "22"` after T-01 raised the executed floor to 22.10.0 on `ci.yml` only. GitHub's `22` is latest 22.x today, so this is a footgun rather than a live break. |
+
 ## Counts
 
 | | S0 | S1 | S2 | S3 | total |
 |---|---|---|---|---|---|
-| FINISH | 2 | 16 | 5 | 0 | **23** |
+| FINISH | 2 | 18 | 7 | 1 | **28** |
 | CUT | 0 | 0 | 1 | 0 | **1** |
-| DEFER | 0 | 0 | 12 | 4 | **16** |
+| DEFER | 0 | 0 | 14 | 5 | **19** |
 | ACCEPT | 0 | 0 | 0 | 0 | **0** |
+| **register** | | | | | **48** |
+
+Computed from the rows above (original 40 + S5-B 8). FINISH closed this resume: G-41, G-42, G-43, G-46, G-47. Open FINISH remains G-16, G-17, G-18 (all human).
 
 **Zero `ACCEPT` at any severity, and zero at S0** — required by `DEFINITION.md` §2.1. The two standing concessions (operator-equivalent ledger access; attested-not-witnessed Wave 1+ evidence) are recorded in `DEFINITION.md` §4 as scope statements with an expiry, not as accepted gaps.
 
-Three FINISH gaps are blocked on Human Actions (`G-16`, `G-17`, `G-18`) and all three gate the launch. The maximum verdict reachable by the agent alone is therefore **CONDITIONAL GO**.
+Three FINISH gaps are blocked on Human Actions (`G-16`, `G-17`, `G-18`) and all three gate the launch. After the S5-B mini loop, every *agent-side* gate line is evidenced. The maximum verdict reachable by the agent alone is therefore **CONDITIONAL GO**.

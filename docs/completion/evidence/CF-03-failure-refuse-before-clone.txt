@@ -1,0 +1,29 @@
+# CF-03 failure — evidence/attach-witness refuse before clone
+HEAD: f15cec1
+
+## evidence with non-hex SHAs
+command: npm run foundry -- evidence pkt_ravidsrk_orca-fleet_71 --base deadbeef --head cafebabe
+exit: 1
+
+> foundry
+> node --experimental-strip-types factory/cli.ts evidence pkt_ravidsrk_orca-fleet_71 --base deadbeef --head cafebabe
+
+evidence requires full 40-hex commit SHAs for --base and --head (no refs, no placeholders) — refusing before any clone or test run
+
+## attach-witness missing manifest
+command: npm run foundry -- attach-witness pkt_ravidsrk_orca-fleet_71 --manifest /tmp/no-such-manifest.json
+exit: 1
+
+> foundry
+> node --experimental-strip-types factory/cli.ts attach-witness pkt_ravidsrk_orca-fleet_71 --manifest /tmp/no-such-manifest.json
+
+cannot read witness manifest /tmp/no-such-manifest.json
+
+## unknown packet
+
+> foundry
+> node --experimental-strip-types factory/cli.ts evidence pkt_does_not_exist --base deadbeef --head cafebabe
+
+unknown packet pkt_does_not_exist
+
+Happy path (real witness block) still blocked on H-03.

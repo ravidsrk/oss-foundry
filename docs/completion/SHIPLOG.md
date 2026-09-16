@@ -3,7 +3,7 @@
 Append-only. A session with zero context reads this file and continues from the resume pointer.
 
 ```
-RESUME POINTER: CONDITIONAL_GO/H-03
+RESUME POINTER: S6
 ```
 
 ---
@@ -196,3 +196,84 @@ Corrected to **2 verified · 2 works · 3 partial**, and  now records per-flow e
 I nearly recorded a false regression: re-measuring the atomic write after adding the directory fsync showed 13 partial reads, which would have looked like the fsync breaking atomicity. The probe was still pointed at the previous worktree, whose patch I had reverted. Re-pointed: **0 partial**. The lesson is the same one the fake-green produced — a measurement you did not verify the setup of is not a measurement.
 
 → **Next: `H-03`.** One line in `allowlist.yaml` unblocks three of the five remaining flows.
+
+---
+
+## 2026-09-16T18:45Z — run `20260916-1845` resumes (R4)
+
+Driver: product-completion. Mode `drive`. Repo `/Users/ravindra/projects/oss-foundry`.
+**R1.** Agentic with write access. `git` 2.55.0 · `node` v24.20.0 · `npm` 11.19.0 · `gh` 2.101.0 · `greptile` 3.5.2.
+
+Prior pointer was `CONDITIONAL_GO/H-03`. Original baseline `74af0b2` is an ancestor of current `main`. Last-run `ba59027` is an ancestor of current `HEAD` `f15cec1` (PR #135, the gate-verdict merge).
+
+**File change since last run: 3 / 134 tracked = 2.2%.** Under 20% — no full re-audit. `A-14`.
+
+**H-03 still open.** `tick` stands down the three consumed `firstIssues` rows and prints `idle`.
+**H-01 still open.** `FOUNDRY_PAT` unset. `E2B_API_KEY` unset. `FOUNDRY_LIVE` unset.
+
+The 2026-09-01 run never produced `ISSUES.md`, never handed S5-B to a separate context, and never ran S6. This resume continues those stages (`A-15`). Human Actions are not waited on.
+
+Working branch `ravidsrk/s5-signoff` (worktree `/Users/ravindra/projects/oss-foundry-s5-signoff`).
+
+### artifacts created this resume (R14)
+
+- `/tmp/pcd-20260916-coldstart` — S1/S4 scratch clone (DELETE in S6)
+- `/tmp/pcd-npm-ci.txt`, `/tmp/pcd-npm-install.txt`, `/tmp/pcd-npm-test.txt`, `/tmp/pcd-npm-test-2.txt`, `/tmp/pcd-validate.txt`, `/tmp/pcd-help.txt`, `/tmp/pcd-status.txt`, `/tmp/pcd-typecheck.txt`, `/tmp/pcd-stranger-*.txt`, `/tmp/pcd-cf*.txt` — probe captures copied into `docs/completion/evidence/` (DELETE the `/tmp` copies in S6)
+- `/Users/ravindra/projects/oss-foundry/.foundry-state.json` — gitignored live ledger created by an observational `tick` on the primary checkout (KEEP as live operator state; gitignored)
+- `/Users/ravindra/projects/oss-foundry-s5-signoff` — this worktree (DELETE after merge)
+- scratch halt of `ravidsrk/orca-fleet` inside `/tmp/pcd-20260916-coldstart` only — primary checkout scorecard remains `warm`/`good` (DESTROY scratch)
+
+### S1-A re-freeze · COMPLETE
+
+Cold start against `f15cec1`: `npm ci` exit 1 (no lockfile) · `npm test` 418/418 twice · validate ok · typecheck 0 errors · README first command 0.58s.
+Evidence: `evidence/S1-coldstart-clone-install.txt`, `evidence/S1-coldstart-build-test-run.txt`, `evidence/T-26-stranger-test.txt`.
+
+CI: last 8 `oss-tick` scheduled runs success. 0 open PRs. 2 open issues (#15, #121).
+
+### S4 extra failure-path captures (happy paths still blocked)
+
+| flow | captured | still missing |
+|---|---|---|
+| CF-01 | idle on exhausted roster | happy gated ALLOW (H-03); policy-deny failure (H-03) |
+| CF-02 | cannot approve from `merged` | happy freeze (H-03); competing-work-between-gate-and-freeze |
+| CF-03 | bad SHA refused before clone; missing manifest refused | happy witness (H-03) |
+| CF-04 | unknown / merged / parked refused before POST | happy draft PR URL (H-01) |
+| CF-05 | cannot attach from `merged`; unknown packet hits GitHub 404 first | happy bind (H-01); disclosure-missing on a live PR |
+
+`attach-draft` looks up the PR on GitHub before the packet id (`factory/cli.ts:1448` then `1453`). Flagged for S5-B.
+
+**Second look:** confirmed the primary checkout was not halted by the scratch CF-07 probe. `foundry status` on `main` still shows orca-fleet `tone=warm health=good`.
+
+→ **Next: S5-B** (fresh-context reviewer spawned isolation=worktree). Then S5-C, then S6. H-03 remains the highest-leverage human action and does not pause this.
+
+### S5-B · fresh-context adversarial review · COMPLETE
+
+Reviewer isolation worktree: `/Users/ravindra/.grok/worktrees/projects-oss-foundry/subagent-01a0ab8e-3af0-7730-9b4f-8dc856d2ebce` (DELETE in S6).
+Bound to SHA `f15cec1`. **Verdict: DOWNGRADE_NO_GO** — §6 and §7 were substituted proofs (R13). Findings G-41..G-48 re-entered.
+
+### Mini S3/S4 · COMPLETE
+
+| gap | disposition |
+|---|---|
+| G-41 §6 | **closed.** Live fire: run [35137846628](https://github.com/ravidsrk/oss-foundry/actions/runs/35137846628) `tick` cancelled / `alert` success / [#136](https://github.com/ravidsrk/oss-foundry/issues/136). Then closed #136 as rehearsal (`A-19`). Evidence `T-18-alert-fires-live.txt`. Also created label `clock-alert` so the job can file. |
+| G-42 §7 | **closed.** Wrote `T-26-stranger-test.txt`. §7 = onboarding (`A-18`); CF-01 happy remains G-18/H-03. |
+| G-43 | **closed.** Wrote `T-05-atomic-write.txt`, `T-06-sigkill-loop.txt`. |
+| G-46 | **closed.** CF-02..CF-05 failure captures + disclosure suite. |
+| G-47 | **closed.** Wrote `T-03-hygiene.txt`. |
+| G-44 | DEFER — already #121 |
+| G-45 | DEFER — attach-draft network-before-id |
+| G-48 | DEFER — oss-tick node 22 pin |
+
+**Gate re-evaluated: CONDITIONAL GO.** Every agent-side line evidenced. Launch-gating HAs only.
+
+**Second look:** closing #136 after the rehearsal so the operator is not paged for a cancel we issued. The reopen path is the next real red tick.
+
+### S5-C · issue filing · COMPLETE
+
+`existing_fetched: 68`. Marker search `pcd:` → **25** hits, one per filing-set id.
+created **24** · updated **1** (#121 ← G-44) · reopened **0** · dedup-skipped **0**.
+Ledger: `docs/completion/ISSUES.md`. Launch-gating: #158 H-01, #160 H-03.
+
+artifacts added: `/tmp/pcd-file-issues.py`, `/tmp/pcd-s5c-summary.json` (DELETE in S6).
+
+→ **Next: S6** cleanup.

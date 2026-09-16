@@ -8,6 +8,8 @@ R15: I do not create accounts, mint credentials, set repository variables, provi
 
 ## H-01 — Create the machine account and its `public_repo` PAT · **GATES LAUNCH**
 
+Issue: https://github.com/ravidsrk/oss-foundry/issues/158
+
 **Why only you.** `scripts/machine-account-wizard.sh:18-25` says it outright: *do not have this wizard or any agent create the account.* GitHub account creation is also a ToS matter, and the credential must be owned by a person.
 
 **Exact instruction.**
@@ -25,6 +27,8 @@ R15: I do not create accounts, mint credentials, set repository variables, provi
 ---
 
 ## H-02 — Decide the E2B / worker-host question · does **not** gate launch
+
+Issue: https://github.com/ravidsrk/oss-foundry/issues/159
 
 **Why only you.** It needs a third-party account, an API key, and infrastructure — and the decision of whether to build it at all is a product call.
 
@@ -46,6 +50,8 @@ R15: I do not create accounts, mint credentials, set repository variables, provi
 ---
 
 ## H-03 — Name the next roster target · **GATES LAUNCH**
+
+Issue: https://github.com/ravidsrk/oss-foundry/issues/160
 
 **Why only you.** `AGENTS.md` puts allowlist additions and their first issue in maintainer hands, and the 2026-08-29 sweep already treated allowlist targets as a product decision and out of bounds for the agent. I will not pick which stranger's repository this factory approaches next.
 
