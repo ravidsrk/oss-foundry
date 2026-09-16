@@ -9,8 +9,8 @@ CRITICAL FLOWS: 7 total · 2 verified · 2 works · 3 partial · 0 cut
 GAPS: S0 0/2 open · S1 3/18 FINISH open (G-16/17/18) · DEFER 19 · CUT 1 · ACCEPT 0
 TASKS: 28/28 done · BLOCKED 0 · HUMAN ACTIONS gating launch: 2 (H-03, H-01)
 ISSUES: created 24 · updated 1 · reopened 0 · dedup-skipped 0 (fetched 68)
-CLEANUP: not yet run
-NEXT: S6 cleanup, then H-03
+CLEANUP: 2 scratch dirs · 0 orphan evidence · 1 branch swept · 0 residue consolidated
+NEXT: H-03 — add one firstIssues row (#160)
 ```
 
 S5-B (fresh context, SHA `f15cec1`) **downgraded to NO-GO** over substituted proofs on §6 (alert never fired) and §7 (named Stranger Test file absent). Mini S3/S4 closed the *missing-file* and *never-fired* findings. What remains is named, not smoothed over:
