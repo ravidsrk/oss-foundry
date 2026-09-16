@@ -4,14 +4,28 @@
 
 ```
 VERDICT: CONDITIONAL GO
-COMPLETION: 86% (was 68% at baseline 74af0b2; 86% at ba59027)   GATE: agent-side lines met after S5-B mini loop; CF-01..CF-05 happy paths blocked on H-03 and H-01
+COMPLETION: 86% (was 68% at baseline 74af0b2)   GATE: unmet — CF-01..CF-05 happy paths still blocked on H-03 and H-01
 CRITICAL FLOWS: 7 total · 2 verified · 2 works · 3 partial · 0 cut
-GAPS: S0 0/2 open · S1 3/18 FINISH open (G-16/17/18) · DEFER 19 · CUT 1 · ACCEPT 0
-TASKS: 28/28 done · BLOCKED 0 · HUMAN ACTIONS gating launch: 2 (H-03, H-01)
-ISSUES: created 24 · updated 1 · reopened 0 · dedup-skipped 0 (fetched 68)
-CLEANUP: 2 scratch dirs · 0 orphan evidence · 1 branch swept · 0 residue consolidated
+GAPS: S0 0/2 open · S1 3 FINISH open (G-16/17/18) · DEFER 19 · CUT 1 · ACCEPT 0
+TASKS: 28/28 · BLOCKED 0 · HUMAN ACTIONS gating launch: 2 (H-03 #160, H-01 #158)
+ISSUES: created 0 · updated 5 · reopened 0 · dedup-skipped 20  (restart S5-C: no new issues)
+CLEANUP: this restart created a worktree only (removed after merge)
 NEXT: H-03 — add one firstIssues row (#160)
 ```
+
+## Restart `20260916-1931` (R4)
+
+**Mode:** agentic with write access. `MODE=drive`. Operator said **restart**.
+
+| | |
+|---|---|
+| HEAD | `10b5d8135a5144bd7669dbc2963f92f23d9f7af1` — same as last DONE pointer |
+| File change since last run | **0 / 148 = 0.0%** — below 20%. Full 17-angle re-audit **not** performed (`A-22`). DEFINITION.md stays frozen at `a708920`. |
+| H-03 | **still open** — firstIssues still 71 / 195 / 1476. `tick` → stand-down ×3 → `idle` |
+| H-01 | **still open** — `FOUNDRY_PAT` unset |
+| Suite | **418/418**, validate ok, CI on `main` success |
+
+Gate re-evaluated mechanically against frozen `DEFINITION.md` §2: still **CONDITIONAL GO**. Nothing agent-side moved. Launch-gating Human Actions are the entire residual.
 
 S5-B (fresh context, SHA `f15cec1`) **downgraded to NO-GO** over substituted proofs on §6 (alert never fired) and §7 (named Stranger Test file absent). Mini S3/S4 closed the *missing-file* and *never-fired* findings. What remains is named, not smoothed over:
 

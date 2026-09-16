@@ -1,7 +1,7 @@
 {
   "product": "Foundry \u2014 operator-gated OSS contribution control plane",
   "repo_path": "/Users/ravindra/projects/oss-foundry",
-  "run_id": "20260916-1845",
+  "run_id": "20260916-1931",
   "mode": "drive",
   "baseline": {
     "commit": "74af0b27f17ac39cda9779cbc6c73e7ed265e7df",
@@ -10,7 +10,7 @@
     "evidence": "evidence/p0-coldstart-2-build-test-run.txt",
     "note": "npm ci fails (no lockfile); zero declared deps so install is a no-op; 379/379 green from a fresh clone"
   },
-  "current_commit": "9c1805b717b52fed5e5dd4da850c0b49c2dc3d12",
+  "current_commit": "10b5d8135a5144bd7669dbc2963f92f23d9f7af1",
   "resume_pointer": "DONE",
   "definition_frozen_at": "a708920",
   "completion_pct": 86,
@@ -1831,6 +1831,16 @@
         "rm -rf /tmp/pcd-*"
       ],
       "reason": "other agents' scratch"
+    },
+    {
+      "id": "A-22",
+      "stage": "S1",
+      "decision": "Restart without 17-angle rewrite; 0.0% drift",
+      "rejected": [
+        "full re-audit",
+        "unfreeze DEFINITION.md"
+      ],
+      "reason": "R4 20% threshold"
     }
   ],
   "research": [
@@ -1916,14 +1926,20 @@
       "commit": "9c1805b",
       "completion_pct": 86,
       "gate": "CONDITIONAL_GO"
+    },
+    {
+      "run_id": "20260916-1931",
+      "commit": "10b5d81",
+      "completion_pct": 86,
+      "gate": "CONDITIONAL_GO"
     }
   ],
   "stage": "DONE",
   "issues": {
-    "created": 24,
-    "updated": 1,
+    "created": 0,
+    "updated": 5,
     "reopened": 0,
-    "dedup_skipped": 0,
+    "dedup_skipped": 20,
     "existing_fetched": 68,
     "ledger": "docs/completion/ISSUES.md"
   },

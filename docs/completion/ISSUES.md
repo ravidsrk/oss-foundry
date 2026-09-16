@@ -43,3 +43,18 @@ Closed gaps (G-01..G-15, G-19..G-24, G-41, G-42, G-43, G-46, G-47) were **not** 
 
 Pre-existing open issues not in the filing set: #15 (watchlist).
 
+## Restart `20260916-1931` (R17 re-entry)
+
+No creates. Comments on the five launch-gating items that they still block:
+
+| candidate | action | issue |
+|---|---|---|
+| H-03 | updated | #160 |
+| H-01 | updated | #158 |
+| G-16 | updated | #137 |
+| G-17 | updated | #138 |
+| G-18 | updated | #139 |
+| remaining filing set | skipped-dup | already have `pcd:` markers |
+
+created 0 · updated 5 · reopened 0 · dedup-skipped 20
+
