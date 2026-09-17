@@ -890,6 +890,55 @@ test("attach-draft refuses a browser-opened PR whose body carries no disclosure"
   assert.equal(bound.prUrl, undefined, `a refused attach must not record a PR URL:\n${run.out}`);
 });
 
+test("attach-draft refuses an unknown packet before contacting GitHub (G-45)", () => {
+  const path = writeState(seedState());
+  const run = runCli(
+    ["attach-draft", "pkt_does_not_exist", "https://github.com/example/repo/pull/1", "--state", path],
+    tmpdir(),
+  );
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /unknown packet pkt_does_not_exist/, run.out);
+  assert.equal(/GitHub 404/.test(run.out), false, `must not hit GitHub for an unknown id:\n${run.out}`);
+});
+
+test("advance requires a packet id", () => {
+  const run = runCli(["advance"], tmpdir());
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /advance requires a packet id/, run.out);
+});
+
+test("attach-witness requires a packet id and --manifest", () => {
+  const run = runCli(["attach-witness"], tmpdir());
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /attach-witness/, run.out);
+});
+
+test("every usage verb is named in this file (G-33 structural coverage)", () => {
+  const help = runCli(["--help"], tmpdir());
+  const verbs = [...help.stdout.matchAll(/^\s{2}([a-z][\w-]*)\b/gm)].map((m) => m[1]!);
+  assert.ok(verbs.includes("tick"), `usage verbs missing tick: ${verbs.join(",")}`);
+  const src = readFileSync(fileURLToPath(new URL("./cli.test.ts", import.meta.url)), "utf8");
+  for (const v of verbs) {
+    if (v === "help") continue;
+    assert.match(src, new RegExp(v), `cli.test.ts never names verb \`${v}\``);
+  }
+});
+
+test("help lists help and --version (G-37, G-32)", () => {
+  const help = runCli(["--help"], tmpdir());
+  assert.equal(help.code, 0, help.out);
+  assert.match(help.stdout, /^\s*help\s*$/m, help.stdout);
+  assert.match(help.stdout, /--version/, help.stdout);
+  const ver = runCli(["--version"], tmpdir());
+  assert.equal(ver.code, 0, ver.out);
+  assert.match(ver.stdout.trim(), /^\d+\.\d+\.\d+$/, ver.out);
+  const json = runCli(["status", "--json"], tmpdir());
+  assert.equal(json.code, 0, json.out);
+  const body = JSON.parse(json.stdout) as { packets: number; ticksRun: number };
+  assert.equal(typeof body.packets, "number");
+  assert.equal(typeof body.ticksRun, "number");
+});
+
 test("attach-draft binds the same PR once its body carries the verbatim block", () => {
   // The complement, so the gate above is a body check and not a broken verb. Same packet, same
   // URL, same stub — one fact different.

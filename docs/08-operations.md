@@ -73,6 +73,32 @@ the resolved command, the toolchain, and the last 40 lines of the run. If a run 
 at all the refusal says that too, and points at `witness-check` — a command that dies before
 printing anything is usually the environment, not the patch.
 
+## Account and key inventory (G-30)
+
+Bus factor is 1. Recovery is this table plus `scripts/machine-account-wizard.sh`.
+
+| What | Owner | Where it lives | Recovery |
+|---|---|---|---|
+| GitHub repo `ravidsrk/oss-foundry` | ravidsrk | github.com | GitHub account recovery |
+| Operator GitHub login `ravidsrk` | ravidsrk | github.com | GitHub account recovery |
+| Machine-account PAT `FOUNDRY_PAT` | ravidsrk (once minted) | operator shell only, never git | `bash scripts/machine-account-wizard.sh`; 90-day expiry, nothing in-repo reminds you (G-30 remainder: calendar) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | operator host | shell / `gh auth` | `gh auth login`; used for reads, not `open-draft` |
+| `E2B_API_KEY` | not created | — | deferred until a Wave 1 packet (H-02) |
+| `FOUNDRY_LIVE` repo variable | unset on purpose | GitHub repo variables | setting it is the launch act, not a recovery step |
+| Allowlist / denylist | this repo | `allowlist.yaml` | git history |
+| Live ledger | operator host | `.foundry-state.json` (gitignored) | restore from `.foundry-state.json.bak`; committed truth is `factory/seed.ts` |
+| Published ledger | this repo | `factory/seed.ts` + `docs/12-ledger.md` | git history |
+| Clock (`oss-tick.yml`) | GitHub Actions | this repo | git revert of the workflow; `clock-alert` issue on failure |
+
+## Retention of GitHub logins in the ledger (G-31)
+
+The ledger stores public GitHub logins (packet authors, `closedBy`, `FOUNDRY_OPERATOR` / `--by` names) and public issue/PR URLs. There is no customer PII and no private email.
+
+- **Live ledger** (`.foundry-state.json`): gitignored. Event ring cap is 80 (`EVENT_RING_CAP`); older events drop. One-generation backup `.foundry-state.json.bak`.
+- **Published seed** (`factory/seed.ts`): public, MIT, retained as git history. Treat it as a public record of packets this factory opened.
+- **Operator action:** do not copy live state into gist/chat. Promote to seed only the packet facts the published ledger needs.
+- **Deletion:** there is no data-principal export/delete path because there are no end-user accounts. Removing a login from the seed is a git commit. Removing it from live state is editing or deleting `.foundry-state.json`.
+
 ## Stopping the factory
 
 Three mechanisms, in descending scope. They are not interchangeable — know which one is in force.
