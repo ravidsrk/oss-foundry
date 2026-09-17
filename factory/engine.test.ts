@@ -1192,6 +1192,13 @@ test("#121: a 403 after closed-unmerged is a block, not a decline", () => {
   assert.equal(isBlockSignal("GitHub 403: You have exceeded a secondary rate limit. Please wait."), false);
   assert.equal(isBlockSignal("FOUNDRY_PAT is not set — the machine account"), false);
   assert.equal(isBlockSignal("GitHub 404"), false);
+  assert.equal(
+    isBlockSignal("GitHub 403 listing pulls on ColeMurray/background-agents: Resource not accessible by personal access token"),
+    false,
+    "a permission 403 is not a maintainer block",
+  );
+  assert.equal(isBlockSignal("GitHub 403 listing pulls: Bad credentials"), false);
+  assert.equal(isBlockSignal("GitHub 403 listing pulls: Requires authentication"), false);
 
   const blocked = applyObservedBlock(
     closed.state,

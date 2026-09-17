@@ -352,6 +352,13 @@ export function isBlockSignal(error: string): boolean {
   if (/primary rate limit exhausted/i.test(error)) return false;
   if (/secondary rate limit/i.test(error)) return false;
   if (/FOUNDRY_PAT is not set/i.test(error)) return false;
+  // Permission / token 403s are not a maintainer block. githubHttpError now
+  // keeps the response cause on the string so these can fire (issue #165).
+  if (/resource not accessible/i.test(error)) return false;
+  if (/bad credentials/i.test(error)) return false;
+  if (/requires authentication/i.test(error)) return false;
+  if (/must authenticate/i.test(error)) return false;
+  if (/oauth.?access restrictions/i.test(error)) return false;
   return true;
 }
 

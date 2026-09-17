@@ -659,6 +659,7 @@ async function main() {
           humanApprovalsRemaining: state.humanApprovalsRemaining,
           mergedTotal: state.mergedTotal,
           bans: state.bans,
+          halt: factoryHalt(state) ?? null,
         }),
       );
       return;
@@ -1361,8 +1362,10 @@ async function main() {
         `${r} — SPEC.md §7: the repo is now a scorecard stop and stays unselectable while the ledger records it. Recorded in local state only; promote it into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that says reverts=0. Not allowlist.yaml — removing the repo there deletes the scorecard row that holds the count.`,
       );
     }
+    const attempted = state.packets.filter((p) => p.prUrl).length;
+    const succeeded = attempted - failures.length;
     console.log(
-      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length} reverts=${reverts.length} reviews=${reviews.length}${failures.length ? ` failures=${failures.length}` : ""}`,
+      `reconciled ${succeeded} of ${attempted} packets; divergences=${doctrine.length} advisories=${owed.length} reverts=${reverts.length} reviews=${reviews.length}${failures.length ? ` failures=${failures.length}` : ""}`,
     );
     if (failures.length) process.exit(1);
     return;
@@ -1429,6 +1432,8 @@ async function main() {
     const synced = await syncGithubPr({ url: packet.prUrl });
     if (!synced.ok) {
       console.error(synced.error);
+      const blocked = absorbBlock(state, packet.repoId, synced.error);
+      if (blocked !== state) persist(blocked);
       process.exit(1);
     }
     // --threads-answered is the operator's attestation that every review thread has a reply.
@@ -1491,6 +1496,8 @@ async function main() {
     const synced = await syncGithubPr({ url });
     if (!synced.ok) {
       console.error(synced.error);
+      const blocked = absorbBlock(state, packetForDraft.repoId, synced.error);
+      if (blocked !== state) persist(blocked);
       process.exit(1);
     }
     // Deliberately NOT gated on the issue's state (issue #40), unlike tick / approve / open-draft.
