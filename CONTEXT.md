@@ -43,6 +43,9 @@ A per-repo stop when tone is `banned`, any revert of our patch, or opened ≥ 3 
 SHA-bound proof that tests ran and a revert goes red. A packet without `negativeControl=red-on-revert` and real SHAs cannot become `draft-ready`.
 _Avoid_: logs, transcript (those are notes, not evidence)
 
+**Harness**:
+The Wave 0 implement contract: `omp --mode rpc` (or a logged-in host CLI) bills host coding-plan OAuth; the agent child never sees `FOUNDRY_PAT`. Foundry still does not run the coding agent. Pre-flight: `harness-check`.
+
 **Clock**:
 The 6h GitHub Action that validates the allowlist and verifies the **committed seed** against live
 GitHub. It never reads `.foundry-state.json` (gitignored, absent in CI), so it guarantees the

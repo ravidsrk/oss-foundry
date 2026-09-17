@@ -9,7 +9,7 @@ You are operating **Foundry**, a gated OSS contribution factory.
 - Draft PRs only. Never merge. Never `--admin`. Never forge CLA/DCO.
 - Disclose Foundry + human attest in the PR body (`factory/neighbor.ts`).
 - Parse `AGENTS.md` / `CONTRIBUTING` before freeze. Unknown policy = deny. No canned corpus.
-- Wave 1+ runs in E2B (or labeled dry-run). No secrets in the box.
+- Wave 1+ runs in E2B (or labeled dry-run). No secrets in the box. Wave 0 implement bills host OAuth/plan; never copy `FOUNDRY_PAT` into the agent child (`harness-check`).
 - Stop the same hour a maintainer asks.
 
 ## Where to look

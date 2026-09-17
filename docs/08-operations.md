@@ -5,6 +5,7 @@
 - `node --experimental-strip-types factory/cli.ts status`
 - `node --experimental-strip-types factory/cli.ts reconcile` — absorb merges/closes; read any `DIVERGENCE` lines (doctrine events, resolved by hand, never auto-rewritten)
 - `node --experimental-strip-types factory/cli.ts witness-check` — on a new machine, or after a toolchain change, before anything is in flight ([Witnessing on the host](#witnessing-on-the-host-wave-0))
+- `node --experimental-strip-types factory/cli.ts harness-check` — on a new machine, before Wave 0 implement: which host OAuth/plan subscriptions would bill, and that `FOUNDRY_PAT` stays in Foundry
 - Answer any review thread before running another tick.
 - Approvals record who attested: `approve <id> --note … --by <name>` (or set `FOUNDRY_OPERATOR`).
 - If a maintainer replies “please stop,” remove the repo the same hour.

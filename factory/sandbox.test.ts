@@ -22,6 +22,16 @@ test("sandbox doctrine tells the operator to reject, not to press a verb the CLI
   assert.match(oracle, /do not skip the oracle/i);
 });
 
+test("sandbox doctrine bills host OAuth/plan subscriptions and keeps the PAT out of the agent child", () => {
+  const billing = SANDBOX_RULES.find((rule) => /OAuth\/plan/i.test(rule));
+  assert.ok(billing, "the subscription-billing rule must survive any rewording");
+  assert.match(billing, /FOUNDRY_PAT/);
+  assert.match(billing, /API keys/i);
+  const harvest = SANDBOX_RULES.find((rule) => /Harvest is git-only/i.test(rule));
+  assert.ok(harvest);
+  assert.match(harvest, /open-draft/);
+});
+
 /**
  * Same pin as the sandbox doctrine above, for the SPEC §5 negative-control refusal.
  * `parked` is a status the engine writes; the operator's stand-down verb is `reject` (issue #62).

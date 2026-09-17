@@ -682,6 +682,7 @@ test("witness-check reports the toolchain each allowlisted repo's testCommand wo
   // An operator who has not read the issue meets this verb in `--help` or not at all.
   const help = runCli(["--help"], tmpdir());
   assert.match(help.stdout, /witness-check \[repoId\]/, help.stdout);
+  assert.match(help.stdout, /harness-check/, help.stdout);
 });
 
 test("witness-check narrows to one repo and refuses one that is not on the allowlist", () => {
