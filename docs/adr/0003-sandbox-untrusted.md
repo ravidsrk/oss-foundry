@@ -17,3 +17,4 @@ Wave 0 may use a host worktree. Wave 1+ must use E2B (or Daytona). Secrets never
 - E2B cost per packet (small).
 - Some test suites will not run; those packets park instead of skipping tests.
 - Dry-run mode is labeled honestly until a key is present. It does not report a successful harvest.
+- Model calls on Wave 0 bill host coding-plan OAuth (omp `agent.db` / logged-in CLIs). Provider API keys and `FOUNDRY_PAT` never enter the clone or the agent child (`factory/harness.ts`). Wave 1+ uses omp auth-gateway on the worker host for the same split.

@@ -23,7 +23,7 @@ Station 1 picks the next named `firstIssues` row in roster order (`pickCandidate
 
 TypeScript in `factory/`. Deterministic. No LLM required to refuse a banned repo. There is no TanStack console in this repository. The clock **must not** open contribution PRs.
 
-The inventory below was derived from `factory/*.ts` on this tree (29 non-`*.test.ts` modules). [`factory/README.md`](../factory/README.md) is the closer map of the operator-facing surface — the modules you actually run — and this page is the complete list so the two stay honest: README names a subset; nothing it names is described differently here.
+The inventory below was derived from `factory/*.ts` on this tree (30 non-`*.test.ts` modules). [`factory/README.md`](../factory/README.md) is the closer map of the operator-facing surface — the modules you actually run — and this page is the complete list so the two stay honest: README names a subset; nothing it names is described differently here.
 
 ### Operator-facing (also in `factory/README.md`)
 
@@ -34,7 +34,8 @@ The inventory below was derived from `factory/*.ts` on this tree (29 non-`*.test
 - `cli.ts` — operator freeze / tick / draft-body loop.
 - `github-pr.ts` — SPEC §6 moment of contact: draft-only `createDraftPull` (`FOUNDRY_PAT`), PR sync, issue/competing-work reads (`GITHUB_TOKEN` / `GH_TOKEN`). No merge helper.
 - `github-scout.ts` — live issue fetch + `rankIssues`. **Not wired**: `tick` walks named `firstIssues`. Public API; `GITHUB_TOKEN` raises the rate limit.
-- `sandbox.ts` — dry-run plan. Emits `# planned · not executed ·` commands with `exit: -1`. Does not stamp harvested/exit 0. Clone in the plan is **full**, not shallow.
+- `sandbox.ts` — dry-run plan. Emits `# planned · not executed ·` commands with `exit: -1`. Does not stamp harvested/exit 0. Clone in the plan is **full**, not shallow. Wave 0 names `omp --mode rpc` billing host OAuth/plan; Wave 1+ names omp auth-gateway on the worker host.
+- `harness.ts` — subscription pre-flight (`harness-check`). Reads omp `auth_credentials` provider ids (never the `data` column), host CLIs on `PATH`, and the env an implementer agent may see. Does not spawn the coding agent.
 - `scorecard.ts` — SPEC §7 standing: merge rate, tone, reverts, the two review KPIs. `health()` can halt a repo; the engine consults it. `classifyRevert` decides what counts as a revert; `applyRevert` (engine) is the only writer of `reverts`.
 - `seed.ts` — committed ledger seed. Keep in sync with GitHub.
 - `run-tests.ts` — the suite's own oracle. Discovers every `factory/*.test.ts` and refuses a run where any file reported zero tests.
@@ -82,7 +83,7 @@ That worker is not in this repository. Wave 0 host witnessing is (`witness.ts`).
 | Allowlist | If it is not listed, it does not exist. |
 | Policy | Forbidden phrases win over “but the issue is tiny.” No docs = deny. |
 | Freeze | Every packet, at every wave. Nothing auto-freezes; the first-20 counter is an odometer, not a gate that opens. |
-| Sandbox | Wave 1+ clones never hit the operator laptop. No secrets in the box. Dry-run is labeled dry-run. This CLI does not run the box. |
+| Sandbox | Wave 1+ clones never hit the operator laptop. No secrets in the box. Dry-run is labeled dry-run. This CLI does not run the box. Wave 0 implement bills host OAuth/plan (omp); `FOUNDRY_PAT` stays in Foundry. |
 | Reviewer | Doctrine: does not see implementer traces. In this tree the review *station* is a status bump; the machine gate is `evidenceIsReady`. |
 | GitHub | Fork → upstream **draft** PR via `FOUNDRY_PAT`. No admin, no merge helper. No GitHub App client. |
 
@@ -96,17 +97,19 @@ v1 is enforced: tick → packet → freeze → draft body, with halt / promotion
 
 ## Environment variables
 
-Derived by grepping `process.env.[A-Z_]+` across `factory/` and cross-checking `env.NAME` parameters that default to or are passed `process.env` (`FOUNDRY_PAT`, `E2B_API_KEY`). `PATH` appears in tests only (toolchain prefix) and is not a Foundry setting. No other `FOUNDRY_*` names are read by shipping code on this tree.
+Derived by grepping `process.env.[A-Z_]+` across `factory/` and cross-checking `env.NAME` parameters that default to or are passed `process.env` (`FOUNDRY_PAT`, `E2B_API_KEY`). `HOME` and `PATH` are read by `factory/harness.ts` to locate `~/.omp/agent/agent.db` and host CLIs — they are not Foundry settings. No other `FOUNDRY_*` names are read by shipping code on this tree.
 
 | Name | Read by | Default | Unset / invalid |
 |---|---|---|---|
-| `FOUNDRY_PAT` | `createDraftPull` (`factory/github-pr.ts`) via `env.FOUNDRY_PAT`, `env` defaulting to `process.env`. The only write credential. Also listed in `WITNESS_SECRET_KEYS` so a host-witness child never sees it (`factory/witness.ts`). | none | `POST /pulls` never leaves. Returns an error naming `scripts/machine-account-wizard.sh`. |
+| `FOUNDRY_PAT` | `createDraftPull` (`factory/github-pr.ts`) via `env.FOUNDRY_PAT`, `env` defaulting to `process.env`. The only write credential. Also listed in `WITNESS_SECRET_KEYS` so a host-witness child never sees it (`factory/witness.ts`). `factory/harness.ts` `SCRUBBED_AGENT_ENV_KEYS` / `agentChildEnv` keep it out of an implementer agent too. | none | `POST /pulls` never leaves. Returns an error naming `scripts/machine-account-wizard.sh`. |
 | `GITHUB_TOKEN` | `githubApiHeaders` (`factory/github-pr.ts`): `process.env.GITHUB_TOKEN \|\| process.env.GH_TOKEN`. Read path only. Also a `WITNESS_SECRET_KEYS` strip. The 6-hour clock injects `secrets.GITHUB_TOKEN` into `verify-ledger` (`.github/workflows/oss-tick.yml`). | none | Unauthenticated public reads (60 req/hr anonymous vs 5,000 with a token). |
 | `GH_TOKEN` | Fallback for `GITHUB_TOKEN` in `githubApiHeaders`. Same secret strip. | none | Ignored if `GITHUB_TOKEN` is set; if both unset, unauthenticated reads. |
 | `FOUNDRY_GITHUB_TIMEOUT_MS` | `githubFetchTimeoutMs` (`factory/github-pr.ts`). Integer milliseconds, 1…`GITHUB_FETCH_TIMEOUT_MAX_MS` (1 hour). | `15000` (`GITHUB_FETCH_TIMEOUT_MS`) | Unset, empty, non-integer, `< 1`, or above the max → shipped 15s bound. Does not throw. |
 | `FOUNDRY_OPERATOR` | `factory/cli.ts` `approve` and `clear-halt` when `--by` is omitted. Attribution in the ledger, not a credential. | `"operator"` | Ledger events record `by: "operator"`. |
 | `E2B_API_KEY` | `witnessEvidence` (`factory/witness.ts`) via caller `env` (`cli.ts` passes `process.env`). Presence check only — this CLI never talks to E2B. Also a `WITNESS_SECRET_KEYS` strip. | none | Wave 1+ `evidence` refuses with “cannot witness evidence in dry-run”. **Set** still refuses: execution belongs to the worker host; ingest with `attach-witness`. |
 | `NODE_TEST_CONTEXT` | `factory/cli.ts` persist / logs-root guards. Set by `node:test` for spawned CLI children. Not an operator setting. | unset in a real operator shell | When set, and the CLI was not given `--state` / `--logs-root`, the process refuses to write the repo-root ledger or run logs. Unset: those writes are allowed. |
+| `HOME` | `probeHarness` (`factory/harness.ts`). Locates `~/.omp/agent/agent.db` and `config.yml`. Also on the witness/agent child allowlist so omp can read that store. | the operator's home | `harness-check` reports the store absent; Wave 0 implement cannot bill omp OAuth until `omp login`. |
+| `PATH` | `probeHarness` (`factory/harness.ts`) `whichOnPath` for `omp` / `claude` / `codex` / `grok`. Also on the witness child allowlist (toolchain). | the operator's PATH | `harness-check` reports no host CLI; Wave 0 implement is unusable unless a subscription store is present. |
 | `FOUNDRY_LIVE` | **Not a `process.env` read.** GitHub Actions **repository variable** `vars.FOUNDRY_LIVE` in `.github/workflows/oss-tick.yml`. | unset (dry) | `!= 'true'` → clock prints “FOUNDRY_LIVE is not set — clock stays dry” and does not file a packet-request issue. `== 'true'` → files (or updates) that issue on `oss-foundry`. Still must not open contribution PRs. |
 
 Not secrets, not read, do not provision: `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY`, `FOUNDRY_INSTALLATION_ID`. They appear in no `factory/` read. See [07-github-app.md](07-github-app.md).

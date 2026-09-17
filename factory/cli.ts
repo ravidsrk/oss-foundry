@@ -58,6 +58,7 @@ import { seedState } from "./seed.ts";
 import { backupFactoryState, loadFactoryState, saveFactoryState } from "./state.ts";
 import { scoreIssue } from "./scout.ts";
 import { emitLine } from "./severity.ts";
+import { probeHarness, renderHarnessCheck, sandboxHarnessLines } from "./harness.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { installTerminalBoundary } from "./terminal.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryEvent, type FactoryState, type ScorecardRow } from "./types.ts";
@@ -613,6 +614,7 @@ function usage(): void {
   advance <packetId>
   evidence <packetId> --base <sha> --head <sha>   (tests + revert control run in the sandbox — witnessed, never attested; host/Wave 0 only)
   witness-check [repoId]   (pre-flight: resolve the interpreter each allowlisted testCommand would really use here, before a packet is in flight)
+  harness-check   (pre-flight: which host OAuth/plan subscriptions Wave 0 implement would bill; PAT stays in Foundry)
   attach-witness <packetId> --manifest <path>   (ingest a witness produced on the worker host; provenance and log hashes re-checked here)
   body <packetId>
   attach-draft <packetId> <prUrl>
@@ -884,6 +886,12 @@ async function main() {
     persist(result.state);
     const p = result.state.packets.find((x) => x.id === id);
     console.log(`advanced ${id} → ${p?.status}`);
+    if (p?.status === "implementing") {
+      console.log(`harness: ${p.sandboxSession?.image}`);
+      for (const line of sandboxHarnessLines(repoById(p.repoId))) {
+        console.log(`  ${line}`);
+      }
+    }
     return;
   }
 
@@ -978,6 +986,15 @@ async function main() {
     persistWitnessLogs(outcome.witness, outcome.logs);
     persist(result.state);
     console.log(`evidence attached ${id}`);
+    return;
+  }
+
+  if (cmd === "harness-check") {
+    // Machine-specific half of the implement contract. applyAdvance stores a
+    // deterministic dry-run (no provider ids, no HOME) so CI and laptops agree;
+    // this verb is how the operator sees whether THIS machine can bill a coding-plan
+    // subscription instead of an API key.
+    console.log(renderHarnessCheck(probeHarness(), ALLOWLIST));
     return;
   }
 

@@ -121,7 +121,9 @@ The first 20 factory-wide approvals decrement a visible counter (`humanApprovals
 
 ## 4. Implementer
 
-**Not a working gate.** `applyAdvance` (`factory/engine.ts`) on status `approved` requires `humanAttest`, calls `runSandboxDry` / `planSandbox`, stores that session on the packet, and bumps status to `implementing` / station `implement`. The stored session is a dry-run plan: commands are comment strings prefixed `# planned · not executed ·` with `exit: -1` (`factory/sandbox.ts`). No playbook pack runs, no worktree is created, no E2B box is booted. Wave 0 host / Wave 1+ E2B execution belongs to a worker host that is not in this tree ([06-v2.md](06-v2.md)).
+**Not a working gate.** `applyAdvance` (`factory/engine.ts`) on status `approved` requires `humanAttest`, calls `runSandboxDry` / `planSandbox`, stores that session on the packet, and bumps status to `implementing` / station `implement`. The stored session is a dry-run plan: commands are comment strings prefixed `# planned · not executed ·` with `exit: -1` (`factory/sandbox.ts`). No playbook pack runs, no worktree is created, no E2B box is booted. Wave 0 host / Wave 1+ E2B execution belongs to a worker host that is not in this tree ([06-v2.md](06-v2.md)). ADR 0001 still holds: the coding agent is orca-fleet `oss-contribute`, not a second loop in this CLI.
+
+The dry-run **does** name how that worker bills. Wave 0 host plans `omp --mode rpc` against a worktree, billing the operator's existing coding-plan OAuth (Claude Pro/Max, Codex ChatGPT, SuperGrok, …) from omp's host store — not `ANTHROPIC_API_KEY` in the child, and not `FOUNDRY_PAT` (that stays here for `open-draft`). Wave 1+ plans an auth-gateway on the worker host so the box never holds refresh tokens either. The machine-specific half is `harness-check` (`factory/harness.ts`): it reads provider **ids** from `~/.omp/agent/agent.db` (never the `data` column) and says whether this laptop can bill a subscription.
 
 The CLI dry-run **plans** sandbox commands. It does not stamp `harvested` with exit 0.
 

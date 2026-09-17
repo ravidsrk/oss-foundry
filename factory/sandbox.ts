@@ -1,4 +1,5 @@
 import { repoById } from "./allowlist.ts";
+import { sandboxHarnessLines } from "./harness.ts";
 import type { SandboxSession, TaskPacket } from "./types.ts";
 
 function now() {
@@ -14,8 +15,8 @@ export function planSandbox(packet: TaskPacket): SandboxSession {
     id: `sbx_${packet.id}`,
     status: "dry-run",
     image: hostOk
-      ? "host-worktree (Wave 0 only)"
-      : "e2b/code-interpreter · fresh · no secrets",
+      ? "host-worktree (Wave 0 only) · omp OAuth/plan · no secrets in the clone"
+      : `${provider === "daytona" ? "daytona" : "e2b"} · fresh · no secrets · auth-gateway on the worker host`,
     commands: [],
   };
 }
@@ -25,9 +26,10 @@ export function runSandboxDry(packet: TaskPacket): SandboxSession {
   const repo = repoById(packet.repoId);
   const cmds = [
     `git clone https://github.com/${packet.repoId}.git  # full clone — historical SHAs must be reachable`,
+    ...sandboxHarnessLines(repo),
     repo?.testCommand ?? "true",
     "git diff --stat",
-    "harvest patch via git format-patch / git push to fork",
+    "harvest patch via git format-patch; GitHub writes stay in Foundry open-draft",
     "destroy sandbox · secrets never entered the box",
   ];
   return {
@@ -43,9 +45,10 @@ export function runSandboxDry(packet: TaskPacket): SandboxSession {
 
 export const SANDBOX_RULES = [
   "Wave 0 (own repos) may use a host worktree. Everything else is E2B or Daytona.",
+  "Wave 0 implement bills host OAuth/plan subscriptions (omp). Never copy FOUNDRY_PAT or provider API keys into the worktree or the agent child.",
   "No GitHub App private key, no npm tokens, no SSH keys inside the box.",
   "Clone is full (historical SHAs must be reachable). Network is allowlisted to git + package registries.",
-  "Harvest is git-only: format-patch or push to the operator fork. Then destroy.",
+  "Harvest is git-only: format-patch or push to the operator fork. Then destroy. GitHub writes stay in Foundry (open-draft).",
   // `reject` is the operator's verb; `parked` is a status the engine writes on its own (over-cap
   // scope, a scorecard halt, a policy denial). Doctrine that reads as an instruction must name a
   // button the operator actually has (issue #44 item 5).

@@ -57,6 +57,7 @@ stdout is the committed seed snapshot: six packets, none in flight, `in flight: 
 | `sync <id>` | Live PR follow-up. Never merges. |
 | `reconcile` | Absorb merges/closes into local state. |
 | `open-draft <id> --head <forkOwner:branch>` | Draft-only create. Needs `FOUNDRY_PAT`. |
+| `harness-check` | Which host OAuth/plan subscriptions Wave 0 implement would bill. PAT stays in Foundry. |
 
 ## What `tick` does today
 

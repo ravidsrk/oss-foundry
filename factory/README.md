@@ -11,7 +11,8 @@ TypeScript modules for the Foundry control plane. No operator web UI lives in th
 | `cli.ts` | Operator freeze / tick / draft-body loop |
 | `github-pr.ts` | Draft-only create payload + PR sync. No POST-pulls helper. No merge helper |
 | `github-scout.ts` | Live issue fetch — the discovery half of the scout seam, **not wired**: `tick` walks named `firstIssues`. Public API; `GITHUB_TOKEN` raises the rate limit |
-| `sandbox.ts` | Dry-run plan. Does not stamp harvested/exit 0 |
+| `sandbox.ts` | Dry-run plan. Does not stamp harvested/exit 0. Wave 0 lines name omp OAuth/plan; Wave 1+ names auth-gateway |
+| `harness.ts` | Subscription pre-flight. Detects omp OAuth/plan + host CLIs; agent child env never carries `FOUNDRY_PAT` |
 | `scorecard.ts` | Halt rules; engine consults `health()` |
 | `seed.ts` | Ledger seed. Keep in sync with GitHub |
 | `run-tests.ts` | The suite's own oracle — see below. Discovers every `factory/*.test.ts`; nothing to register |
