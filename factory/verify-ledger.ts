@@ -2,6 +2,7 @@ import { competitionAdvisories, readCompetition } from "./competition-read.ts";
 import { packetChecks } from "./ledger-check.ts";
 import { revertCheck, syncGithubPr } from "./github-pr.ts";
 import { seedState } from "./seed.ts";
+import { emitLine } from "./severity.ts";
 import { installTerminalBoundary } from "./terminal.ts";
 
 // Clock-side, read-only: the committed seed ledger must match GitHub. A divergence — the published
@@ -74,9 +75,9 @@ for (const packet of withPr) {
     advisory.push(...competitionAdvisories(packet, await readCompetition(packet)));
   }
 }
-for (const a of advisory) console.error(`ADVISORY ${a}`);
+for (const a of advisory) emitLine("advisory", a);
 if (fatal.length > 0) {
-  for (const d of fatal) console.error(`DIVERGENCE ${d}`);
+  for (const d of fatal) emitLine("divergence", d);
   process.exit(1);
 }
 const owed = advisory.length === 0 ? "" : `; ${advisory.length} advisory outstanding (see above)`;

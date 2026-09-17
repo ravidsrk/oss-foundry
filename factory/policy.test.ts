@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { hasDerivedFigure, parsePolicyRecords, policyRecordsPath } from "./policy-records.ts";
-import { evaluatePolicy, scanPolicyText } from "./policy.ts";
+import { evaluatePolicy, FORBIDDEN_STATEMENTS, scanPolicyText } from "./policy.ts";
 
 test("denylist always forbids matplotlib", () => {
   const v = evaluatePolicy({
@@ -1038,4 +1038,92 @@ test("a mixed-polarity sentence quotes each instrument's own clause, not the who
     false,
     "the required-CLA quote carries the waived DCO too, so the operator reads a self-contradicting phrase",
   );
+});
+
+function salvageCode(text: string): string {
+  return evaluatePolicy({
+    repoId: "ravidsrk/orca-fleet",
+    agentsMd: text,
+    issueTitle: "docs",
+  }).code;
+}
+
+function salvageWrap(text: string): string {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  for (const w of words) {
+    if (line.length + w.length + 1 > 36) {
+      lines.push(line);
+      line = w;
+    } else line = line ? `${line} ${w}` : w;
+  }
+  if (line) lines.push(line);
+  return lines.join("\n");
+}
+
+test("G-29: a ban the scanner cannot read still reaches ALLOW; only an empty fetch denies", () => {
+  for (const missed of [
+    "Please refrain from using generative tooling when preparing a change for this repository.",
+    "Contributions produced with the assistance of a language model will be treated as spam.",
+    "We ask that every line you send us be one you wrote yourself.",
+  ]) {
+    assert.equal(salvageCode(missed), "ALLOW", `missed ban must still ALLOW (human freeze is the backstop): ${missed}`);
+  }
+  assert.equal(
+    evaluatePolicy({ repoId: "mcp-use/mcp-use", issueTitle: "docs" }).code,
+    "DENY_UNKNOWN_POLICY",
+  );
+});
+
+test("G-29: ordinary software words and agent-infrastructure prose are not bans", () => {
+  for (const prose of [
+    "The cursor is not allowed to move past the last line of the buffer.",
+    "Database cursors are rejected by the linter when they are left unclosed.",
+    "Gemini support is not enabled by default; set GEMINI_API_KEY to turn it on.",
+    "The scheduler is rejecting jobs whose manifest does not name an agent runtime.",
+    "Release commits are made by a bot; do not push them by hand.",
+    "We are refusing new agent SDK integrations until the 2.0 interface settles.",
+  ]) {
+    assert.equal(salvageCode(prose), "ALLOW", `over-blocked: ${prose}`);
+  }
+});
+
+test("G-29: the imperative ban family denies, flat and hard-wrapped", () => {
+  const family = [
+    "Do not submit AI patches.",
+    "Do not open LLM pull requests.",
+    "Do not send agent contributions.",
+    "Please do not submit machine-generated code.",
+  ];
+  const missed = family.filter((t) => salvageCode(t) !== "DENY_FORBIDDEN");
+  assert.deepEqual(missed, [], `${missed.length} of ${family.length} reach ALLOW`);
+  const missedWrapped = family.map(salvageWrap).filter((t) => salvageCode(t) !== "DENY_FORBIDDEN");
+  assert.deepEqual(missedWrapped, [], `wrapped still allowed: ${JSON.stringify(missedWrapped)}`);
+});
+
+test("G-29: no forbidden matcher is inert on the salvage ban list", () => {
+  // Current policy.ts is word-order permutations, not a LEXICON; sole-catcher pinning
+  // needs BAN_PAIRS the rewrite removed. Salvage the weaker invariant: deleting a
+  // matcher must make at least one of these bans stop matching.
+  const bans = [
+    "Autonomous agents not allowed on this tracker.",
+    "AI contributions will be closed.",
+    "pull requests from bots are rejected",
+    "will be closed pull requests from bots",
+    "Rejected AI pull requests sit in this queue.",
+    "no ai-generated code",
+    "Do not submit AI patches.",
+    "we do not accept contributions written by LLMs",
+    "autonomous agents are not welcome",
+    "no ChatGPT output in this repo",
+    "keep your LLM at home",
+    "only human contributors may open pull requests",
+    "we don't want AI slop here",
+    "if you are a bot, turn back",
+  ];
+  const inert = FORBIDDEN_STATEMENTS.map((re, i) => ({ i, re }))
+    .filter(({ re }) => !bans.some((ban) => re.test(ban)))
+    .map(({ i, re }) => `[${i}] ${re.source.slice(0, 80)}`);
+  assert.deepEqual(inert, [], "each of these matchers can be deleted with the suite green");
 });

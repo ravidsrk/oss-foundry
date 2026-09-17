@@ -89,7 +89,7 @@ export type WitnessRunner = (
  * strips userinfo from the value. A proxy that required that password then fails
  * closed, without leaking it. `NO_PROXY` is a host list, not a URL, and is copied as-is.
  */
-export const WITNESS_CHILD_ENV_KEYS = [
+const WITNESS_CHILD_ENV_KEYS = [
   "PATH", // git, npm, node, python, bash — a child with no PATH cannot clone or test
   "HOME", // npm cache (~/.npm); git/python user-level files the toolchain actually reads
   "TMPDIR", // npm extract + test temp files; Node's os.tmpdir() honours this
@@ -378,7 +378,7 @@ export interface IngestedWitness {
 }
 
 /** Where a packet's run logs live, relative to the repo root. Committed beside the evidence page. */
-export const WITNESS_LOG_ROOT = "docs/evidence/logs";
+const WITNESS_LOG_ROOT = "docs/evidence/logs";
 
 /**
  * How an operator actually runs the ingest verb. `package.json` is `private: true` with no `bin`,
@@ -597,7 +597,7 @@ export function isTestPath(path: string): boolean {
 }
 
 /** The one digest the witness, the evidence page, and the log check all speak. */
-export function witnessLogSha(text: string): string {
+function witnessLogSha(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 

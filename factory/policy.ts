@@ -17,7 +17,8 @@ const VERDICT = String.raw`(?:not\s+(?:\w+\s+){0,2}(?:allowed|welcome|accepted|a
 // Sentence-sized window that a real period ends — but abbreviation dots (e.g., i.e., etc.) do not.
 const W = String.raw`(?:e\.g\.|i\.e\.|etc\.|[^.\n]){0,90}`;
 
-const FORBIDDEN_STATEMENTS: RegExp[] = [
+/** Exported so tests can pin each matcher as the sole catcher of at least one ban (G-29). */
+export const FORBIDDEN_STATEMENTS: RegExp[] = [
   new RegExp(`${SUBJECT}${W}${OBJECT}${W}${VERDICT}`, "i"),
   new RegExp(`${OBJECT}${W}${SUBJECT}${W}${VERDICT}`, "i"),
   new RegExp(`${VERDICT}${W}${OBJECT}${W}${SUBJECT}`, "i"),
