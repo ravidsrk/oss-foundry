@@ -14,6 +14,7 @@ import {
   OMP_CREDENTIAL_QUERY,
   parseOmpDefaultModel,
   planHarness,
+  providerOfModel,
   probeHarness,
   renderHarnessCheck,
   sandboxHarnessLines,
@@ -69,6 +70,13 @@ test("credentialKind maps omp store types onto oauth / plan / api-key", () => {
   assert.equal(credentialKind("kimi-code", "oauth"), "plan");
   assert.equal(credentialKind("zai", "oauth"), "plan");
   assert.equal(credentialKind("openrouter", "api_key"), "api-key");
+});
+
+test("providerOfModel reads the omp provider prefix and ignores bare names", () => {
+  assert.equal(providerOfModel("anthropic/claude-sonnet-4-6"), "anthropic");
+  assert.equal(providerOfModel("openrouter/foo"), "openrouter");
+  assert.equal(providerOfModel("opus"), undefined);
+  assert.equal(providerOfModel(undefined), undefined);
 });
 
 test("parseOmpDefaultModel reads modelRoles.default and ignores sibling keys", () => {
@@ -223,15 +231,39 @@ test("planHarness without a subscription and without a host CLI is unusable, not
   assert.match(plan.reason, /coding-plan subscription/);
 });
 
-test("planHarness falls back to a logged-in host CLI when omp has no OAuth store", () => {
+test("planHarness omits a configured default that is not a coding-plan subscription", () => {
+  const home = tmp("foundry-harness-bypass-");
+  writeStore(
+    home,
+    [
+      { provider: "anthropic", type: "oauth" },
+      { provider: "openrouter", type: "api_key" },
+    ],
+    "modelRoles:\n  default: openrouter/some-model\n",
+  );
+  const bin = tmp("foundry-harness-bypass-bin-");
+  stubBin(bin, "omp");
+  const probe = probeHarness({ home, path: bin });
+  const plan = planHarness({ wave: 0, sandbox: "host" }, probe);
+  assert.equal(plan.usable, true);
+  assert.equal(plan.via, "omp-oauth");
+  assert.equal(plan.model, undefined);
+  assert.equal(plan.argv.includes("--model"), false);
+  assert.match(plan.reason, /openrouter\/some-model/);
+  assert.match(plan.reason, /omitted from the spawn/);
+  assert.deepEqual(plan.providers, ["anthropic"]);
+});
+
+test("planHarness does not report a host CLI as usable without probing its login", () => {
   const home = tmp("foundry-harness-cli-");
   const bin = tmp("foundry-harness-cli-bin-");
   stubBin(bin, "grok");
   const probe = probeHarness({ home, path: bin });
   const plan = planHarness({ wave: 0, sandbox: "host" }, probe);
-  assert.equal(plan.usable, true);
+  assert.equal(plan.usable, false);
   assert.equal(plan.via, "host-cli");
-  assert.match(plan.reason, /grok/);
+  assert.match(plan.reason, /did not probe its login/);
+  assert.deepEqual(plan.argv, []);
 });
 
 test("sandbox dry-run lines name the subscription contract and stay machine-independent", () => {

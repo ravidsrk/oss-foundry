@@ -121,6 +121,14 @@ export function credentialKind(provider: string, credentialType: string): Creden
  * Parse `modelRoles.default` from omp `config.yml` without a YAML library.
  * The file is small and the key we want is a single unquoted scalar.
  */
+/** First path segment of an omp model id (`anthropic/claude-…` → `anthropic`). Bare names have none. */
+export function providerOfModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  const slash = model.indexOf("/");
+  if (slash <= 0) return undefined;
+  return model.slice(0, slash);
+}
+
 export function parseOmpDefaultModel(yaml: string): string | undefined {
   const lines = yaml.split(/\r?\n/);
   let inRoles = false;
@@ -331,7 +339,10 @@ export function planHarness(
   }
   const subs = activeSubscriptions(probe);
   const omp = probe.clis.find((c) => c.name === "omp");
-  const model = probe.defaultModel;
+  const configured = probe.defaultModel;
+  const configuredProvider = providerOfModel(configured);
+  const modelBillsSubscription =
+    !configuredProvider || subs.some((s) => s.provider === configuredProvider);
   if (omp && subs.length > 0) {
     const argv = [
       omp.path,
@@ -343,14 +354,19 @@ export function planHarness(
       "<session>",
       "--no-title",
     ];
-    if (model) argv.push("--model", model);
+    const spawnModel = configured && modelBillsSubscription ? configured : undefined;
+    if (spawnModel) argv.push("--model", spawnModel);
+    let reason = `Wave 0 host implement bills omp OAuth/plan (${unique(subs.map((s) => s.provider)).join(", ")}); FOUNDRY_PAT stays in Foundry.`;
+    if (configured && !modelBillsSubscription) {
+      reason += ` Configured default ${configured} is not a coding-plan subscription — omitted from the spawn.`;
+    }
     return {
       usable: true,
       via: "omp-oauth",
-      reason: `Wave 0 host implement bills omp OAuth/plan (${unique(subs.map((s) => s.provider)).join(", ")}); FOUNDRY_PAT stays in Foundry.`,
+      reason,
       executable: omp.path,
       argv,
-      model,
+      model: spawnModel,
       providers: unique(subs.map((s) => s.provider)),
       sandbox,
       wave,
@@ -359,11 +375,11 @@ export function planHarness(
   const hostCli = probe.clis.find((c) => c.name !== "omp");
   if (hostCli) {
     return {
-      usable: true,
+      usable: false,
       via: "host-cli",
-      reason: `Wave 0 host implement uses the logged-in ${hostCli.name} CLI (that CLI's own subscription). Exact flags are the CLI's; GitHub writes stay in Foundry.`,
+      reason: `found ${hostCli.name} on PATH but did not probe its login — Wave 0 implement is not reported usable until omp OAuth/plan is present in agent.db`,
       executable: hostCli.path,
-      argv: [hostCli.path, "-p", "<packet prompt>"],
+      argv: [],
       providers: unique(subs.map((s) => s.provider)),
       sandbox,
       wave,
