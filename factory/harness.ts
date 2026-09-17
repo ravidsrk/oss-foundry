@@ -193,18 +193,33 @@ function readViaNodeSqlite(dbPath: string): StoredCredential[] | undefined {
   }
 }
 
+/**
+ * `sqlite3` is the Node 22.10 floor path: `node:sqlite` still needs
+ * `--experimental-sqlite` there. A harness-check child whose PATH is only a
+ * stub bin (the CLI test, a locked-down worker) must still find the binary.
+ */
+const SQLITE3_CANDIDATES = [
+  "sqlite3",
+  "/usr/bin/sqlite3",
+  "/opt/homebrew/bin/sqlite3",
+  "/usr/local/bin/sqlite3",
+];
+
 function readViaSqlite3(dbPath: string): StoredCredential[] | undefined {
-  const run = spawnSync("sqlite3", ["-json", dbPath, OMP_CREDENTIAL_QUERY], {
-    encoding: "utf8",
-  });
-  if (run.status !== 0) return undefined;
-  try {
-    const parsed = JSON.parse(run.stdout || "[]") as Record<string, unknown>[];
-    if (!Array.isArray(parsed)) return undefined;
-    return rowsToCredentials(parsed);
-  } catch {
-    return undefined;
+  for (const bin of SQLITE3_CANDIDATES) {
+    const run = spawnSync(bin, ["-json", dbPath, OMP_CREDENTIAL_QUERY], {
+      encoding: "utf8",
+    });
+    if (run.status !== 0) continue;
+    try {
+      const parsed = JSON.parse(run.stdout || "[]") as Record<string, unknown>[];
+      if (!Array.isArray(parsed)) continue;
+      return rowsToCredentials(parsed);
+    } catch {
+      continue;
+    }
   }
+  return undefined;
 }
 
 function readOmpStore(agentDir: string): {

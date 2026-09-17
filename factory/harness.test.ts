@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { tmp } from "./tmp-dir.ts";
@@ -285,6 +285,28 @@ test("whichOnPath finds an executable stub and ignores a missing name", () => {
   assert.equal(whichOnPath("claude", bin), undefined);
 });
 
+test("probeHarness still reads the store when PATH has no sqlite3", () => {
+  // Node 22.10 CI: node:sqlite is flagged, and a locked-down PATH hid `sqlite3`.
+  // Absolute candidates (/usr/bin/sqlite3) must still open the fixture.
+  const home = tmp("foundry-harness-nopath-");
+  writeStore(home, [{ provider: "anthropic", type: "oauth" }]);
+  const bin = tmp("foundry-harness-nopath-bin-");
+  stubBin(bin, "omp");
+  const saved = process.env.PATH;
+  try {
+    process.env.PATH = bin;
+    const probe = probeHarness({ home, path: bin });
+    assert.equal(probe.storeError, undefined, probe.storeError);
+    assert.deepEqual(
+      probe.credentials.map((c) => c.provider),
+      ["anthropic"],
+    );
+  } finally {
+    if (saved === undefined) delete process.env.PATH;
+    else process.env.PATH = saved;
+  }
+});
+
 test("harness-check is a CLI verb and reports a fixture store, not the operator's", () => {
   const home = tmp("foundry-harness-cli-home-");
   writeStore(
@@ -305,7 +327,10 @@ test("harness-check is a CLI verb and reports a fixture store, not the operator'
         ...process.env,
         NODE_NO_WARNINGS: "1",
         HOME: home,
-        PATH: bin,
+        // Prepend the stub bin so `omp` resolves here, but keep the parent PATH
+        // so `sqlite3` remains reachable. Node 22.10 has no unflagged
+        // `node:sqlite`; wiping PATH made harness-check report the store unread.
+        PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       },
     },
   );
