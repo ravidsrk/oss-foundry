@@ -9,6 +9,8 @@ import {
   applyAttachDraft,
   applyAttachEvidence,
   applyHalt,
+  applyObservedBlock,
+  isBlockSignal,
   applyReject,
   applyPrSync,
   applyReviewObservation,
@@ -55,6 +57,7 @@ import { health, mergeRate, scorecardRow, stopReasons, terminalCount } from "./s
 import { seedState } from "./seed.ts";
 import { backupFactoryState, loadFactoryState, saveFactoryState } from "./state.ts";
 import { scoreIssue } from "./scout.ts";
+import { emitLine } from "./severity.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { installTerminalBoundary } from "./terminal.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryEvent, type FactoryState, type ScorecardRow } from "./types.ts";
@@ -284,6 +287,17 @@ function persist(state: FactoryState): void {
   saveFactoryState(STATE_FILE, state);
 }
 
+function absorbBlock(state: FactoryState, repoId: string | undefined, error: string): FactoryState {
+  if (!repoId || !isBlockSignal(error)) return state;
+  const observed = applyObservedBlock(state, repoId, error);
+  if (!observed.recorded) return state;
+  emitLine(
+    "halt",
+    `block observed on ${repoId}: GitHub 403 after a closed-unmerged packet. Denylist the repo the same hour.`,
+  );
+  return observed.state;
+}
+
 function mustLoad() {
   const loaded = loadFactoryState(STATE_FILE);
   if (!loaded.ok) {
@@ -297,7 +311,7 @@ function mustLoad() {
   }
   const halted = factoryHalt(loaded.state);
   if (halted) {
-    console.error(`FACTORY HALTED ${halted.at}: ${halted.reason}`);
+    emitLine("halt", `${halted.at}: ${halted.reason}`);
   }
   return { state: loaded.state, source: loaded.source };
 }
@@ -314,14 +328,14 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
   // The clock verifies the committed seed, never this file (docs/08-operations.md). This is the
   // only place the operator is told the two have parted company.
   if (source === "file") {
-    for (const d of seedDivergences(state, seedState())) console.error(`SEED DRIFT ${d}`);
+    for (const d of seedDivergences(state, seedState())) emitLine("seedDrift", d);
   }
   // The halt used to reach the terminal only as a mustLoad side-effect on stderr, above the
   // report and not part of it. status is the 2 a.m. diagnostic; a factory-wide stop that is not
   // in the report is a stuck factory with no surfaced reason (G-08).
   const halted = factoryHalt(state);
   if (halted) {
-    console.log(`FACTORY HALTED ${halted.at}: ${halted.reason}`);
+    emitLine("halt", `${halted.at}: ${halted.reason}`, "report");
   }
   const inflight = state.packets.filter((p) => INFLIGHT_STATUSES.includes(p.status));
   console.log(`Foundry  packets=${state.packets.length} ticks=${state.ticksRun} attestedWave0=${foundryAttestedWave0Merges(state.packets)} inflight=${hasInflight(state.packets)}`);
@@ -485,6 +499,8 @@ async function tickWithGithub(state: FactoryState) {
     const pulls = await listOpenPulls(repo.id);
     if (!pulls.ok) {
       console.error(pulls.error);
+      const blocked = absorbBlock(state, repo.id, pulls.error);
+      if (blocked !== state) persist(blocked);
       process.exit(1);
     }
     refuseIfCapped([pulls], repo.id);
@@ -1225,6 +1241,7 @@ async function main() {
       const synced = await syncGithubPr({ url: packet.prUrl });
       if (!synced.ok) {
         console.error(`${packet.id}: ${synced.error}`);
+        next = absorbBlock(next, packet.repoId, synced.error);
         failures.push(packet.id);
         continue;
       }
@@ -1330,16 +1347,18 @@ async function main() {
     // a DIVERGENCE, a debt on a ledger that already reconciles is an ADVISORY. `reconcile` gates on
     // neither — it reports so the operator can act — but calling a re-witness debt a divergence
     // here and not there would teach two different meanings for one word.
-    for (const a of owed) console.error(`ADVISORY ${a}`);
-    for (const d of doctrine) console.error(`DIVERGENCE ${d}`);
+    for (const a of owed) emitLine("advisory", a);
+    for (const d of doctrine) emitLine("divergence", d);
     for (const r of reviews) {
-      console.error(
-        `REVIEW ${r}. Recorded in local state only; promote the scorecard row into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that never observed this PR's review.`,
+      emitLine(
+        "review",
+        `${r}. Recorded in local state only; promote the scorecard row into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that never observed this PR's review.`,
       );
     }
     for (const r of reverts) {
-      console.error(
-        `REVERT ${r} — SPEC.md §7: the repo is now a scorecard stop and stays unselectable while the ledger records it. Recorded in local state only; promote it into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that says reverts=0. Not allowlist.yaml — removing the repo there deletes the scorecard row that holds the count.`,
+      emitLine(
+        "revert",
+        `${r} — SPEC.md §7: the repo is now a scorecard stop and stays unselectable while the ledger records it. Recorded in local state only; promote it into factory/seed.ts (and regenerate the docs/12-ledger.md block) or the clock keeps reading a seed that says reverts=0. Not allowlist.yaml — removing the repo there deletes the scorecard row that holds the count.`,
       );
     }
     console.log(
@@ -1441,13 +1460,13 @@ async function main() {
     for (const e of result.state.events) {
       if (eventIdsBefore.has(e.id)) continue;
       if (e.packetId === id && e.message.includes("Human review not observed")) {
-        console.error(`ADVISORY ${e.message}`);
+        emitLine("advisory", e.message);
       }
     }
     // Re-check competing work on a still-open submitted/followed-up packet (issue #111).
     if (after && synced.meta.state !== "closed" && !synced.meta.merged) {
       for (const line of competitionAdvisories(after, await readCompetition(after))) {
-        console.error(`ADVISORY ${line}`);
+        emitLine("advisory", line);
       }
     }
     return;

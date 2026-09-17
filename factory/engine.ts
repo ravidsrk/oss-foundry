@@ -341,6 +341,62 @@ export function applyHalt(
   };
 }
 
+/**
+ * A GitHub 403 that is not a rate-limit and not a missing PAT. Issue #121: a maintainer block
+ * closes every contribution from the machine account and says nothing; the next write (or
+ * authenticated read) returns 403. Primary/secondary quota exhaustion and an unset PAT are
+ * different 403s and must not halt the repo.
+ */
+export function isBlockSignal(error: string): boolean {
+  if (!/\bGitHub 403\b/.test(error)) return false;
+  if (/primary rate limit exhausted/i.test(error)) return false;
+  if (/secondary rate limit/i.test(error)) return false;
+  if (/FOUNDRY_PAT is not set/i.test(error)) return false;
+  return true;
+}
+
+/**
+ * Keep writing `closedUnmerged` on a silent close. If a later 403 arrives against that same
+ * repo, the close was a block: halt (banned), park followed-up packets, and reverse one
+ * `closedUnmerged` so the decline does not stand as the record. A 403 with no prior
+ * closed-unmerged packet is not a block — it is PAT, collaborator-only PRs, or quota.
+ */
+export function applyObservedBlock(
+  state: FactoryState,
+  repoId: string,
+  detail: string,
+): { state: FactoryState; recorded: boolean; error?: string } {
+  const repo = repoById(repoId);
+  if (!repo) return { state, recorded: false, error: `${repoId} is not on the allowlist.` };
+  const canonical = repo.id;
+  const closedUnmergedPacket = state.packets.find(
+    (p) =>
+      sameRepoId(p.repoId, canonical) &&
+      p.status === "followed-up" &&
+      p.prMeta?.state === "closed" &&
+      p.prMeta.merged !== true,
+  );
+  if (!closedUnmergedPacket) return { state, recorded: false };
+  const halted = applyHalt(
+    state,
+    canonical,
+    `GitHub 403 after closed-unmerged packet ${closedUnmergedPacket.id} — treating as a maintainer block. ${detail}`,
+  );
+  if (halted.error) return { state, recorded: false, error: halted.error };
+  const scorecard = halted.state.scorecard.map((row) =>
+    sameRepoId(row.repoId, canonical)
+      ? { ...row, closedUnmerged: Math.max(0, row.closedUnmerged - 1) }
+      : row,
+  );
+  return {
+    state: appendEvent(
+      { ...halted.state, scorecard },
+      ev("score", `Block observed on ${canonical}: reversed closedUnmerged for ${closedUnmergedPacket.id}`),
+    ),
+    recorded: true,
+  };
+}
+
 function pickCandidate(
   state: FactoryState,
   live: LiveIssue[],

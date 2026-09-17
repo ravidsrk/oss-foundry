@@ -8,6 +8,7 @@
 - Answer any review thread before running another tick.
 - Approvals record who attested: `approve <id> --note … --by <name>` (or set `FOUNDRY_OPERATOR`).
 - If a maintainer replies “please stop,” remove the repo the same hour.
+- If GitHub returns **403** on a repo that already has a closed-unmerged Foundry packet, treat it as a **block** (issue #121): the factory halts that repo (`banned`) and reverses the `closedUnmerged` decline. Denylist the same hour. A 403 with no prior closed-unmerged packet is not a block (PAT, collaborator-only PRs, or quota).
 
 ## What the clock actually verifies
 
