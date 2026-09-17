@@ -54,6 +54,7 @@ import { renderEvidencePage, renderFreezeEvidence, renderPrBody } from "./packet
 import { health, mergeRate, scorecardRow, stopReasons, terminalCount } from "./scorecard.ts";
 import { seedState } from "./seed.ts";
 import { backupFactoryState, loadFactoryState, saveFactoryState } from "./state.ts";
+import { scoreIssue } from "./scout.ts";
 import { foundryAttestedWave0Merges, ledgerSections, quietLabel } from "./status.ts";
 import { installTerminalBoundary } from "./terminal.ts";
 import { INFLIGHT_STATUSES, type EvidenceManifest, type EvidenceWitness, type FactoryEvent, type FactoryState, type ScorecardRow } from "./types.ts";
@@ -202,6 +203,21 @@ function refuseIfCapped(reads: { truncated: boolean }[], what: string): void {
   process.exit(1);
 }
 
+async function competingVerdictFor(packet: {
+  repoId: string;
+  issueNumber: number;
+  issueUrl: string;
+  prUrl?: string;
+}): Promise<import("./engine.ts").CompetitionVerdict> {
+  const read = await readCompetition(packet);
+  if (!read.ok) {
+    console.error(read.error);
+    process.exit(1);
+  }
+  refuseIfCapped([read], packet.repoId);
+  return read.verdict;
+}
+
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const STATE_FILE_FLAG = flag(ARGV, "--state");
 const STATE_FILE = resolve(STATE_FILE_FLAG ?? resolve(REPO_ROOT, ".foundry-state.json"));
@@ -298,7 +314,7 @@ function printStatus(state: FactoryState, source: "file" | "seed") {
   // The clock verifies the committed seed, never this file (docs/08-operations.md). This is the
   // only place the operator is told the two have parted company.
   if (source === "file") {
-    for (const d of seedDivergences(state, seedState())) console.log(`SEED DRIFT ${d}`);
+    for (const d of seedDivergences(state, seedState())) console.error(`SEED DRIFT ${d}`);
   }
   // The halt used to reach the terminal only as a mustLoad side-effect on stderr, above the
   // report and not part of it. status is the 2 a.m. diagnostic; a factory-wide stop that is not
@@ -530,14 +546,21 @@ async function tickWithGithub(state: FactoryState) {
         adjacentKeys.push(key);
         continue;
       }
+      const daysOld = daysOldFrom(liveIssue.issue.createdAt);
       live.push({
         repoId: repo.id,
         number: issue.number,
         title: issue.title,
         url: issue.url,
-        labels: repo.preferredLabels,
-        daysOld: 0,
-        scout: { total: 0, parts: { wave: 0, labels: 0, size: 0, freshness: 0 } },
+        // Issue labels are not on IssueLiveState; do not pretend preferredLabels are the issue's.
+        labels: [],
+        daysOld,
+        scout: scoreIssue({
+          repoId: repo.id,
+          title: issue.title,
+          labels: [],
+          daysOld,
+        }),
         agentsMd,
         contributing,
       });
@@ -552,10 +575,19 @@ const [cmd, ...rest] = ARGV;
  * Kept inside `main()` rather than at module scope: this used to `console.log` + `process.exit(0)`
  * on import, which made the module impossible to import from anywhere — including a test.
  */
+function daysOldFrom(iso?: string): number {
+  if (!iso) return 0;
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return 0;
+  return Math.floor(ms / 86_400_000);
+}
+
 function usage(): void {
   console.log(`Foundry operator loop
 
-  status
+  help
+  --version
+  status [--json]
   events   (ledger event log, newest first — the audit trail; ledger is the published export, not this)
   tick
   approve <packetId> --note <text> [--by <name>]   (identity also via FOUNDRY_OPERATOR)
@@ -585,6 +617,13 @@ ${DISCLOSURE}
 }
 
 async function main() {
+  if (cmd === "--version" || cmd === "-V" || cmd === "version") {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      version?: string;
+    };
+    console.log(pkg.version ?? "unversioned");
+    return;
+  }
   if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
     usage();
     return;
@@ -592,6 +631,22 @@ async function main() {
   const { state, source } = mustLoad();
 
   if (cmd === "status") {
+    if (rest.includes("--json")) {
+      console.log(
+        JSON.stringify({
+          stateFile: STATE_FILE,
+          source,
+          packets: state.packets.length,
+          ticksRun: state.ticksRun,
+          attestedWave0: foundryAttestedWave0Merges(state.packets),
+          inflight: hasInflight(state.packets),
+          humanApprovalsRemaining: state.humanApprovalsRemaining,
+          mergedTotal: state.mergedTotal,
+          bans: state.bans,
+        }),
+      );
+      return;
+    }
     printStatus(state, source);
     return;
   }
@@ -671,30 +726,7 @@ async function main() {
         console.error(`stand down: ${standDown} Reject or leave it gated — do not approve.`);
         process.exit(1);
       }
-      const pulls = await listOpenPulls(packetForFreeze.repoId);
-      if (!pulls.ok) {
-        console.error(pulls.error);
-        process.exit(1);
-      }
-      const crossRefs = findCompetingPull(
-        pulls.pulls,
-        packetForFreeze.issueNumber,
-        packetForFreeze.issueUrl,
-        packetForFreeze.repoId,
-      )
-        ? { ok: true as const, urls: [] as string[], truncated: false }
-        : await listCrossReferencingOpenPulls(packetForFreeze.repoId, packetForFreeze.issueNumber);
-      if (!crossRefs.ok) {
-        console.error(crossRefs.error);
-        process.exit(1);
-      }
-      refuseIfCapped([pulls, crossRefs], packetForFreeze.repoId);
-      const verdict = classifyCompetition(
-        { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
-        packetForFreeze.issueNumber,
-        packetForFreeze.issueUrl,
-        packetForFreeze.repoId,
-      );
+      const verdict = await competingVerdictFor(packetForFreeze);
       if (verdict.kind === "competing") {
         console.error(
           `stand down: competing PR ${verdict.url} (${verdict.why}) appeared on ${packetForFreeze.repoId}#${packetForFreeze.issueNumber} since gating. Reject or park — do not approve.`,
@@ -1123,23 +1155,7 @@ async function main() {
       console.error(`stand down: ${issueStandDown} Reject or leave it draft-ready — do not open.`);
       process.exit(1);
     }
-    const pulls = await listOpenPulls(packet.repoId);
-    const crossRefs = pulls.ok
-      ? findCompetingPull(pulls.pulls, packet.issueNumber, packet.issueUrl, packet.repoId)
-        ? { ok: true as const, urls: [] as string[], truncated: false }
-        : await listCrossReferencingOpenPulls(packet.repoId, packet.issueNumber)
-      : pulls;
-    if (!pulls.ok || !crossRefs.ok) {
-      console.error(!pulls.ok ? pulls.error : (crossRefs as { error: string }).error);
-      process.exit(1);
-    }
-    refuseIfCapped([pulls, crossRefs], packet.repoId);
-    const verdict = classifyCompetition(
-      { pulls: pulls.pulls, crossReferencedPullUrls: crossRefs.urls },
-      packet.issueNumber,
-      packet.issueUrl,
-      packet.repoId,
-    );
+    const verdict = await competingVerdictFor(packet);
     if (verdict.kind === "competing") {
       console.error(`stand down: competing PR ${verdict.url} (${verdict.why}). Assist or park — do not open.`);
       process.exit(1);
@@ -1192,6 +1208,7 @@ async function main() {
     let next = state;
     const doctrine: string[] = [];
     const owed: string[] = [];
+    const failures: string[] = [];
     // Reverts get their own bucket and their own word. `DIVERGENCE` means the ledger asserts
     // something GitHub contradicts and `ADVISORY` means a debt on a ledger that reconciles; a
     // revert is neither — it is a live safety event on a repository (SPEC.md §7). Overloading
@@ -1208,7 +1225,8 @@ async function main() {
       const synced = await syncGithubPr({ url: packet.prUrl });
       if (!synced.ok) {
         console.error(`${packet.id}: ${synced.error}`);
-        process.exit(1);
+        failures.push(packet.id);
+        continue;
       }
       const live = {
         state: synced.meta.state,
@@ -1325,8 +1343,9 @@ async function main() {
       );
     }
     console.log(
-      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length} reverts=${reverts.length} reviews=${reviews.length}`,
+      `reconciled ${state.packets.filter((p) => p.prUrl).length} packets; divergences=${doctrine.length} advisories=${owed.length} reverts=${reverts.length} reviews=${reviews.length}${failures.length ? ` failures=${failures.length}` : ""}`,
     );
+    if (failures.length) process.exit(1);
     return;
   }
 
@@ -1445,12 +1464,16 @@ async function main() {
       console.error("Not a GitHub pull request URL.");
       process.exit(1);
     }
+    const packetForDraft = state.packets.find((p) => p.id === id);
+    if (!packetForDraft) {
+      console.error(`unknown packet ${id}`);
+      process.exit(1);
+    }
     const synced = await syncGithubPr({ url });
     if (!synced.ok) {
       console.error(synced.error);
       process.exit(1);
     }
-    const packetForDraft = state.packets.find((p) => p.id === id);
     // Deliberately NOT gated on the issue's state (issue #40), unlike tick / approve / open-draft.
     // By here the pull request already exists on GitHub; the only question left is whether the
     // ledger records it. Refusing would leave a live PR the ledger has never heard of — the
@@ -1458,23 +1481,8 @@ async function main() {
     // the closed issue would still be there, now with nothing watching the draft. The right
     // response to a draft on an issue that closed is a human closing the draft, which needs the
     // record first.
-    if (packetForDraft) {
-      const parsed = parsePrUrl(url)!;
-      const pulls = await listOpenPulls(packetForDraft.repoId);
-      const crossRefs = await listCrossReferencingOpenPulls(packetForDraft.repoId, packetForDraft.issueNumber);
-      if (!pulls.ok || !crossRefs.ok) {
-        console.error(!pulls.ok ? pulls.error : !crossRefs.ok ? crossRefs.error : "");
-        process.exit(1);
-      }
-      refuseIfCapped([pulls, crossRefs], packetForDraft.repoId);
-      const others = pulls.pulls.filter((p) => p.number !== parsed.number);
-      const otherRefs = crossRefs.urls.filter((u) => parsePrUrl(u)?.number !== parsed.number);
-      const verdict = classifyCompetition(
-        { pulls: others, crossReferencedPullUrls: otherRefs },
-        packetForDraft.issueNumber,
-        packetForDraft.issueUrl,
-        packetForDraft.repoId,
-      );
+    {
+      const verdict = await competingVerdictFor({ ...packetForDraft, prUrl: url });
       if (verdict.kind === "competing") {
         console.error(
           `stand down: competing PR ${verdict.url} (${verdict.why}) appeared on ${packetForDraft.repoId}#${packetForDraft.issueNumber}. Assist or park — do not attach.`,

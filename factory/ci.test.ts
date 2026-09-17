@@ -386,6 +386,17 @@ test("CI executes the declared Node floor, it does not merely assert it", () => 
   );
 });
 
+test("oss-tick.yml pins the same Node floor the suite oracle needs (G-48)", () => {
+  const tick = workflows().find((w) => w.name === "oss-tick.yml");
+  assert.ok(tick, "oss-tick.yml is missing");
+  const setup = jobBlock(tick.text, "tick");
+  assert.match(
+    setup,
+    /node-version:\s*"22\.10\.0"/,
+    `oss-tick.yml must pin node-version to ${SUITE_ORACLE_FLOOR}, not a floating "22". GitHub's "22" is latest 22.x today; a future 22.x that drops test:summary.file would make the clock's node --experimental-strip-types path undiagnosable. The suite does not run here, but validate-allowlist.ts and verify-ledger.ts do.`,
+  );
+});
+
 /**
  * The type-check gate, guarded the same way the suite step is (issue #54's argument): adding it
  * fixes today, and does nothing about it being deleted. `--experimental-strip-types` erases types

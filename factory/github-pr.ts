@@ -269,6 +269,8 @@ export interface IssueLiveState {
   closedAt?: string;
   /** Login of whoever closed it, when GitHub reports one. */
   closedBy?: string;
+  /** ISO-8601 `created_at` from GitHub, for scout freshness. Absent only if GitHub omitted it. */
+  createdAt?: string;
   url: string;
 }
 
@@ -306,6 +308,7 @@ export async function fetchIssueState(
       pull_request?: unknown;
       closed_at?: string | null;
       closed_by?: { login?: string } | null;
+      created_at?: string | null;
       html_url?: string;
     };
     return {
@@ -319,6 +322,7 @@ export async function fetchIssueState(
         isPullRequest: body.pull_request !== undefined && body.pull_request !== null,
         closedAt: body.closed_at ?? undefined,
         closedBy: body.closed_by?.login,
+        createdAt: body.created_at ?? undefined,
         url: body.html_url ?? `https://github.com/${repoId}/issues/${issueNumber}`,
       },
     };

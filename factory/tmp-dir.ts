@@ -49,7 +49,18 @@ export function tmp(prefix: string): string {
     installed = true;
     process.on("exit", removeTmpDirs);
   }
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  let dir: string;
+  try {
+    dir = mkdtempSync(join(tmpdir(), prefix));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM" || code === "EROFS" || code === "ENOENT") {
+      throw new Error(
+        `tmp() cannot create a directory under TMPDIR=${JSON.stringify(tmpdir())} (${code}). Set TMPDIR to a writable path. Tests that need scratch dirs cannot run without it.`,
+      );
+    }
+    throw err;
+  }
   created.push(dir);
   return dir;
 }
