@@ -1335,6 +1335,7 @@ test("primary rate limit exhaustion is distinguishable from an ordinary 403", as
   assert.equal(ordinary.ok, false);
   if (!ordinary.ok) {
     assert.match(ordinary.error, /GitHub 403 listing pulls/);
+    assert.match(ordinary.error, /nope/, "the 403 cause must survive so isBlockSignal can tell a permission failure from a block");
     assert.doesNotMatch(ordinary.error, /primary rate limit/i);
   }
 

@@ -141,10 +141,37 @@ function primaryRateLimitMessage(res: Response): string | undefined {
   return `GitHub primary rate limit exhausted (${resource}: ${ceiling}, remaining 0, resets ${resetAt}${retry})`;
 }
 
-function githubHttpError(res: Response, what: string): string {
+/**
+ * Clip the GitHub error body so a 403's *cause* survives into the string
+ * `isBlockSignal` classifies. Without it, a permission 403 and a maintainer
+ * block are both `GitHub 403 listing pulls` (issue #165 Greptile P1).
+ */
+async function githubErrorCause(res: Response): Promise<string | undefined> {
+  try {
+    const text = await res.text();
+    if (!text) return undefined;
+    try {
+      const parsed = JSON.parse(text) as { message?: unknown };
+      if (typeof parsed.message === "string" && parsed.message.trim()) {
+        return parsed.message.replace(/\s+/g, " ").slice(0, 240);
+      }
+    } catch {
+      // not JSON
+    }
+    const clipped = text.replace(/\s+/g, " ").trim().slice(0, 240);
+    return clipped || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function githubHttpError(res: Response, what: string): Promise<string> {
   const primary = primaryRateLimitMessage(res);
   if (primary) return what ? `${primary} ${what}` : primary;
-  return what ? `GitHub ${res.status} ${what}` : `GitHub ${res.status}`;
+  const cause = await githubErrorCause(res);
+  const status = `GitHub ${res.status}`;
+  const labeled = what ? `${status} ${what}` : status;
+  return cause ? `${labeled}: ${cause}` : labeled;
 }
 
 /**
@@ -299,7 +326,7 @@ export async function fetchIssueState(
       githubRequestInit({ headers: githubApiHeaders() }),
     );
     if (!res.ok) {
-      return { ok: false, error: githubHttpError(res, `reading ${repoId}#${issueNumber}`) };
+      return { ok: false, error: await githubHttpError(res, `reading ${repoId}#${issueNumber}`) };
     }
     const body = (await res.json()) as {
       number?: number;
@@ -419,7 +446,7 @@ export async function compareCommits(
     if (!res.ok) {
       return {
         ok: false,
-        error: githubHttpError(
+        error: await githubHttpError(
           res,
           `comparing ${baseSha.slice(0, 7)}...${headSha.slice(0, 7)} on ${repoId}`,
         ),
@@ -616,7 +643,7 @@ async function listAllPages<T>(
   const items: T[] = [];
   for (let page = 0; page < cap; page += 1) {
     const res = await fetchImpl(url, githubRequestInit({ headers: githubApiHeaders() }));
-    if (!res.ok) return { ok: false, error: githubHttpError(res, what) };
+    if (!res.ok) return { ok: false, error: await githubHttpError(res, what) };
     const body = await res.json();
     if (!Array.isArray(body)) return { ok: false, error: `GitHub returned a non-list ${what}` };
     items.push(...(body as T[]));
@@ -772,7 +799,7 @@ export async function syncGithubPr(data: { url: string }, fetchImpl: typeof fetc
       `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
       githubRequestInit({ headers: githubApiHeaders() }),
     );
-    if (!res.ok) return { ok: false as const, error: githubHttpError(res, "") };
+    if (!res.ok) return { ok: false as const, error: await githubHttpError(res, "") };
     const pr = (await res.json()) as {
       html_url: string;
       title: string;

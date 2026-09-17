@@ -182,6 +182,8 @@ interface LivePr {
   /** A never-ending review cursor, so the read caps. Unlike `reviewsUnreadable`, retrying will not
    * help (issue #69). */
   reviewsTruncated?: boolean;
+  /** `GET /pulls/{n}` itself fails. Used to pin mixed reconcile and the sync block path. */
+  httpError?: { status: number; message: string };
 }
 
 /** What `GET /repos/{owner}/{repo}/commits?since=…` answers, keyed by repo id. */
@@ -281,6 +283,7 @@ globalThis.fetch = async (url) => {
     : "";
   const pr = facts["https://github.com/" + path];
   if (!pr) return json(404, { message: "unstubbed " + url });
+  if (pr.httpError) return json(pr.httpError.status, { message: pr.httpError.message });
   // The two review surfaces the human-review split is read from (issue #39). Sub-resources of the
   // pull, so they are matched before the pull itself.
   if (parts[5] === "reviews" || parts[5] === "comments") {
@@ -787,6 +790,79 @@ test("reconcile calls a contradiction DIVERGENCE and a re-witness debt ADVISORY,
   );
 });
 
+test("reconcile reports successful-of-attempted when one packet fails and still persists the rest", () => {
+  const seed = seedState();
+  const failedUrl = "https://github.com/ColeMurray/background-agents/pull/1652";
+  const driftedUrl = "https://github.com/ravidsrk/orca-fleet/pull/70";
+  const path = writeState(seed);
+  const run = runCli(["reconcile", "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [failedUrl]: { httpError: { status: 500, message: "boom" } },
+        [driftedUrl]: { state: "open", merged: false },
+      }),
+    ),
+  });
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.stdout, /reconciled 3 of 4 packets/, run.stdout);
+  assert.match(run.stdout, /failures=1/, run.stdout);
+  assert.match(
+    run.out,
+    /DIVERGENCE pkt_ravidsrk_orca-fleet_\d+: ledger says merged but the PR is open and unmerged/,
+    run.out,
+  );
+  assert.match(run.out, /pkt_ColeMurray_background-agents_1476: GitHub 500/, run.out);
+});
+
+test("sync absorbs a maintainer-block 403 after closed-unmerged", () => {
+  const seed = seedState();
+  const packet = seed.packets.find((p) => p.repoId === "ColeMurray/background-agents")!;
+  assert.equal(packet.status, "followed-up");
+  assert.equal(packet.prMeta?.merged, false);
+  const path = writeState(seed);
+  const run = runCli(["sync", packet.id, "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [packet.prUrl!]: {
+          httpError: {
+            status: 403,
+            message: "You have been blocked from contributing to this repository.",
+          },
+        },
+      }),
+    ),
+  });
+  assert.equal(run.code, 1, run.out);
+  assert.match(run.out, /GitHub 403/);
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const row = onDisk.scorecard.find((r) => r.repoId === packet.repoId);
+  assert.equal(row?.maintainerTone, "banned");
+  assert.equal(row?.closedUnmerged, 0);
+});
+
+test("sync does not treat a permission 403 as a maintainer block", () => {
+  const seed = seedState();
+  const packet = seed.packets.find((p) => p.repoId === "ColeMurray/background-agents")!;
+  const path = writeState(seed);
+  const run = runCli(["sync", packet.id, "--state", path], tmpdir(), {
+    preload: prFactsStub(
+      livePrs({
+        [packet.prUrl!]: {
+          httpError: {
+            status: 403,
+            message: "Resource not accessible by personal access token",
+          },
+        },
+      }),
+    ),
+  });
+  assert.equal(run.code, 1, run.out);
+  const onDisk = JSON.parse(readFileSync(path, "utf8")) as FactoryState;
+  const row = onDisk.scorecard.find((r) => r.repoId === packet.repoId);
+  assert.notEqual(row?.maintainerTone, "banned");
+  assert.equal(row?.closedUnmerged, 1);
+});
+
 /**
  * The disclosure block ColeMurray/background-agents#1652 actually carries, read-only from
  * `GET /repos/ColeMurray/background-agents/pulls/1652` (fetched 2026-08-29). ADR 0004 added the
@@ -937,6 +1013,23 @@ test("help lists help and --version (G-37, G-32)", () => {
   const body = JSON.parse(json.stdout) as { packets: number; ticksRun: number };
   assert.equal(typeof body.packets, "number");
   assert.equal(typeof body.ticksRun, "number");
+});
+
+test("status --json includes the factory halt, including its absence", () => {
+  const halted = applySecondaryLimitHalt(seedState(), {
+    repoId: DRAFT_READY_REPO,
+    at: "2026-08-29T09:00:00.000Z",
+  });
+  const run = runCli(["status", "--json", "--state", writeState(halted)], tmpdir());
+  assert.equal(run.code, 0, run.out);
+  const body = JSON.parse(run.stdout) as { halt: { at: string; reason: string } | null };
+  assert.ok(body.halt, `halt must be in the JSON stream, not only on stderr:\n${run.out}`);
+  assert.equal(body.halt.at, "2026-08-29T09:00:00.000Z");
+  assert.match(body.halt.reason, /secondary rate limit/);
+  const clear = runCli(["status", "--json", "--state", writeState(seedState())], tmpdir());
+  assert.equal(clear.code, 0, clear.out);
+  const clearBody = JSON.parse(clear.stdout) as { halt: null };
+  assert.equal(clearBody.halt, null);
 });
 
 test("attach-draft binds the same PR once its body carries the verbatim block", () => {
